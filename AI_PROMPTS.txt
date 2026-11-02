@@ -1,0 +1,12 @@
+Prompt log (mandatory). Add an entry for every prompt that materially shaped the project.
+
+================================================
+Date: YYYY-MM-DD
+Student: Name
+Tool: ChatGPT / Claude / Copilot / Gemini
+Related Requirement: e.g. FLT-22
+Prompt:
+...
+How the output was used:
+...
+================================================
