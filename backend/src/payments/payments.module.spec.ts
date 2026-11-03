@@ -2,10 +2,11 @@ import { CronExpression, SchedulerRegistry } from '@nestjs/schedule';
 import { Test } from '@nestjs/testing';
 import { BookingLifecycle } from './booking-lifecycle.service';
 import { BookingProviderRegistry } from './booking-provider.registry';
+import { PAYMENT_ACTIVITY, StubPaymentActivity } from './payment-activity';
 import { PaymentsModule } from './payments.module';
 
 describe('PaymentsModule wiring', () => {
-  it('provides the lifecycle and registers the every-minute hold-expiry cron job', async () => {
+  it('provides the lifecycle, payment activity stub, and registers the every-minute hold-expiry cron job', async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [PaymentsModule],
     }).compile();
@@ -17,6 +18,7 @@ describe('PaymentsModule wiring', () => {
       expect(app.get(BookingProviderRegistry)).toBeInstanceOf(
         BookingProviderRegistry,
       );
+      expect(app.get(PAYMENT_ACTIVITY)).toBeInstanceOf(StubPaymentActivity);
 
       const jobs = [...app.get(SchedulerRegistry).getCronJobs().values()];
       expect(jobs).toHaveLength(1);

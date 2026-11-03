@@ -7,13 +7,12 @@ export interface BookingStatusSnapshot {
 }
 
 /**
- * What BookingLifecycle needs from the flight and hotel booking owners (Flights B / Hotels B).
- *
- * `markExpired` is the existing method from docs/contracts.md section 7.
- * `getStatus`, `applyStatus` and `findExpiredHolds` are PROPOSED additions (SCRUM-33): the contract
- * has no way to persist a status change or to find expired holds. Pending the lead's confirmation.
+ * Everything BookingLifecycle needs from a booking owner (Flights B / Hotels B).
+ * Confirmed by the lead for SCRUM-33 — docs/contracts.md section 7, to be recorded as v1.1.
+ * (Previously drafted under the name `BookingLifecycleProvider`; this is the single,
+ * merged name going forward.)
  */
-export interface BookingLifecycleProvider {
+export interface BookingProvider {
   /** Current status and hold expiry, or null if the booking does not exist. */
   getStatus(id: string): Promise<BookingStatusSnapshot | null>;
 
@@ -21,6 +20,11 @@ export interface BookingLifecycleProvider {
    * ONE atomic conditional update: set the status to `to` only if it is currently `from`
    * (e.g. findOneAndUpdate({ _id, status: from }, { status: to })).
    * Returns false when the booking was not in `from` any more (someone else changed it first).
+   *
+   * When `to` is EXPIRED or CANCELLED, the held seats/rooms are released in the SAME
+   * MongoDB transaction as the status write — there is no separate best-effort release
+   * step any more (no `markExpired`). If the transaction fails, neither the status nor
+   * the release happened.
    */
   applyStatus(
     id: string,
@@ -28,9 +32,14 @@ export interface BookingLifecycleProvider {
     to: BookingStatus,
   ): Promise<boolean>;
 
-  /** Ids of PENDING_PAYMENT bookings whose holdExpiresAt is at or before `now`, at most `limit`. */
-  findExpiredHolds(now: Date, limit: number): Promise<string[]>;
-
-  /** Release the held seats / rooms (contract method). Called once after a booking becomes EXPIRED. */
-  markExpired(id: string): Promise<void>;
+  /**
+   * Ids of PENDING_PAYMENT bookings whose holdExpiresAt is at or before `now`, ordered so a
+   * cursor makes sense (e.g. ascending by _id), starting strictly after `afterId` when given,
+   * at most `limit`.
+   */
+  findExpiredHolds(
+    now: Date,
+    limit: number,
+    afterId?: string,
+  ): Promise<string[]>;
 }

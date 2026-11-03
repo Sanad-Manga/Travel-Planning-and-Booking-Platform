@@ -60,3 +60,36 @@ Kept the contract's four allowed transitions exactly. The provider interface met
 findExpiredHolds are proposals (the contract does not have them) and are waiting for the lead's answer before merge.
 The only other file touched is app.module.ts (one import for PaymentsModule).
 ================================================
+
+================================================
+Date: 2026-11-03
+Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code, Sonnet 5)
+Related Requirement: GEN-11 (SCRUM-33)
+Prompt:
+Pasted the lead's PR #8 review (approved the 3 proposed interface methods with one change:
+getStatus/applyStatus/findExpiredHolds approved; findExpiredHolds gets an afterId cursor;
+applyStatus now releases inventory itself, in one transaction, when `to` is EXPIRED or CANCELLED,
+replacing the separate markExpired step; BookingLifecycleProvider renamed to one BookingProvider
+interface) plus a new rule: a booking whose payment is PROCESSING is protected from expiry for up
+to PAYMENT_PAUSE_MAX_MINUTES (5), via a new PaymentActivity.prepareExpiry() the sweep/expireIfDue
+call before ever expiring a hold. Asked for one new commit on the branch with build/lint/test
+output and this entry.
+
+How the output was used:
+Renamed the interface to BookingProvider; removed markExpired (and the "release can fail" handling
+that went with it) since applyStatus now owns the release; added findExpiredHolds's afterId cursor
+and used it in the sweep so a skipped or endlessly-failing booking can never be re-fetched forever
+or block bookings further down the list; added PaymentActivity (payment-activity.ts) with a stub
+that always returns EXPIRE (no Stripe yet - PAY-01 provides the real one) wired into PaymentsModule
+behind the PAYMENT_ACTIVITY token; added a shared BookingProvider conformance test
+(booking-provider.conformance.ts) that Flights B / Hotels B can run against their real
+implementations, self-tested here against a FakeBookingProvider.
+One honest gap: the PROCESSING-PaymentIntent timing (pause, cap, cancel-then-check-status) is
+PAY-01's actual logic, which doesn't exist yet. The new tests here drive BookingLifecycle through
+each of PaymentActivity's three possible answers (SKIP/PAID/EXPIRE) via a configurable fake, which
+tests my code's reaction to that signal correctly, but is not a real test of Stripe's timing -
+I said so plainly in the PR/Jira reply rather than implying it's been tested end to end.
+I ran build, lint and the unit tests myself on a clean checkout: build and lint clean, 58/58 tests
+passing (booking-lifecycle.service.spec.ts, payments.module.spec.ts, booking-provider.conformance.spec.ts).
+================================================

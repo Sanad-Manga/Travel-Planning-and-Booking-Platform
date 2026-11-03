@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { BookingType } from '../common';
-import { BookingLifecycleProvider } from './booking-provider.interface';
+import { BookingProvider } from './booking-provider.interface';
 
 /**
  * Booking owners register themselves here (e.g. in onModuleInit: `registry.register(BookingType.FLIGHT, this)`).
@@ -9,9 +9,9 @@ import { BookingLifecycleProvider } from './booking-provider.interface';
  */
 @Injectable()
 export class BookingProviderRegistry {
-  private readonly providers = new Map<BookingType, BookingLifecycleProvider>();
+  private readonly providers = new Map<BookingType, BookingProvider>();
 
-  register(type: BookingType, provider: BookingLifecycleProvider): void {
+  register(type: BookingType, provider: BookingProvider): void {
     this.providers.set(type, provider);
   }
 
@@ -19,7 +19,7 @@ export class BookingProviderRegistry {
     return [...this.providers.keys()];
   }
 
-  get(type: BookingType): BookingLifecycleProvider {
+  get(type: BookingType): BookingProvider {
     const provider = this.providers.get(type);
     if (!provider)
       throw new Error(`No booking provider registered for ${type}`);

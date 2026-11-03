@@ -4,66 +4,34 @@ import {
   BookingLifecycle,
   HOLD_SWEEP_BATCH_SIZE,
 } from './booking-lifecycle.service';
-import {
-  BookingLifecycleProvider,
-  BookingStatusSnapshot,
-} from './booking-provider.interface';
 import { BookingProviderRegistry } from './booking-provider.registry';
 import { ALLOWED_TRANSITIONS } from './booking-transitions';
+import { FakeBookingProvider } from './fake-booking-provider';
+import { PaymentActivity, PrepareExpiryResult } from './payment-activity';
 
-/** In-memory stand-in for a booking owner. applyStatus is an atomic compare-and-set, like the real findOneAndUpdate. */
-class FakeProvider implements BookingLifecycleProvider {
-  readonly bookings = new Map<string, BookingStatusSnapshot>();
-  readonly released: string[] = [];
-  readonly failApplyFor = new Set<string>();
-  failRelease = false;
-  findCalls = 0;
+/**
+ * Configurable fake for PaymentActivity. Per booking, queue() takes a sequence of results:
+ * the last one repeats forever once the queue is down to one value, so e.g.
+ * queue('f1', 'SKIP', 'EXPIRE') answers SKIP once and EXPIRE on every call after
+ * (models "still paused" on the first sweep, "the pause ended" on a later one).
+ * Defaults to EXPIRE for anything not configured, matching StubPaymentActivity.
+ */
+class FakePaymentActivity implements PaymentActivity {
+  private readonly queues = new Map<string, PrepareExpiryResult[]>();
+  readonly calls: string[] = [];
 
-  add(
-    id: string,
-    status: BookingStatus,
-    holdExpiresAt: Date | null = null,
-  ): void {
-    this.bookings.set(id, { status, holdExpiresAt });
+  queue(bookingId: string, ...results: PrepareExpiryResult[]): void {
+    this.queues.set(bookingId, [...results]);
   }
 
-  status(id: string): BookingStatus | undefined {
-    return this.bookings.get(id)?.status;
-  }
-
-  async getStatus(id: string): Promise<BookingStatusSnapshot | null> {
-    const booking = this.bookings.get(id);
-    return booking ? { ...booking } : null;
-  }
-
-  async applyStatus(
-    id: string,
-    from: BookingStatus,
-    to: BookingStatus,
-  ): Promise<boolean> {
-    if (this.failApplyFor.has(id)) throw new Error('database down');
-    const booking = this.bookings.get(id);
-    if (!booking || booking.status !== from) return false;
-    booking.status = to;
-    return true;
-  }
-
-  async findExpiredHolds(now: Date, limit: number): Promise<string[]> {
-    this.findCalls++;
-    return [...this.bookings.entries()]
-      .filter(
-        ([, b]) =>
-          b.status === BookingStatus.PENDING_PAYMENT &&
-          b.holdExpiresAt != null &&
-          b.holdExpiresAt <= now,
-      )
-      .slice(0, limit)
-      .map(([id]) => id);
-  }
-
-  async markExpired(id: string): Promise<void> {
-    if (this.failRelease) throw new Error('release failed');
-    this.released.push(id);
+  async prepareExpiry(
+    _type: BookingType,
+    bookingId: string,
+  ): Promise<PrepareExpiryResult> {
+    this.calls.push(bookingId);
+    const q = this.queues.get(bookingId);
+    if (!q || q.length === 0) return 'EXPIRE';
+    return q.length > 1 ? q.shift()! : q[0];
   }
 }
 
@@ -73,8 +41,9 @@ const FUTURE = new Date('2026-11-20T12:10:00.000Z');
 const ALL_STATUSES = Object.values(BookingStatus);
 
 describe('BookingLifecycle', () => {
-  let flights: FakeProvider;
-  let hotels: FakeProvider;
+  let flights: FakeBookingProvider;
+  let hotels: FakeBookingProvider;
+  let paymentActivity: FakePaymentActivity;
   let lifecycle: BookingLifecycle;
   let errorLog: jest.SpyInstance;
 
@@ -82,12 +51,13 @@ describe('BookingLifecycle', () => {
     errorLog = jest
       .spyOn(Logger.prototype, 'error')
       .mockImplementation(() => undefined);
-    flights = new FakeProvider();
-    hotels = new FakeProvider();
+    flights = new FakeBookingProvider();
+    hotels = new FakeBookingProvider();
+    paymentActivity = new FakePaymentActivity();
     const registry = new BookingProviderRegistry();
     registry.register(BookingType.FLIGHT, flights);
     registry.register(BookingType.HOTEL, hotels);
-    lifecycle = new BookingLifecycle(registry);
+    lifecycle = new BookingLifecycle(registry, paymentActivity);
   });
 
   afterEach(() => {
@@ -136,7 +106,6 @@ describe('BookingLifecycle', () => {
         ).rejects.toBeInstanceOf(ConflictException);
 
         expect(flights.status('f1')).toBe(from);
-        expect(flights.released).toEqual([]);
       },
     );
 
@@ -168,42 +137,13 @@ describe('BookingLifecycle', () => {
       expect([BookingStatus.CONFIRMED, BookingStatus.EXPIRED]).toContain(
         flights.status('f1'),
       );
-      // seats are released only if expiry actually won
-      expect(flights.released).toEqual(
-        flights.status('f1') === BookingStatus.EXPIRED ? ['f1'] : [],
-      );
-    });
-
-    it('releases seats/rooms exactly once when a booking expires, and not for other moves', async () => {
-      hotels.add('h1', BookingStatus.PENDING_PAYMENT, PAST);
-      hotels.add('h2', BookingStatus.PENDING_PAYMENT, FUTURE);
-
-      await lifecycle.transition(
-        BookingType.HOTEL,
-        'h1',
-        BookingStatus.EXPIRED,
-      );
-      await lifecycle.transition(
-        BookingType.HOTEL,
-        'h2',
-        BookingStatus.CONFIRMED,
-      );
-
-      expect(hotels.released).toEqual(['h1']);
-    });
-
-    it('keeps the EXPIRED status and does not throw when releasing fails', async () => {
-      flights.failRelease = true;
-      flights.add('f1', BookingStatus.PENDING_PAYMENT, PAST);
-
-      await expect(
-        lifecycle.transition(BookingType.FLIGHT, 'f1', BookingStatus.EXPIRED),
-      ).resolves.toBeUndefined();
-      expect(flights.status('f1')).toBe(BookingStatus.EXPIRED);
     });
 
     it('fails clearly when no provider is registered for the type', async () => {
-      const empty = new BookingLifecycle(new BookingProviderRegistry());
+      const empty = new BookingLifecycle(
+        new BookingProviderRegistry(),
+        paymentActivity,
+      );
       await expect(
         empty.transition(BookingType.FLIGHT, 'f1', BookingStatus.CONFIRMED),
       ).rejects.toThrow('No booking provider registered for FLIGHT');
@@ -219,7 +159,15 @@ describe('BookingLifecycle', () => {
       ).resolves.toBe(true);
 
       expect(flights.status('f1')).toBe(BookingStatus.EXPIRED);
-      expect(flights.released).toEqual(['f1']);
+    });
+
+    it('expires a booking at exactly the hold expiry instant (no payment ever started)', async () => {
+      flights.add('f1', BookingStatus.PENDING_PAYMENT, NOW);
+
+      await expect(
+        lifecycle.expireIfDue(BookingType.FLIGHT, 'f1', NOW),
+      ).resolves.toBe(true);
+      expect(flights.status('f1')).toBe(BookingStatus.EXPIRED);
     });
 
     it('does nothing while the hold is still valid', async () => {
@@ -249,6 +197,26 @@ describe('BookingLifecycle', () => {
         lifecycle.expireIfDue(BookingType.HOTEL, 'missing', NOW),
       ).resolves.toBe(false);
     });
+
+    it('leaves a booking alone while its payment is PROCESSING and in the pause window (SKIP)', async () => {
+      flights.add('f1', BookingStatus.PENDING_PAYMENT, PAST);
+      paymentActivity.queue('f1', 'SKIP');
+
+      await expect(
+        lifecycle.expireIfDue(BookingType.FLIGHT, 'f1', NOW),
+      ).resolves.toBe(false);
+      expect(flights.status('f1')).toBe(BookingStatus.PENDING_PAYMENT);
+    });
+
+    it('confirms instead of expiring when PaymentActivity reports PAID (e.g. a cancel-reveals-succeeded race)', async () => {
+      flights.add('f1', BookingStatus.PENDING_PAYMENT, PAST);
+      paymentActivity.queue('f1', 'PAID');
+
+      await expect(
+        lifecycle.expireIfDue(BookingType.FLIGHT, 'f1', NOW),
+      ).resolves.toBe(true);
+      expect(flights.status('f1')).toBe(BookingStatus.CONFIRMED);
+    });
   });
 
   describe('sweepExpiredHolds', () => {
@@ -264,22 +232,17 @@ describe('BookingLifecycle', () => {
       expect(flights.status('f-later')).toBe(BookingStatus.PENDING_PAYMENT);
       expect(flights.status('f-paid')).toBe(BookingStatus.CONFIRMED);
       expect(hotels.status('h-due')).toBe(BookingStatus.EXPIRED);
-      expect(flights.released).toEqual(['f-due']);
-      expect(hotels.released).toEqual(['h-due']);
     });
 
-    it('is idempotent: a second run changes and releases nothing more', async () => {
+    it('is idempotent: a second run changes nothing more', async () => {
       flights.add('f1', BookingStatus.PENDING_PAYMENT, PAST);
       hotels.add('h1', BookingStatus.PENDING_PAYMENT, PAST);
 
       await lifecycle.sweepExpiredHolds(NOW);
       await expect(lifecycle.sweepExpiredHolds(NOW)).resolves.toBe(0);
-
-      expect(flights.released).toEqual(['f1']);
-      expect(hotels.released).toEqual(['h1']);
     });
 
-    it('works through more due holds than one batch holds', async () => {
+    it('works through more due holds than one batch holds, via the afterId cursor', async () => {
       const total = HOLD_SWEEP_BATCH_SIZE * 2 + 50;
       for (let i = 0; i < total; i++)
         flights.add(`f${i}`, BookingStatus.PENDING_PAYMENT, PAST);
@@ -291,10 +254,9 @@ describe('BookingLifecycle', () => {
           (b) => b.status === BookingStatus.EXPIRED,
         ),
       ).toBe(true);
-      expect(flights.released).toHaveLength(total);
     });
 
-    it('keeps going when one booking fails, and stops when nothing can progress', async () => {
+    it('keeps going when one booking fails, and does not re-fetch it forever', async () => {
       flights.add('bad', BookingStatus.PENDING_PAYMENT, PAST);
       flights.add('good', BookingStatus.PENDING_PAYMENT, PAST);
       flights.failApplyFor.add('bad');
@@ -304,6 +266,8 @@ describe('BookingLifecycle', () => {
       expect(flights.status('good')).toBe(BookingStatus.EXPIRED);
       expect(flights.status('bad')).toBe(BookingStatus.PENDING_PAYMENT);
       expect(errorLog).toHaveBeenCalledTimes(1);
+      // only one pass: the cursor moved past "bad" even though it failed
+      expect(flights.findCalls).toBe(1);
     });
 
     it('does not loop forever when every booking in a full batch keeps failing', async () => {
@@ -313,7 +277,8 @@ describe('BookingLifecycle', () => {
       }
 
       await expect(lifecycle.sweepExpiredHolds(NOW)).resolves.toBe(0);
-      expect(flights.findCalls).toBe(1);
+      // one page of failures, then an empty page proves the cursor moved past all of them
+      expect(flights.findCalls).toBe(2);
     });
 
     it('still sweeps hotels when the flight provider breaks', async () => {
@@ -335,7 +300,59 @@ describe('BookingLifecycle', () => {
       ]);
 
       expect(first + second).toBe(1);
-      expect(flights.released).toEqual(['f1']);
+      expect(flights.status('f1')).toBe(BookingStatus.EXPIRED);
+    });
+
+    it('leaves an in-flight-and-paused booking alone, and does not re-sweep it forever within one run', async () => {
+      flights.add('paused', BookingStatus.PENDING_PAYMENT, PAST);
+      flights.add('due', BookingStatus.PENDING_PAYMENT, PAST);
+      paymentActivity.queue('paused', 'SKIP');
+
+      await expect(lifecycle.sweepExpiredHolds(NOW)).resolves.toBe(1);
+
+      expect(flights.status('paused')).toBe(BookingStatus.PENDING_PAYMENT);
+      expect(flights.status('due')).toBe(BookingStatus.EXPIRED);
+      // the cursor moved past "paused" once, not re-fetched within this run
+      expect(flights.findCalls).toBe(1);
+    });
+
+    it('confirms instead of expiring when PaymentActivity reports PAID during a sweep', async () => {
+      flights.add('f1', BookingStatus.PENDING_PAYMENT, PAST);
+      paymentActivity.queue('f1', 'PAID');
+
+      await expect(lifecycle.sweepExpiredHolds(NOW)).resolves.toBe(0); // confirmed, not counted as "expired"
+      expect(flights.status('f1')).toBe(BookingStatus.CONFIRMED);
+    });
+
+    it('expires a booking whose payment reached FAILED only after the pause deadline, on a later sweep', async () => {
+      flights.add('f1', BookingStatus.PENDING_PAYMENT, PAST);
+      // first sweep: still within the pause window (SKIP); a later sweep: the deadline has
+      // passed and PaymentActivity now reports EXPIRE for the FAILED payment.
+      paymentActivity.queue('f1', 'SKIP', 'EXPIRE');
+
+      await expect(lifecycle.sweepExpiredHolds(NOW)).resolves.toBe(0);
+      expect(flights.status('f1')).toBe(BookingStatus.PENDING_PAYMENT);
+
+      await expect(lifecycle.sweepExpiredHolds(NOW)).resolves.toBe(1);
+      expect(flights.status('f1')).toBe(BookingStatus.EXPIRED);
+    });
+
+    it('still finishes a large batch when some bookings are paused (SKIP) and does not starve the rest', async () => {
+      const total = 150;
+      for (let i = 0; i < total; i++) {
+        flights.add(`f${i}`, BookingStatus.PENDING_PAYMENT, PAST);
+        if (i % 3 === 0) paymentActivity.queue(`f${i}`, 'SKIP');
+      }
+
+      await expect(lifecycle.sweepExpiredHolds(NOW)).resolves.toBe(100); // 150 - 50 skipped (i % 3 === 0)
+
+      for (let i = 0; i < total; i++) {
+        const expected =
+          i % 3 === 0 ? BookingStatus.PENDING_PAYMENT : BookingStatus.EXPIRED;
+        expect(flights.status(`f${i}`)).toBe(expected);
+      }
+      // 2 pages (100 + 50): the cursor advanced through every id, skipped or not
+      expect(flights.findCalls).toBe(2);
     });
   });
 });
