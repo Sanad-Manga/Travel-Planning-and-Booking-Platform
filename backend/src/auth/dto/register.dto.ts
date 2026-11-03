@@ -34,7 +34,8 @@ export class RegisterDto {
   @MaxByteLength(PASSWORD_MAX_BYTES, {
     message: 'password is too long (maximum 72 bytes; non-English characters use 2 or more bytes each)',
   })
-  @Matches(/[A-Za-z]/, { message: 'password must contain at least one letter' })
+  // \p{L} = any Unicode letter (Latin, Arabic, ...); the `u` flag makes JavaScript understand \p{...}.
+  @Matches(/\p{L}/u, { message: 'password must contain at least one letter' })
   @Matches(/\d/, { message: 'password must contain at least one digit' })
   password: string;
 

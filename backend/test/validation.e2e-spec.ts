@@ -35,6 +35,43 @@ describe('backend-enforced validation and password hashing (e2e)', () => {
     expect(fieldsOf(res)).toEqual(expect.arrayContaining(['name', 'email', 'password', 'acceptTerms']));
   });
 
+  // "Letter" means any Unicode letter (\p{L}), so Arabic passwords work, not only A-Z.
+  describe('password letter and digit rules are Unicode-aware', () => {
+    const register = (email: string, password: string) =>
+      post('/api/auth/register', { name: 'Ali', email, password, acceptTerms: true });
+    const messagesOf = (res: request.Response): string[] => res.body.details.map((d: { message: string }) => d.message);
+
+    it('accepts Arabic letters plus a digit', async () => {
+      await register('unicode-ar@example.com', 'كلمةسرية1').expect(201);
+    });
+
+    it('still accepts Latin letters plus a digit', async () => {
+      await register('unicode-latin@example.com', 'Passw0rdOK').expect(201);
+    });
+
+    it('rejects digits only with the letter message', async () => {
+      const res = await register('unicode-digits@example.com', '1234567890').expect(400);
+      expect(res.body.details).toEqual([{ field: 'password', message: 'password must contain at least one letter' }]);
+    });
+
+    it.each([
+      ['Arabic', 'كلمةسريةطويلة'],
+      ['Latin', 'OnlyLettersHere'],
+    ])('rejects %s letters only with the digit message', async (_label, password) => {
+      const res = await register('unicode-letters@example.com', password).expect(400);
+      expect(messagesOf(res)).toEqual(['password must contain at least one digit']);
+    });
+
+    it('still enforces the 72-byte limit on Arabic input (37 letters + digit = 75 bytes)', async () => {
+      const res = await register('unicode-long@example.com', 'ع'.repeat(37) + '1').expect(400);
+      expect(res.body.details).toEqual([{ field: 'password', message: expect.stringContaining('72 bytes') }]);
+    });
+
+    it('accepts Arabic input right under the limit (35 letters + digit = 71 bytes)', async () => {
+      await register('unicode-fits@example.com', 'ع'.repeat(35) + '1').expect(201);
+    });
+  });
+
   // bcrypt only uses the first 72 BYTES, so the limit is counted in UTF-8 bytes, not characters.
   describe('password length limit is 72 bytes', () => {
     const register = (email: string, password: string) =>

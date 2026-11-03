@@ -24,7 +24,7 @@ export class RegisterDto {
   @ApiProperty({ example: 'Passw0rdOK' })
   @IsString()
   @MinLength(8, { message: 'password must be at least 8 characters' })
-  @Matches(/[A-Za-z]/, { message: 'password must contain at least one letter' })
+  @Matches(/\p{L}/u, { message: 'password must contain at least one letter' })
   @Matches(/\d/, { message: 'password must contain at least one digit' })
   password: string;
 
@@ -90,6 +90,7 @@ Notes:
 - Only salted bcrypt hashes are stored (`bcryptjs`, cost 10, see `BCRYPT_SALT_ROUNDS`). bcrypt creates a random salt on every call and stores it inside the hash string, so two users with the same password get different hashes.
 - The schema field is `passwordHash` with `select: false`: queries do not load it unless they explicitly ask (`findByEmail(email, true)`, login only).
 - Never return the hash or any token. Return a response DTO (`UserResponseDto`), not the Mongoose document.
+- "Letter" means any Unicode letter (`/\p{L}/u`), so Arabic and other scripts count, not only A-Z.
 - Passwords longer than 72 **bytes** (UTF-8) are rejected, using the `@MaxByteLength` validator. bcrypt ignores everything after byte 72, and non-English characters take 2 or more bytes each (an Arabic letter is 2), so counting characters with `@MaxLength` would let an over-long password through and silently truncate it.
 
 ## 5. Where this is tested

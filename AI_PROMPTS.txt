@@ -130,3 +130,25 @@ Implement the lead's additional request on PR #7: add POST /api/auth/refresh (AC
 How the output was used:
 Generated AuthService.refresh, the controller route, a clearAuthCookies helper built from the same option builders as setAuthCookies, the jti claim, the equal-secrets check and the unit and e2e tests. A clean npm ci, build, lint, unit tests and e2e tests were run locally. I must review: the refresh route is @Public and the controller clears the cookies when the service throws 401, the jti is not stored anywhere yet (SCRUM-38 will use it), and that everyone's local .env must now have two DIFFERENT JWT secrets or the app will not start.
 ================================================
+
+================================================
+Date: 2026-11-03
+Student: Ziad Mohamed
+Tool: Claude (claude.ai chat)
+Related Requirement: ACC-01
+Prompt:
+I asked why Arabic passwords were rejected on register.
+How the output was used:
+Claude explained that the letter rule /[A-Za-z]/ only accepts Latin letters. I confirmed it with a node one-liner and used that to write the fix prompt.
+================================================
+
+================================================
+Date: 2026-11-03
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-01
+Prompt:
+Change the register password letter rule from /[A-Za-z]/ to the Unicode-aware /\p{L}/u so Arabic letters count, keep every other rule (minimum length, digit rule, 72-byte maximum), add e2e tests for Arabic and Latin passwords, digits only, letters only and the 72-byte limit on Arabic input, and update the validation pattern document.
+How the output was used:
+Changed the one @Matches rule in RegisterDto (it was the only place with that rule in backend/src/auth/), updated the code sample in docs/api/validation-pattern.md and added a Unicode describe block to test/validation.e2e-spec.ts. Build, lint, unit and e2e tests were run locally. I must review that \p{L} also accepts letters from any other script, and the digit rule is unchanged (\d matches only 0-9).
+================================================
