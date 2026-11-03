@@ -152,3 +152,14 @@ Change the register password letter rule from /[A-Za-z]/ to the Unicode-aware /\
 How the output was used:
 Changed the one @Matches rule in RegisterDto (it was the only place with that rule in backend/src/auth/), updated the code sample in docs/api/validation-pattern.md and added a Unicode describe block to test/validation.e2e-spec.ts. Build, lint, unit and e2e tests were run locally. I must review that \p{L} also accepts letters from any other script, and the digit rule is unchanged (\d matches only 0-9).
 ================================================
+
+================================================
+Date: 2026-11-03
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: SETUP (tsconfig cleanup, no requirement ID)
+Prompt:
+Asked why VS Code shows an error in backend/tsconfig.json and to solve it.
+How the output was used:
+The error came from VS Code's newer bundled TypeScript warning that the baseUrl option is deprecated. Nothing in the project uses baseUrl (all imports are relative), so it was removed. The ignoreDeprecations workaround was not used because the project's pinned TypeScript 5.9.3 rejects that value. Build, lint and unit tests pass. tsconfig.json belongs to the skeleton, so the lead should be told about this one-line change.
+================================================
