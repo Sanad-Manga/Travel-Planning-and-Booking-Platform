@@ -119,3 +119,14 @@ The fix prompt for the 72-byte password limit: replace the character-based @MaxL
 How the output was used:
 Added a reusable @MaxByteLength decorator (auth/validators) with a unit test, a PASSWORD_MAX_BYTES constant in auth/auth.constants.ts, used it in RegisterDto (other password rules untouched, the letter rule still accepts Latin letters only), removed maxLength from the Swagger field, replaced the old 72-character e2e test with four byte-based cases and updated docs/api/validation-pattern.md. Lint, build, unit and e2e tests were run locally. I should review the error message wording and confirm the letter-rule question with the lead.
 ================================================
+
+================================================
+Date: 2026-11-03
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-06
+Prompt:
+Implement the lead's additional request on PR #7: add POST /api/auth/refresh (ACC-06, session expiry) as a stateless sliding 30-minute session. Read the refresh cookie, verify it with the refresh secret, re-read the user and their role from the database (401 if missing or not ACTIVE), issue a new access and a new refresh token, clear both cookies on any failure, add a random jti to refresh tokens, and make startup fail when the access and refresh secrets are equal. No logout, no revocation, no Sprint 2 work.
+How the output was used:
+Generated AuthService.refresh, the controller route, a clearAuthCookies helper built from the same option builders as setAuthCookies, the jti claim, the equal-secrets check and the unit and e2e tests. A clean npm ci, build, lint, unit tests and e2e tests were run locally. I must review: the refresh route is @Public and the controller clears the cookies when the service throws 401, the jti is not stored anywhere yet (SCRUM-38 will use it), and that everyone's local .env must now have two DIFFERENT JWT secrets or the app will not start.
+================================================

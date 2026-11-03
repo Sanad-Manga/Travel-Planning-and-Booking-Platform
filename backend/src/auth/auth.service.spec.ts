@@ -12,7 +12,7 @@ const ID = '6730a1f2c3d4e5f607182930';
 describe('AuthService', () => {
   let service: AuthService;
   const usersService = { findByEmail: jest.fn(), findById: jest.fn(), create: jest.fn() };
-  const jwtService = { signAsync: jest.fn() };
+  const jwtService = { signAsync: jest.fn(), verifyAsync: jest.fn() };
   const dto = { name: 'Ali', email: 'ali@example.com', password: 'Passw0rdOK', acceptTerms: true };
   const storedHash = hashSync('Passw0rdOK', 4);
 
@@ -90,7 +90,19 @@ describe('AuthService', () => {
     it('also issues a refresh token signed with the refresh secret (user id only, 30 minutes)', async () => {
       usersService.findByEmail.mockResolvedValue(userDoc());
       await service.login(credentials);
-      expect(jwtService.signAsync).toHaveBeenCalledWith({ sub: ID }, { secret: 'r'.repeat(32), expiresIn: 30 * 60 });
+      expect(jwtService.signAsync).toHaveBeenCalledWith(
+        { sub: ID },
+        { secret: 'r'.repeat(32), expiresIn: 30 * 60, jwtid: expect.stringMatching(/^[0-9a-f-]{36}$/) },
+      );
+    });
+
+    it('gives every refresh token a different jti', async () => {
+      usersService.findByEmail.mockResolvedValue(userDoc());
+      await service.login(credentials);
+      await service.login(credentials);
+      const jtis = jwtService.signAsync.mock.calls.filter((call) => call[1]?.jwtid).map((call) => call[1].jwtid);
+      expect(jtis).toHaveLength(2);
+      expect(jtis[0]).not.toBe(jtis[1]);
     });
 
     it('puts the airlineId in the token for an airline moderator', async () => {
@@ -131,6 +143,53 @@ describe('AuthService', () => {
     it('DEACTIVATED -> generic 401', async () => {
       usersService.findByEmail.mockResolvedValue(userDoc({ status: AccountStatus.DEACTIVATED }));
       await expect(service.login(credentials)).rejects.toThrow('Invalid email or password');
+    });
+  });
+
+  describe('refresh', () => {
+    beforeEach(() => jwtService.verifyAsync.mockResolvedValue({ sub: ID }));
+
+    it('verifies with the refresh secret and HS256, then issues a new access AND refresh token', async () => {
+      usersService.findById.mockResolvedValue(userDoc());
+      const result = await service.refresh('old.refresh.token');
+      expect(jwtService.verifyAsync).toHaveBeenCalledWith('old.refresh.token', { secret: 'r'.repeat(32), algorithms: ['HS256'] });
+      expect(result).toMatchObject({ accessToken: 'signed.jwt.token', refreshToken: 'signed.jwt.token' });
+      expect(jwtService.signAsync).toHaveBeenCalledTimes(2);
+      expect(JSON.stringify(result.user)).not.toContain('passwordHash');
+    });
+
+    it('re-reads role and ids from the database instead of trusting the old token', async () => {
+      jwtService.verifyAsync.mockResolvedValue({ sub: ID, role: Role.ADMIN });
+      usersService.findById.mockResolvedValue(userDoc({ role: Role.HOTEL_MODERATOR, hotelId: { toString: () => 'hotel-1' } }));
+      await service.refresh('old.refresh.token');
+      expect(jwtService.signAsync).toHaveBeenCalledWith({ sub: ID, role: Role.HOTEL_MODERATOR, hotelId: 'hotel-1' });
+    });
+
+    it.each([undefined, null, '', 123])('401 "Invalid or expired session" for a missing token (%p)', async (token) => {
+      await expect(service.refresh(token)).rejects.toThrow('Invalid or expired session');
+      expect(jwtService.verifyAsync).not.toHaveBeenCalled();
+    });
+
+    it('401 when the token fails verification (tampered, expired or wrong secret)', async () => {
+      jwtService.verifyAsync.mockRejectedValue(new Error('invalid signature'));
+      await expect(service.refresh('bad')).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(jwtService.signAsync).not.toHaveBeenCalled();
+    });
+
+    it('401 when the verified token has no usable sub', async () => {
+      jwtService.verifyAsync.mockResolvedValue({});
+      await expect(service.refresh('x')).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+
+    it.each([AccountStatus.SUSPENDED, AccountStatus.DEACTIVATED])('401 when the user is %s', async (status) => {
+      usersService.findById.mockResolvedValue(userDoc({ status }));
+      await expect(service.refresh('x')).rejects.toThrow('Invalid or expired session');
+      expect(jwtService.signAsync).not.toHaveBeenCalled();
+    });
+
+    it('401 when the user no longer exists', async () => {
+      usersService.findById.mockResolvedValue(null);
+      await expect(service.refresh('x')).rejects.toBeInstanceOf(UnauthorizedException);
     });
   });
 

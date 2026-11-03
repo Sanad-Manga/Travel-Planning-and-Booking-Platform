@@ -2,7 +2,7 @@ import { ConflictException, ForbiddenException, Injectable, UnauthorizedExceptio
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { compare, hash, hashSync } from 'bcryptjs';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { AccessTokenPayload, AccountStatus } from '../common';
 import { UserDocument } from '../users/schemas/user.schema';
 import { UsersService } from '../users/users.service';
@@ -74,6 +74,41 @@ export class AuthService {
       throw this.invalidCredentials();
     }
 
+    return this.startSession(user);
+  }
+
+  /**
+   * Stateless sliding session (ACC-06): a valid refresh token buys a NEW access token and a NEW refresh token,
+   * so every refresh restarts the 30 minutes. Server-side revocation and logout come in SCRUM-38.
+   * Role and ids are re-read from the database, never copied from the old token.
+   */
+  async refresh(refreshToken: unknown): Promise<LoginResult> {
+    if (typeof refreshToken !== 'string' || refreshToken === '') {
+      throw this.invalidSession();
+    }
+
+    let payload: { sub?: unknown };
+    try {
+      // Only the REFRESH secret verifies here, so an access token is rejected (signature mismatch).
+      payload = await this.jwtService.verifyAsync<{ sub?: unknown }>(refreshToken, {
+        secret: readJwtSecrets(this.config).refresh,
+        algorithms: ['HS256'],
+      });
+    } catch {
+      throw this.invalidSession();
+    }
+    if (typeof payload.sub !== 'string') {
+      throw this.invalidSession();
+    }
+
+    const user = await this.usersService.findById(payload.sub);
+    if (!user || user.status !== AccountStatus.ACTIVE) {
+      throw this.invalidSession();
+    }
+    return this.startSession(user);
+  }
+
+  private async startSession(user: UserDocument): Promise<LoginResult> {
     const [accessToken, refreshToken] = await Promise.all([this.signAccessToken(user), this.signRefreshToken(user)]);
     return { user: UserResponseDto.from(user), accessToken, refreshToken };
   }
@@ -103,8 +138,14 @@ export class AuthService {
   private signRefreshToken(user: UserDocument): Promise<string> {
     return this.jwtService.signAsync(
       { sub: user.id },
-      { secret: readJwtSecrets(this.config).refresh, expiresIn: REFRESH_TOKEN_TTL_SECONDS },
+      // jwtid = random `jti` claim, unique per token. Nothing stores it yet; SCRUM-38 can use it to revoke
+      // a single token without changing the token shape.
+      { secret: readJwtSecrets(this.config).refresh, expiresIn: REFRESH_TOKEN_TTL_SECONDS, jwtid: randomUUID() },
     );
+  }
+
+  private invalidSession(): UnauthorizedException {
+    return new UnauthorizedException('Invalid or expired session');
   }
 
   // Identical for "no such email" and "wrong password".

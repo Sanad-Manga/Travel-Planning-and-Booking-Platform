@@ -17,6 +17,12 @@ describe('readJwtSecrets', () => {
     expect(() => readJwtSecrets(config({ JWT_ACCESS_SECRET: GOOD }))).toThrow('JWT_REFRESH_SECRET is required');
   });
 
+  it('fails when both secrets are equal', () => {
+    expect(() => readJwtSecrets(config({ JWT_ACCESS_SECRET: GOOD, JWT_REFRESH_SECRET: GOOD }))).toThrow(
+      'JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be different',
+    );
+  });
+
   it('fails when a secret is shorter than 32 characters or still the .env.example placeholder', () => {
     expect(() => readJwtSecrets(config({ JWT_ACCESS_SECRET: 'short', JWT_REFRESH_SECRET: GOOD }))).toThrow(
       'JWT_ACCESS_SECRET must be at least 32 characters',

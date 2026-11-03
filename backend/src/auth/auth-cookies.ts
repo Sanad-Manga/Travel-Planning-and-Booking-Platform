@@ -25,6 +25,22 @@ export function refreshCookieOptions(secure: boolean): CookieOptions {
   return { ...baseOptions(secure), path: '/api/auth', maxAge: REFRESH_TOKEN_TTL_SECONDS * 1000 };
 }
 
+/**
+ * Removes both cookies. A browser only deletes a cookie when the name, path (and flags) match the one it holds,
+ * so this reuses the exact same option builders as setAuthCookies; the options cannot drift apart.
+ */
+export function clearAuthCookies(res: Response, secure: boolean): void {
+  res.clearCookie(ACCESS_TOKEN_COOKIE, withoutMaxAge(accessCookieOptions(secure)));
+  res.clearCookie(REFRESH_TOKEN_COOKIE, withoutMaxAge(refreshCookieOptions(secure)));
+}
+
+// Clearing sets an already-expired date, so maxAge must not be passed along.
+function withoutMaxAge(options: CookieOptions): CookieOptions {
+  const copy = { ...options };
+  delete copy.maxAge;
+  return copy;
+}
+
 export function setAuthCookies(res: Response, tokens: { accessToken: string; refreshToken: string }, secure: boolean): void {
   res.cookie(ACCESS_TOKEN_COOKIE, tokens.accessToken, accessCookieOptions(secure));
   res.cookie(REFRESH_TOKEN_COOKIE, tokens.refreshToken, refreshCookieOptions(secure));

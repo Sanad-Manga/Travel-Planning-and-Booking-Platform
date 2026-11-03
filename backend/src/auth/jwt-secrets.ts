@@ -26,6 +26,10 @@ export function readJwtSecrets(config: ConfigService): JwtSecrets {
       errors.push(`${name} must be at least ${JWT_SECRET_MIN_LENGTH} characters long`);
     }
   }
+  // With equal secrets an access token would also verify as a refresh token (and the other way round).
+  if (errors.length === 0 && access === refresh) {
+    errors.push('JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be different');
+  }
   if (errors.length) {
     throw new Error(`Invalid auth configuration:\n - ${errors.join('\n - ')}`);
   }
