@@ -56,3 +56,36 @@ How the output was used:
 The reviewer drafted contracts v1.1 (section 6 constant, section 7 provider/registry/PaymentActivity rows, section 8
 pause rules). I reviewed the wording against GEN-11 and the requirements sheet before committing it.
 ================================================
+
+================================================
+Date: 2026-11-04
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: GEN-12 (SCRUM-18)
+Prompt:
+Implement official reference-data seeding after inspecting docs/contracts.md and the existing NestJS backend. Preserve the four official CSV datasets and their identifiers; derive currencies; validate complete input; provide idempotent, recoverable MongoDB upserts and ReferenceDataService lookups. Add actual Jest and isolated MongoDB tests, verify build/test/lint, respect module ownership, avoid the shared Atlas database and .env contents, and document integration requirements and observed results.
+How the output was used:
+Created the reference-data schemas, CSV loader/validator, explicit seed CLI, Nest module and service, tests, and module setup/interface documentation. Verified with disposable MongoDB instances only. Proposed csv-parse as the required parsing dependency and documented shared-file integration for lead review. No application startup seeding or adjacent-ticket endpoints were added.
+================================================
+
+================================================
+Date: 2026-11-04
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: GEN-12 (SCRUM-18)
+Prompt:
+Independently review the completed reference-data implementation against docs/contracts.md. Inspect source, official datasets, schemas, upserts, service integration, dependency metadata and actual Jest tests. Report evidence-backed defects and optional improvements without modifying files, installing dependencies, running the seed, or accessing the shared Atlas database or .env contents.
+How the output was used:
+Received an APPROVE verdict with no blocking implementation defects. The read-only review identified stale dependency/setup documentation and suggested optional concurrent-seeding and existing-duplicate index-failure tests. It confirmed manifest/lockfile consistency statically; it did not rerun installation, build, tests or seeding, and made no file changes.
+================================================
+
+================================================
+Date: 2026-11-04
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: GEN-12 (SCRUM-18)
+Prompt:
+Explicitly authorize documentation cleanup in backend/src/reference-data/README.md and AI_PROMPTS.txt only. Correct outdated dependency information and append entries documenting the independent review and this cleanup. Do not modify implementation files, install dependencies, commit, push, or create a PR. Verify the documentation changes afterward.
+How the output was used:
+Updated the README to reflect csv-parse@7.0.3 already declared in the manifest and lockfile, documented npm ci setup, separated unverified team-lead approval from dependency availability, and distinguished initial verification from the independent review. Appended the review and cleanup entries without overwriting previous log entries. Verification checks documentation content, whitespace and repository file hashes; implementation tests and seeding are not rerun for this documentation-only change.
+================================================
