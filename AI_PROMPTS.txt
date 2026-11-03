@@ -75,3 +75,14 @@ Implement SCRUM-15 (ACC-04, login plus the shared guards) on top of the registra
 How the output was used:
 Generated the guards, decorators and interfaces in common/ (additions only), the login and me endpoints, the cookie helper, the secret validation and the unit and e2e tests; lint, build, unit and e2e tests were run locally. I must review: the 15-minute access token, that GET /me also returns 401 when the account is no longer ACTIVE, that the only edits to existing common/ lines are the exports in index.ts and the cookie-name comment in constants.ts, and the lead must approve the common/ additions. Branch is based on the ACC-01 branch, so its PR must be retargeted to develop after ACC-01 merges.
 ================================================
+
+================================================
+Date: 2026-11-03
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-19
+Prompt:
+Implement SCRUM-16 (ACC-19, tokens in httpOnly cookies only) on top of the login branch: issue a refresh token cookie (httpOnly, SameSite Lax, path /api/auth, max age 30 minutes, secure from config) next to the access cookie through the one shared cookie helper, and add tests that assert the Set-Cookie flags, that no token appears in any response body, and that Swagger cookie auth is wired. No refresh endpoint and no logout yet.
+How the output was used:
+Generated the refresh token signing (separate secret), the cookie helper changes and the cookie e2e tests; lint, build, unit and e2e tests were run locally. I must review: the refresh token only carries the user id, and nothing can use it yet (the refresh endpoint, revocation and logout are SCRUM-38 in Sprint 2). The Swagger "Try it out" check is automated against the generated OpenAPI document and a cookie-jar login flow; I will confirm it manually in the browser at /api/docs.
+================================================

@@ -1,4 +1,5 @@
 import { ConflictException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import { compare, hashSync } from 'bcryptjs';
@@ -37,6 +38,8 @@ describe('AuthService', () => {
         AuthService,
         { provide: UsersService, useValue: usersService },
         { provide: JwtService, useValue: jwtService },
+        // Fake secrets, only for this test.
+        { provide: ConfigService, useValue: new ConfigService({ JWT_ACCESS_SECRET: 'a'.repeat(32), JWT_REFRESH_SECRET: 'r'.repeat(32) }) },
       ],
     }).compile();
     service = moduleRef.get(AuthService);
@@ -82,6 +85,12 @@ describe('AuthService', () => {
       expect(result.user).toMatchObject({ id: ID, email: 'ali@example.com' });
       expect(JSON.stringify(result.user)).not.toContain('passwordHash');
       expect(jwtService.signAsync).toHaveBeenCalledWith({ sub: ID, role: Role.USER });
+    });
+
+    it('also issues a refresh token signed with the refresh secret (user id only, 30 minutes)', async () => {
+      usersService.findByEmail.mockResolvedValue(userDoc());
+      await service.login(credentials);
+      expect(jwtService.signAsync).toHaveBeenCalledWith({ sub: ID }, { secret: 'r'.repeat(32), expiresIn: 30 * 60 });
     });
 
     it('puts the airlineId in the token for an airline moderator', async () => {

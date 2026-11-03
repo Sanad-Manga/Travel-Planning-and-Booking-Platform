@@ -13,7 +13,7 @@ import {
 } from '@nestjs/swagger';
 import { Response } from 'express';
 import { AuthenticatedUser, CurrentUser, ErrorResponseDto, Public } from '../common';
-import { setAccessCookie } from './auth-cookies';
+import { setAuthCookies } from './auth-cookies';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -40,14 +40,16 @@ export class AuthController {
   @Public()
   @Post('login')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Log in with email and password. The access token is set as an httpOnly cookie, never in the body.' })
-  @ApiOkResponse({ type: UserResponseDto, description: 'The logged-in user. The token is in the Set-Cookie header.' })
+  @ApiOperation({
+    summary: 'Log in with email and password. Sets the access_token and refresh_token httpOnly cookies; no token is ever in the body.',
+  })
+  @ApiOkResponse({ type: UserResponseDto, description: 'The logged-in user. The tokens are only in the Set-Cookie headers.' })
   @ApiBadRequestResponse({ type: ErrorResponseDto, description: 'Malformed email or missing password' })
   @ApiUnauthorizedResponse({ type: ErrorResponseDto, description: 'Invalid email or password' })
   @ApiForbiddenResponse({ type: ErrorResponseDto, description: 'Account suspended' })
   async login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response): Promise<UserResponseDto> {
-    const { user, accessToken } = await this.authService.login(dto);
-    setAccessCookie(res, accessToken, this.config.get<boolean>('cookieSecure') ?? false);
+    const { user, accessToken, refreshToken } = await this.authService.login(dto);
+    setAuthCookies(res, { accessToken, refreshToken }, this.config.get<boolean>('cookieSecure') ?? false);
     return user;
   }
 

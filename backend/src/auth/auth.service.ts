@@ -1,13 +1,16 @@
 import { ConflictException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { compare, hash, hashSync } from 'bcryptjs';
 import { randomBytes } from 'node:crypto';
 import { AccessTokenPayload, AccountStatus } from '../common';
 import { UserDocument } from '../users/schemas/user.schema';
 import { UsersService } from '../users/users.service';
+import { REFRESH_TOKEN_TTL_SECONDS } from './auth-cookies';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { UserResponseDto } from './dto/user-response.dto';
+import { readJwtSecrets } from './jwt-secrets';
 
 // bcrypt work factor: each +1 doubles the hashing time. 10 is the common default (~50-100 ms).
 export const BCRYPT_SALT_ROUNDS = 10;
@@ -15,6 +18,7 @@ export const BCRYPT_SALT_ROUNDS = 10;
 export interface LoginResult {
   user: UserResponseDto;
   accessToken: string;
+  refreshToken: string;
 }
 
 @Injectable()
@@ -26,6 +30,7 @@ export class AuthService {
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
+    private readonly config: ConfigService,
   ) {}
 
   /** Creates a USER account. Business rule (unique email) is enforced here, not only by the DTO. */
@@ -69,7 +74,8 @@ export class AuthService {
       throw this.invalidCredentials();
     }
 
-    return { user: UserResponseDto.from(user), accessToken: await this.signAccessToken(user) };
+    const [accessToken, refreshToken] = await Promise.all([this.signAccessToken(user), this.signRefreshToken(user)]);
+    return { user: UserResponseDto.from(user), accessToken, refreshToken };
   }
 
   /** The user behind a valid token, for GET /auth/me. The token alone is not enough: the account must still be ACTIVE. */
@@ -90,6 +96,15 @@ export class AuthService {
       ...(user.hotelId ? { hotelId: user.hotelId.toString() } : {}),
     };
     return this.jwtService.signAsync(payload);
+  }
+
+  // Signed with a DIFFERENT secret than the access token, so a refresh token can never pass as an access token.
+  // It only carries the user id; role and ids are re-read from the database when it is exchanged (Sprint 2).
+  private signRefreshToken(user: UserDocument): Promise<string> {
+    return this.jwtService.signAsync(
+      { sub: user.id },
+      { secret: readJwtSecrets(this.config).refresh, expiresIn: REFRESH_TOKEN_TTL_SECONDS },
+    );
   }
 
   // Identical for "no such email" and "wrong password".
