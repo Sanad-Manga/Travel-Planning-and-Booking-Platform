@@ -42,3 +42,25 @@ The reviewer found a paginate bug that would have conflicted with a current open
 I ran build, lint, unit and e2e tests on a
 clean `npm ci` myself, and checked that Swagger opens at /api/docs and that a bad MONGODB_URI is rejected.
 ================================================
+
+================================================
+Date: 2026-11-03
+Student: Ziad Mohamed
+Tool: Claude (claude.ai chat)
+Related Requirement: ACC-01, ACC-04, ACC-19, GEN-13
+Prompt:
+Asked Claude to read contracts.md, the project description PDF, the Jira Sprint 1 tickets and the repo skeleton, then plan the Auth & Accounts implementation and write this Claude Code prompt.
+How the output was used:
+Used the plan (user/auth module split, guard design, cookie and login decisions) as the basis for the implementation prompt below.
+================================================
+
+================================================
+Date: 2026-11-03
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-01
+Prompt:
+Implement SCRUM-14 (ACC-01, register with email, password and consent) after reading docs/contracts.md and the skeleton: users module (User schema, UsersService with findByEmail/findById/create), auth module, RegisterDto, UserResponseDto, POST /api/auth/register with Swagger decorators, unit tests and an e2e test with mongodb-memory-server. Design decisions given: role always USER, 409 with a field-level detail for a duplicate email, bcryptjs salted hash, never return the hash, no cookies on register.
+How the output was used:
+Generated the users and auth modules, the DTOs, the unit tests and the e2e test; lint, build, unit and e2e tests were run locally. I must review: the field name acceptTerms for consent (the contract does not name it), the 72-character password maximum (bcrypt ignores bytes beyond 72), the bcrypt cost of 10, and that the only edit outside my modules is the AuthModule import in app.module.ts. I will run the Swagger tests manually before the PR is merged.
+================================================
