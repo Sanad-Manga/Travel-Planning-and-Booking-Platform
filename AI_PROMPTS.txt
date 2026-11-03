@@ -64,3 +64,14 @@ Implement SCRUM-14 (ACC-01, register with email, password and consent) after rea
 How the output was used:
 Generated the users and auth modules, the DTOs, the unit tests and the e2e test; lint, build, unit and e2e tests were run locally. I must review: the field name acceptTerms for consent (the contract does not name it), the 72-character password maximum (bcrypt ignores bytes beyond 72), the bcrypt cost of 10, and that the only edit outside my modules is the AuthModule import in app.module.ts. I will run the Swagger tests manually before the PR is merged.
 ================================================
+
+================================================
+Date: 2026-11-03
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-04
+Prompt:
+Implement SCRUM-15 (ACC-04, login plus the shared guards) on top of the registration branch: POST /api/auth/login (password checked before status, generic 401, 403 for suspended, dummy-hash comparison for unknown emails), GET /api/auth/me, global JwtAuthGuard with @Public(), RolesGuard with @Roles(), @CurrentUser(), JWT via @nestjs/jwt (no passport) with the access token in an httpOnly cookie set through one shared helper, JWT secrets validated at start-up. Tests: me without cookie 401, login sets an httpOnly cookie, wrong password 401, suspended 403, role guard 403 and 200, public route without a cookie.
+How the output was used:
+Generated the guards, decorators and interfaces in common/ (additions only), the login and me endpoints, the cookie helper, the secret validation and the unit and e2e tests; lint, build, unit and e2e tests were run locally. I must review: the 15-minute access token, that GET /me also returns 401 when the account is no longer ACTIVE, that the only edits to existing common/ lines are the exports in index.ts and the cookie-name comment in constants.ts, and the lead must approve the common/ additions. Branch is based on the ACC-01 branch, so its PR must be retargeted to develop after ACC-01 merges.
+================================================

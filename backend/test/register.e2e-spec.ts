@@ -1,16 +1,11 @@
 import { INestApplication } from '@nestjs/common';
-import { MongooseModule } from '@nestjs/mongoose';
-import { Test } from '@nestjs/testing';
-import { MongoMemoryServer } from 'mongodb-memory-server';
 import { Connection } from 'mongoose';
-import { getConnectionToken } from '@nestjs/mongoose';
 import request from 'supertest';
-import { AuthModule } from '../src/auth/auth.module';
-import { setupApp } from '../src/setup-app';
+import { AuthTestApp, createAuthTestApp } from './helpers/auth-test-app';
 
 describe('POST /api/auth/register (e2e)', () => {
+  let testApp: AuthTestApp;
   let app: INestApplication;
-  let mongo: MongoMemoryServer;
   let connection: Connection;
 
   const valid = { name: 'Ali Hassan', email: 'ali@example.com', password: 'Passw0rdOK', acceptTerms: true };
@@ -18,23 +13,13 @@ describe('POST /api/auth/register (e2e)', () => {
   const fieldsOf = (res: request.Response): string[] => res.body.details.map((d: { field: string }) => d.field);
 
   beforeAll(async () => {
-    mongo = await MongoMemoryServer.create();
-    const moduleRef = await Test.createTestingModule({
-      imports: [MongooseModule.forRoot(mongo.getUri()), AuthModule],
-    }).compile();
-    app = moduleRef.createNestApplication();
-    setupApp(app);
-    await app.init();
-    connection = app.get<Connection>(getConnectionToken());
-    await connection.model('User').init(); // make sure the unique index exists before the tests run
+    testApp = await createAuthTestApp();
+    ({ app, connection } = testApp);
   }, 180_000); // the very first run downloads the in-memory MongoDB binary
 
-  afterAll(async () => {
-    await app.close();
-    await mongo.stop();
-  });
+  afterAll(() => testApp.close());
 
-  it('registers a user: 201, role USER, no hash, no cookies', async () => {
+  it('registers a user without being logged in: 201, role USER, no hash, no cookies', async () => {
     const res = await register(valid).expect(201);
     expect(res.body).toMatchObject({ name: 'Ali Hassan', email: 'ali@example.com', role: 'USER', status: 'ACTIVE' });
     expect(res.body.id).toEqual(expect.any(String));
@@ -71,7 +56,10 @@ describe('POST /api/auth/register (e2e)', () => {
     expect(fieldsOf(res)).toContain('password');
   });
 
-  it.each([['missing', undefined], ['false', false]])('rejects consent that is %s with 400', async (_label, acceptTerms) => {
+  it.each([
+    ['missing', undefined],
+    ['false', false],
+  ])('rejects consent that is %s with 400', async (_label, acceptTerms) => {
     const res = await register({ ...valid, email: 'consent@example.com', acceptTerms }).expect(400);
     expect(fieldsOf(res)).toEqual(['acceptTerms']);
   });
