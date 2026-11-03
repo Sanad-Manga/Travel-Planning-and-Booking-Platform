@@ -42,3 +42,17 @@ The reviewer found a paginate bug that would have conflicted with a current open
 I ran build, lint, unit and e2e tests on a
 clean `npm ci` myself, and checked that Swagger opens at /api/docs and that a bad MONGODB_URI is rejected.
 ================================================
+================================================
+Date: 2026-11-03
+Student: Ahmed Sanad
+Tool: Claude (Claude Code, Sonnet 5.5), used as a code reviewer
+Related Requirement: GEN-11, FLT-22, HTL-18, PAY-01 (SCRUM-33, PR #8)
+Prompt:
+While reviewing PR #8 (booking lifecycle), asked how a payment that arrives near the 10-minute hold expiry should
+behave. Chose to pause the hold while a payment is in flight, capped at 5 minutes ("go with A"), then asked to add
+the resulting rules to docs/contracts.md.
+
+How the output was used:
+The reviewer drafted contracts v1.1 (section 6 constant, section 7 provider/registry/PaymentActivity rows, section 8
+pause rules). I reviewed the wording against GEN-11 and the requirements sheet before committing it.
+================================================
