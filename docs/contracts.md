@@ -40,7 +40,7 @@
 - Dates: ISO 8601 UTC strings (`2026-11-20T14:30:00.000Z`). Flight times are stored in UTC and the airport's IANA time zone is returned alongside so clients can show local time. Date-only fields (stay dates, itinerary start) are `YYYY-MM-DD`.
 - Money: one platform currency (PAY-04). Store and return **integer minor units** (cents) in fields named `...Cents`, plus `currency`. Never floats.
 - Schemas: `timestamps: true`. Collection names plural camelCase. Add indexes for fields you search or filter on. Use references for shared/independent data, embedding only for bounded child data.
-- Reference data (`countries`, `cities`, `airports`, `attractions`, `currencies`) is seeded from the official datasets **keeping the provided IDs**. Never invent IDs. Other modules store those IDs as references.
+- Reference data (`countries`, `cities`, `airports`, `attractions`, `currencies`) is seeded from the official datasets **keeping the provided IDs**. Never invent IDs. Other modules store those IDs as references. Each airport carries its IANA time zone (from `Airports.csv`), and the supported currencies are the currency codes listed in `Countries.csv` (no separate currency file).
 
 ## 4. Auth and authorization
 
@@ -118,7 +118,7 @@ Payments owns the **hold-expiry sweep** (cron every minute plus a lazy expiry ch
 | Owner | Provides | Needs from |
 |---|---|---|
 | Auth | Guards, `@CurrentUser`, login/session, profile (incl. preferred currency) | Admin (seed admin) |
-| Admin | Seeding + `ReferenceDataService`, audit log, moderator creation, suspend/reactivate, reports | Auth (guards), airlines/hotels exist (moderator link), Notifications |
+| Admin | Seeding + `ReferenceDataService`, audit log, moderator creation, suspend/reactivate, provider deactivate/reactivate (`PATCH /api/admin/providers/:type/:id/deactivate` and `/reactivate`, `:type` = `hotel` or `airline`; separate from suspending the moderator; hidden from search and not bookable, existing CONFIRMED bookings stay valid; affected parties notified), reports | Auth (guards), airlines/hotels exist (moderator link), Notifications |
 | You (lead) | Skeleton, `common/`, airlines, flights, cabins, baggage rules, hotels, rooms, availability | Seeding (airports/cities), Upload |
 | Flights B | Search, holds, flight booking, e-ticket, cancel | Flights A (cabins), Payments (confirm/refund), Notifications |
 | Hotels B | Search, holds, hotel booking, cancel, reviews | Hotels A (rooms/availability), Payments, Notifications |
