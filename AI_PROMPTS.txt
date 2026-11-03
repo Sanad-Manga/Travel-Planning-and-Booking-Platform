@@ -10,3 +10,20 @@ Prompt:
 How the output was used:
 ...
 ================================================
+
+================================================
+Date: 2026-11-03
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: SETUP (SCRUM-13), GEN-05, GEN-13, GEN-08
+Prompt:
+Build the NestJS backend skeleton for the team project from docs/contracts.md and the Jira ticket SCRUM-13:
+config, Mongoose connection, /api prefix, ValidationPipe, a global exception filter with the contract error
+shape, Swagger with cookie auth, shared enums/constants and pagination helpers. Install all libraries the
+mandatory requirements need so the whole team uses identical locked versions. Branch off develop.
+How the output was used:
+Used the generated skeleton as the base of backend/. I reviewed the files, chose to pin Nest 11 (the last
+CommonJS major) instead of Nest 12 (ESM only) to keep imports simple for the team, chose bcryptjs because the
+requirements only ask for salted hashes, and confirmed the unit tests, e2e tests, lint, build and a real
+start-up against an in-memory MongoDB all pass.
+================================================
