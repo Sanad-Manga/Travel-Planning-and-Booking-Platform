@@ -38,7 +38,8 @@ The app refuses to start if `MONGODB_URI` is missing or still the placeholder.
 | `npm run build` | Compile to `dist/` |
 | `npm test` | Unit tests |
 | `npm run test:e2e` | End-to-end tests (global validation, error shape, `/api` prefix) |
-| `npm run lint` | ESLint (no `console.log` allowed) |
+| `npm run lint` | ESLint check only, fails on problems (no `console.log` allowed) |
+| `npm run lint:fix` | ESLint with auto-fix, edits files |
 
 ### Backend layout
 ```

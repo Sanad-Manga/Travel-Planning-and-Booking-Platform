@@ -21,20 +21,43 @@ function fakeModel(rows: unknown[], total: number) {
   return { model, calls };
 }
 
+const identity = (d: any) => d;
+
 describe('paginate', () => {
   it('returns the contract envelope and skips the right number of rows', async () => {
     const { model, calls } = fakeModel([{ a: 1 }, { a: 2 }], 25);
-    const result = await paginate(model, {}, { page: 3, limit: 10 }, { sort: { createdAt: -1 } });
+    const result = await paginate(model, {}, { page: 3, limit: 10 }, { map: identity, sort: { createdAt: -1 } });
     expect(result).toEqual({ items: [{ a: 1 }, { a: 2 }], page: 3, limit: 10, total: 25, totalPages: 3 });
     expect(calls.skip).toBe(20);
     expect(calls.limit).toBe(10);
-    expect(calls.sort).toEqual({ createdAt: -1 });
   });
 
   it('maps documents to response DTOs', async () => {
     const { model } = fakeModel([{ _id: 'x1', secret: 's' }], 1);
     const result = await paginate(model, {}, { page: 1, limit: 10 }, { map: (d) => ({ id: d._id }) });
     expect(result.items).toEqual([{ id: 'x1' }]);
+  });
+
+  it('never leaks _id, __v or passwordHash once mapped to a DTO', async () => {
+    const { model } = fakeModel([{ _id: 'u1', __v: 0, passwordHash: '$2a$10$secret', name: 'Sam' }], 1);
+    const result = await paginate(model, {}, { page: 1, limit: 10 }, { map: (d) => ({ id: d._id }) });
+    expect(result.items).toEqual([{ id: 'u1' }]);
+    const json = JSON.stringify(result);
+    expect(json).not.toContain('passwordHash');
+    expect(json).not.toContain('__v');
+    expect(json).not.toContain('secret');
+  });
+
+  it('sorts by _id ascending when no sort is given, so pages are stable', async () => {
+    const { model, calls } = fakeModel([], 0);
+    await paginate(model, {}, { page: 1, limit: 10 }, { map: identity });
+    expect(calls.sort).toEqual({ _id: 1 });
+  });
+
+  it('lets an explicit sort win over the default', async () => {
+    const { model, calls } = fakeModel([], 0);
+    await paginate(model, {}, { page: 1, limit: 10 }, { map: identity, sort: { createdAt: -1 } });
+    expect(calls.sort).toEqual({ createdAt: -1 });
   });
 
   it('reports zero pages for an empty result', () => {

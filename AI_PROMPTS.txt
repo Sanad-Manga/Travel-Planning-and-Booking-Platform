@@ -27,3 +27,16 @@ CommonJS major) instead of Nest 12 (ESM only) to keep imports simple for the tea
 requirements only ask for salted hashes, and confirmed the unit tests, e2e tests, lint, build and a real
 start-up against an in-memory MongoDB all pass.
 ================================================
+
+================================================
+Date: 2026-11-03
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: SETUP (SCRUM-13)
+Prompt:
+Apply the PR #1 review: make `map` required in paginate() so raw documents can never be returned, default
+the sort to { _id: 1 } for stable pages, add tests for both, and split `lint` (check only) from `lint:fix`.
+How the output was used:
+Applied the changes to paginate.ts, paginate.spec.ts, package.json scripts and the README scripts table, then
+re-ran build, lint, unit and e2e tests after a clean `npm ci`. Nothing else was changed.
+================================================
