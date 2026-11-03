@@ -11,6 +11,12 @@ describe('validateEnv', () => {
     expect(env.PLATFORM_CURRENCY).toBe('USD');
   });
 
+  it('defaults COOKIE_SECURE to true in production and lets it be switched off explicitly', () => {
+    expect(validateEnv({ ...ok, NODE_ENV: 'production' }).COOKIE_SECURE).toBe(true);
+    expect(validateEnv({ ...ok, NODE_ENV: 'production', COOKIE_SECURE: 'false' }).COOKIE_SECURE).toBe(false);
+    expect(validateEnv({ ...ok, NODE_ENV: 'development' }).COOKIE_SECURE).toBe(false);
+  });
+
   it('fails fast when MONGODB_URI is missing', () => {
     expect(() => validateEnv({})).toThrow(/MONGODB_URI is required/);
   });
