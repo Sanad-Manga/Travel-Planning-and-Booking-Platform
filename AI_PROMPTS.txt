@@ -42,3 +42,23 @@ The reviewer found a paginate bug that would have conflicted with a current open
 I ran build, lint, unit and e2e tests on a
 clean `npm ci` myself, and checked that Swagger opens at /api/docs and that a bad MONGODB_URI is rejected.
 ================================================
+
+================================================
+Date: 2026-11-03
+Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code, Sonnet 5)
+Related Requirement: PAY-04 (SCRUM-34)
+Prompt:
+Pasted docs/contracts.md, a context file for my module (Payments & Policies) and the SCRUM-34 ticket text, then:
+"Implement only this ticket, following contracts.md. List your assumptions first."
+Assumptions I gave the AI: PLATFORM_CURRENCY and the ...Cents naming convention already exist in common/constants.ts
+(from SCRUM-13) and I cannot edit common/ without the lead's approval, so the ticket's own deliverable in MY module is a
+reusable enforcement of the convention (a validator + DTO + helpers), not a new constant.
+
+How the output was used:
+Used the generated backend/src/payments/money/ (MoneyDto, IsPlatformCurrency validator, assertPlatformCurrency,
+isValidCents, toMoney, formatMoney helpers) and its Jest tests as-is. This is the shared "one platform currency,
+integer cents" building block for PAY-01/PAY-03 (Stripe payments and refunds), which I own and haven't started yet.
+I ran build, lint and the unit tests myself (18 tests, all passing) on a clean checkout. No endpoint exists for this
+ticket (Swagger: n/a per the ticket), so there is nothing to test in Swagger.
+================================================
