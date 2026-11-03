@@ -1,4 +1,4 @@
-# Project Contracts (v1)
+# Project Contracts (v1.1)
 
 **Instructions to the AI assistant reading this:** you are helping one student implement one ticket of a team NestJS + MongoDB project. This file is the team's binding contract. Follow it exactly. If your code would conflict with it, the file wins. If the file seems wrong or incomplete for the ticket, stop and tell the student to raise it with the lead; do not work around it or invent your own version. If the ticket or any needed signature is missing, ask for it before writing code. Before coding, list your assumptions and anything you need from another module. A separate Reviewer AI will check the student's PR against this file and the ticket, using the checklist in section 11, so self-check your output against it.
 
@@ -80,6 +80,7 @@ State transitions of `BookingStatus` go through `BookingLifecycle.transition()` 
 | Constant | Value |
 |---|---|
 | `HOLD_MINUTES` (env) | 10 (flight seats and hotel rooms) |
+| `PAYMENT_PAUSE_MAX_MINUTES` | 5 (longest a payment in flight can pause hold expiry) |
 | Login lockout | 5 consecutive failures, 15 minutes, success resets counter |
 | Session inactivity | 30 minutes |
 | Default page size | 10 |
@@ -100,11 +101,16 @@ Everything below is injected via NestJS DI. Owners publish the signature first; 
 | `BookingLifecycle.transition` | Payments | `transition(type, bookingId, to: BookingStatus): Promise<void>`; rejects illegal transitions | booking owners |
 | `RefundsService.issue` | Payments | `issue({ bookingType, bookingId, amountCents, reason }): Promise<Refund>`; called on every cancellation with a positive refund | flight/hotel cancel, flight cancel by airline |
 | `RefundCalculator.compute` | Payments | `compute({ tiers, daysBefore, totalCents }): number`: tier with highest threshold not above days remaining, else 0 | flight/hotel cancel preview + cancel |
-| Booking provider interface | Flights B, Hotels B | `getPayable(id, userId)` -> `{ amountCents, currency, status, holdExpiresAt }`, `markConfirmed(id, paymentRef)`, `markExpired(id)`, `getPolicies(id)` | Payments (payment, webhook, expiry sweep, policy acceptance) |
+| Booking provider interface (`BookingProvider`) | Flights B, Hotels B | `getPayable(id, userId)` -> `{ amountCents, currency, status, holdExpiresAt }`, `markConfirmed(id, paymentRef)`, `markExpired(id)`, `getPolicies(id)`, plus the lifecycle methods below | Payments (payment, webhook, expiry sweep, policy acceptance) |
+| `BookingProvider` lifecycle methods | Flights B, Hotels B | `getStatus(id)` -> `{ status, holdExpiresAt? }`; `applyStatus(id, from, to): Promise<boolean>` (atomic conditional update on `_id` AND `status = from`; `false` if the booking was no longer in `from`); `findExpiredHolds(now, limit, afterId?)` -> overdue `PENDING_PAYMENT` bookings ordered by `_id`, after `afterId` when given | `BookingLifecycle` only |
+| `BookingProviderRegistry` | Payments | `register(type, provider)`; owners register their provider on module init so Payments never imports their modules | booking owners (register), `BookingLifecycle` (lookup) |
+| `PaymentActivity.prepareExpiry` | Payments | `prepareExpiry(type, bookingId, now): Promise<'SKIP' \| 'PAID' \| 'EXPIRE'>`; `SKIP` = a payment is in flight and inside the pause cap, `PAID` = cancelling the PaymentIntent found it already succeeded (booking must be confirmed, not expired), `EXPIRE` = safe to expire | `BookingLifecycle` (sweep and lazy check) |
 | `ReferenceDataService` | Admin | read access to countries, cities, airports, attractions, currencies by ID | flights, hotels, itineraries, users |
 | `isHidden` flag | field on `Post`, `Comment`, `Review`, `Itinerary` | hidden content is returned only to its author and admins | blog, reviews, itineraries, reports |
 
 Payments owns the **hold-expiry sweep** (cron every minute plus a lazy expiry check whenever a booking is read) for both booking collections. Booking owners only create `PENDING_PAYMENT` bookings with `holdExpiresAt`.
+
+`BookingLifecycle.transition()` is the only code that changes `BookingStatus`. It validates against the transition table, calls `applyStatus`, and the owner's `applyStatus` releases inventory in the same MongoDB transaction when `to` is `EXPIRED` or `CANCELLED` (no separate best-effort release step). Booking owners check that the caller owns the booking BEFORE calling `transition()`. Before expiring, the sweep and the lazy check call `PaymentActivity.prepareExpiry`; the sweep walks overdue bookings by `_id` with `afterId` so skipped bookings are neither re-fetched in a loop nor starve later ones.
 
 ## 8. Concurrency rules (flight seats, hotel rooms)
 
@@ -112,6 +118,10 @@ Payments owns the **hold-expiry sweep** (cron every minute plus a lazy expiry ch
 - Available seats = total - booked - held (held = unexpired holds). Infants take no seat.
 - Hotel booking with several rooms is **all or nothing**: use a transaction; if any room overlaps a confirmed booking, an unexpired hold, or a blocked range, hold nothing and return 409.
 - Expired/failed payment releases the seats/rooms. Cancellation returns them to inventory.
+- **A payment in flight pauses the hold.** A booking whose payment is `PROCESSING` is not expired. The pause ends at the first of: the payment reaches `SUCCEEDED`, `FAILED` or `CANCELLED`, or `PAYMENT_PAUSE_MAX_MINUTES` pass since it entered `PROCESSING`. After the cap, Payments cancels the PaymentIntent first; if Stripe says it already succeeded, the booking is confirmed instead of expired. After `FAILED`/`CANCELLED`, the normal clock applies (an overdue booking is expired by the next sweep).
+- A new payment may only start while the booking is `PENDING_PAYMENT` and its hold is unexpired, and only one payment may be in flight per booking. Worst case a hold lasts `HOLD_MINUTES` + `PAYMENT_PAUSE_MAX_MINUTES`.
+- Availability queries count only unexpired `PENDING_PAYMENT` and `CONFIRMED` bookings; `EXPIRED` and `CANCELLED` never block inventory.
+- If a payment succeeds for a booking that is already `EXPIRED`, Payments refunds it automatically (PAY-03) and notifies the user; it never revives the booking.
 
 ## 9. Module interfaces: what each owner provides and needs
 
