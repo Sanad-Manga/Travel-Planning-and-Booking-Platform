@@ -42,3 +42,22 @@ The reviewer found a paginate bug that would have conflicted with a current open
 I ran build, lint, unit and e2e tests on a
 clean `npm ci` myself, and checked that Swagger opens at /api/docs and that a bad MONGODB_URI is rejected.
 ================================================
+
+================================================
+Date: 2026-11-03
+Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: GEN-01 (SCRUM-32)
+Prompt:
+Pasted docs/contracts.md, a context file for my module (Payments & Policies) and the SCRUM-32 ticket text, then:
+"Implement only this ticket, following contracts.md. List your assumptions first."
+Follow-ups: asked how to handle the auth guards, which are not on develop yet (SCRUM-15),
+and how to test the service without a database.
+
+How the output was used:
+Used the generated notifications module (schema, NotificationsService.notify/list/unreadCount/markRead, controller, DTOs)
+and its Jest tests in backend/src/notifications. notify() keeps the signature from contracts.md section 7 and never throws.
+GET /api/notifications/unread-count is an addition to the two endpoints in the ticket (proposal to the lead).
+current-user.stub.ts is a temporary stand-in for @CurrentUser() and must be replaced once SCRUM-15 is merged.
+The only other file touched is app.module.ts (one import for NotificationsModule).
+================================================
