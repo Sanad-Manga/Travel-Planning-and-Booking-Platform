@@ -35,14 +35,29 @@ describe('backend-enforced validation and password hashing (e2e)', () => {
     expect(fieldsOf(res)).toEqual(expect.arrayContaining(['name', 'email', 'password', 'acceptTerms']));
   });
 
-  it('rejects a password over 72 characters (bcrypt would silently truncate it)', async () => {
-    const res = await post('/api/auth/register', {
-      name: 'Ali',
-      email: 'long@example.com',
-      password: 'a1'.repeat(37),
-      acceptTerms: true,
-    }).expect(400);
-    expect(fieldsOf(res)).toEqual(['password']);
+  // bcrypt only uses the first 72 BYTES, so the limit is counted in UTF-8 bytes, not characters.
+  describe('password length limit is 72 bytes', () => {
+    const register = (email: string, password: string) =>
+      post('/api/auth/register', { name: 'Ali', email, password, acceptTerms: true });
+
+    it('accepts exactly 72 ASCII characters (72 bytes)', async () => {
+      await register('bytes72@example.com', 'a1'.repeat(36)).expect(201);
+    });
+
+    it('rejects 73 ASCII characters with a field-level error', async () => {
+      const res = await register('bytes73@example.com', 'a1'.repeat(36) + 'b').expect(400);
+      expect(res.body).toMatchObject({ statusCode: 400, message: 'Validation failed' });
+      expect(res.body.details).toEqual([{ field: 'password', message: expect.stringContaining('72 bytes') }]);
+    });
+
+    it('rejects 40 Arabic letters + a Latin letter and digit (42 characters but 82 bytes)', async () => {
+      const res = await register('arabic-long@example.com', 'ع'.repeat(40) + 'a1').expect(400);
+      expect(fieldsOf(res)).toEqual(['password']);
+    });
+
+    it('accepts a short password with a few Arabic characters (under 72 bytes)', async () => {
+      await register('arabic-short@example.com', 'كلمةسر' + 'Pass1234').expect(201);
+    });
   });
 
   it('two users with the same password get different bcrypt hashes, and neither is the plaintext', async () => {

@@ -90,7 +90,7 @@ Notes:
 - Only salted bcrypt hashes are stored (`bcryptjs`, cost 10, see `BCRYPT_SALT_ROUNDS`). bcrypt creates a random salt on every call and stores it inside the hash string, so two users with the same password get different hashes.
 - The schema field is `passwordHash` with `select: false`: queries do not load it unless they explicitly ask (`findByEmail(email, true)`, login only).
 - Never return the hash or any token. Return a response DTO (`UserResponseDto`), not the Mongoose document.
-- Passwords longer than 72 characters are rejected because bcrypt ignores everything after 72 bytes.
+- Passwords longer than 72 **bytes** (UTF-8) are rejected, using the `@MaxByteLength` validator. bcrypt ignores everything after byte 72, and non-English characters take 2 or more bytes each (an Arabic letter is 2), so counting characters with `@MaxLength` would let an over-long password through and silently truncate it.
 
 ## 5. Where this is tested
 

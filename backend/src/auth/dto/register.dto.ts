@@ -2,6 +2,8 @@ import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { Equals, IsEmail, IsNotEmpty, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 import { PASSWORD_MIN_LENGTH } from '../../common';
+import { PASSWORD_MAX_BYTES } from '../auth.constants';
+import { MaxByteLength } from '../validators/max-byte-length.decorator';
 
 // Runs before validation: " Ali@Mail.COM " becomes "ali@mail.com". Non-strings are left for the validators to reject.
 const trimString = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
@@ -24,13 +26,14 @@ export class RegisterDto {
   @ApiProperty({
     example: 'Passw0rdOK',
     minLength: PASSWORD_MIN_LENGTH,
-    maxLength: 72,
-    description: 'At least 8 characters, with at least one letter and one digit.',
+    description: 'At least 8 characters, with at least one letter and one digit. At most 72 bytes in UTF-8.',
   })
   @IsString()
   @MinLength(PASSWORD_MIN_LENGTH, { message: `password must be at least ${PASSWORD_MIN_LENGTH} characters` })
-  // bcrypt only uses the first 72 bytes, so longer passwords would silently be truncated.
-  @MaxLength(72, { message: 'password must be at most 72 characters' })
+  // bcrypt only uses the first 72 BYTES, so a longer password would silently be truncated. Bytes, not characters.
+  @MaxByteLength(PASSWORD_MAX_BYTES, {
+    message: 'password is too long (maximum 72 bytes; non-English characters use 2 or more bytes each)',
+  })
   @Matches(/[A-Za-z]/, { message: 'password must contain at least one letter' })
   @Matches(/\d/, { message: 'password must contain at least one digit' })
   password: string;
