@@ -86,3 +86,14 @@ Implement SCRUM-16 (ACC-19, tokens in httpOnly cookies only) on top of the login
 How the output was used:
 Generated the refresh token signing (separate secret), the cookie helper changes and the cookie e2e tests; lint, build, unit and e2e tests were run locally. I must review: the refresh token only carries the user id, and nothing can use it yet (the refresh endpoint, revocation and logout are SCRUM-38 in Sprint 2). The Swagger "Try it out" check is automated against the generated OpenAPI document and a cookie-jar login flow; I will confirm it manually in the browser at /api/docs.
 ================================================
+
+================================================
+Date: 2026-11-03
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GEN-13
+Prompt:
+Implement SCRUM-17 (GEN-13, backend-enforced validation and salted hashing): write a short docs/api/validation-pattern.md (how to write a DTO, how errors look, where business rules live) using the register DTO as the example, plus tests proving field-level errors, rejection of extra fields, and that two identical passwords produce different hashes that are not the plaintext. Keep it small and do not duplicate what the register PR already covers.
+How the output was used:
+Generated the pattern document and one extra e2e test file (wrong types, unknown field on login, empty body, 72-character limit, identical passwords giving different hashes); lint, build, unit and e2e tests were run locally. I must review the document against how the team actually writes DTOs, and the lead should confirm it is the pattern everyone copies. The register tests already covered field-level errors and extra fields, so they are linked from the document instead of duplicated.
+================================================
