@@ -211,15 +211,15 @@ describe('HTL-01 hotel profile (e2e)', () => {
       await http().patch(`/api/hotels/${hotelA}`).set('Cookie', modA).send({ photos }).expect(400);
     });
 
-    it("404 when editing another moderator's hotel, and the hotel is unchanged", async () => {
-      await http().patch(`/api/hotels/${hotelB}`).set('Cookie', modA).send({ description: 'Hacked' }).expect(404);
+    it("403 when editing another moderator's hotel, and the hotel is unchanged", async () => {
+      await http().patch(`/api/hotels/${hotelB}`).set('Cookie', modA).send({ description: 'Hacked' }).expect(403);
       const ok = await http().patch(`/api/hotels/${hotelB}`).set('Cookie', modB).send({ address: 'New street 1' }).expect(200);
       expect(ok.body.description).toBe('Riverside hotel.');
     });
 
-    it('404 for an unknown or malformed id', async () => {
-      await http().patch(`/api/hotels/${new Types.ObjectId()}`).set('Cookie', modA).send({ description: 'x' }).expect(404);
-      await http().patch('/api/hotels/not-an-id').set('Cookie', modA).send({ description: 'x' }).expect(404);
+    it('403 for an unknown or malformed id (not the own hotel of the moderator)', async () => {
+      await http().patch(`/api/hotels/${new Types.ObjectId()}`).set('Cookie', modA).send({ description: 'x' }).expect(403);
+      await http().patch('/api/hotels/not-an-id').set('Cookie', modA).send({ description: 'x' }).expect(403);
     });
 
     it('409 when renaming to a name already used in the same city', async () => {

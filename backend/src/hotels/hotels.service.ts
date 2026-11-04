@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { Model } from 'mongoose';
 import { AuthenticatedUser, MAX_IMAGES_PER_ENTITY, Role } from '../common';
 import { ReferenceDataService } from '../reference-data/reference-data.service';
 import { CreateHotelDto } from './dto/create-hotel.dto';
@@ -40,12 +40,12 @@ export class HotelsService {
   }
 
   /**
-   * HTL-01: a hotel moderator edits ONLY their own hotel. Another hotel's id answers 404 (not 403),
-   * so a moderator cannot probe which hotels exist.
+   * HTL-01: a hotel moderator edits ONLY their own hotel. Any other id answers 403 (contracts section 4:
+   * hotel profiles are public, so there is nothing to hide). 404 only if the moderator's own hotel is gone.
    */
   async update(id: string, dto: UpdateHotelDto, actor: AuthenticatedUser): Promise<HotelResponseDto> {
     if (actor.role !== Role.HOTEL_MODERATOR) throw new ForbiddenException('Only a hotel moderator can edit a hotel');
-    if (!Types.ObjectId.isValid(id) || actor.hotelId !== id) throw new NotFoundException('Hotel not found');
+    if (actor.hotelId !== id) throw new ForbiddenException('You can only edit your own hotel');
 
     this.assertPhotoLimit(dto.photos);
     const changes: Record<string, unknown> = {};

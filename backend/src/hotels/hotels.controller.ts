@@ -41,8 +41,8 @@ export class HotelsController {
   @ApiOkResponse({ type: HotelResponseDto })
   @ApiBadRequestResponse({ type: ErrorResponseDto, description: 'Empty body, invalid field, unknown cityId, or more than 5 photos' })
   @ApiUnauthorizedResponse({ type: ErrorResponseDto, description: 'Not logged in' })
-  @ApiForbiddenResponse({ type: ErrorResponseDto, description: 'Not a hotel moderator' })
-  @ApiNotFoundResponse({ type: ErrorResponseDto, description: "Hotel does not exist or is not the moderator's own hotel" })
+  @ApiForbiddenResponse({ type: ErrorResponseDto, description: "Not a hotel moderator, or not the moderator's own hotel" })
+  @ApiNotFoundResponse({ type: ErrorResponseDto, description: "The moderator's own hotel no longer exists" })
   @ApiConflictResponse({ type: ErrorResponseDto, description: 'A hotel with this name already exists in this city' })
   update(
     @Param('id') id: string,
