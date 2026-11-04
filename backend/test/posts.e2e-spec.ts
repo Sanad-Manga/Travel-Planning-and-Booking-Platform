@@ -382,4 +382,137 @@ describe('BLG-01 create post (e2e)', () => {
         .expect(400);
     });
   });
+
+  describe('PATCH and DELETE /api/posts/:id (BLG-04)', () => {
+    let otherCookie: string;
+    const posts = () => connection.collection('posts');
+    const createPost = async (over: Record<string, unknown> = {}) =>
+      (await http().post('/api/posts').set('Cookie', userCookie).send(validPost(over)).expect(201)).body as { id: string; publishedAt?: string };
+    const patch = (id: string, cookie: string | undefined, body: Record<string, unknown>) => {
+      const r = http().patch(`/api/posts/${id}`).send(body);
+      return cookie ? r.set('Cookie', cookie) : r;
+    };
+
+    beforeAll(async () => {
+      await insertUser('editor-other@example.com', Role.USER);
+      otherCookie = await loginCookie('editor-other@example.com');
+    });
+
+    it('guests get 401 on both endpoints', async () => {
+      const id = new Types.ObjectId().toString();
+      await patch(id, undefined, { title: 'x' }).expect(401);
+      await http().delete(`/api/posts/${id}`).expect(401);
+    });
+
+    it('the author edits only the sent fields; the rest, author and counters stay', async () => {
+      const post = await createPost({ tags: ['a'] });
+      const res = await patch(post.id, userCookie, { title: '  New title ', tags: [' Beach ', 'beach'] }).expect(200);
+      expect(res.body).toMatchObject({ id: post.id, title: 'New title', body: 'We started at the pyramids.', tags: ['beach'], authorId: userId, status: PostStatus.DRAFT });
+      expect(new Date(res.body.updatedAt).getTime()).toBeGreaterThanOrEqual(new Date(res.body.createdAt).getTime());
+      const stored = await posts().findOne({ _id: new Types.ObjectId(post.id) });
+      expect(stored).toMatchObject({ title: 'New title', likeCount: 0, commentCount: 0, isHidden: false });
+    });
+
+    it('replaces images and enforces the same validation as create', async () => {
+      const post = await createPost();
+      const res = await patch(post.id, userCookie, { images: [{ id: 'i1', url: '/uploads/posts/1.jpg' }] }).expect(200);
+      expect(res.body.images).toEqual([{ id: 'i1', url: '/uploads/posts/1.jpg' }]);
+      await patch(post.id, userCookie, { title: '   ' }).expect(400);
+      await patch(post.id, userCookie, { tags: ['1', '2', '3', '4', '5', '6'] }).expect(400);
+      await patch(post.id, userCookie, { status: 'ARCHIVED' }).expect(400);
+      const nul = await patch(post.id, userCookie, { title: null }).expect(400);
+      expect(nul.body.details[0].field).toBe('title');
+    });
+
+    it('rejects an empty body with 400', async () => {
+      const post = await createPost();
+      await patch(post.id, userCookie, {}).expect(400);
+    });
+
+    it('cannot change authorId, isHidden or the counters (forbidNonWhitelisted)', async () => {
+      const post = await createPost();
+      for (const field of [{ authorId: new Types.ObjectId().toString() }, { isHidden: true }, { likeCount: 9 }, { commentCount: 9 }, { publishedAt: '2020-01-01' }]) {
+        await patch(post.id, userCookie, { title: 'ok', ...field }).expect(400);
+      }
+      expect(await posts().findOne({ _id: new Types.ObjectId(post.id) })).toMatchObject({ title: 'Three days in Cairo', isHidden: false, likeCount: 0 });
+    });
+
+    it('sets publishedAt on the first publish and keeps it through DRAFT and re-publish', async () => {
+      const post = await createPost();
+      expect(post.publishedAt).toBeUndefined();
+      const first = (await patch(post.id, userCookie, { status: PostStatus.PUBLISHED }).expect(200)).body;
+      expect(first.status).toBe(PostStatus.PUBLISHED);
+      expect(first.publishedAt).toBeDefined();
+      await new Promise((r) => setTimeout(r, 20));
+      const back = (await patch(post.id, userCookie, { status: PostStatus.DRAFT }).expect(200)).body;
+      expect(back).toMatchObject({ status: PostStatus.DRAFT, publishedAt: first.publishedAt });
+      const again = (await patch(post.id, userCookie, { status: PostStatus.PUBLISHED }).expect(200)).body;
+      expect(again.publishedAt).toBe(first.publishedAt);
+    });
+
+    it('editing a post created as PUBLISHED does not move its publishedAt', async () => {
+      const post = await createPost({ status: PostStatus.PUBLISHED });
+      const res = await patch(post.id, userCookie, { status: PostStatus.PUBLISHED, title: 'again' }).expect(200);
+      expect(res.body.publishedAt).toBe(post.publishedAt);
+    });
+
+    it('the author can edit and delete a hidden post', async () => {
+      const post = await createPost();
+      await posts().updateOne({ _id: new Types.ObjectId(post.id) }, { $set: { isHidden: true } });
+      const res = await patch(post.id, userCookie, { title: 'still mine' }).expect(200);
+      expect(res.body).toMatchObject({ title: 'still mine', isHidden: true });
+      await http().delete(`/api/posts/${post.id}`).set('Cookie', userCookie).expect(204);
+    });
+
+    it("another user's post, an unknown id and a malformed id are all 404 for edit and delete (even for an admin)", async () => {
+      const post = await createPost();
+      const ids = [post.id, new Types.ObjectId().toString(), 'not-an-id', '123456789012'];
+      for (const [cookie, id] of [[otherCookie, ids[0]], [adminCookie, ids[0]], [userCookie, ids[1]], [userCookie, ids[2]], [userCookie, ids[3]]]) {
+        const e = await patch(id, cookie, { title: 'hacked' }).expect(404);
+        expect(e.body.message).toBe('Post not found');
+        await http().delete(`/api/posts/${id}`).set('Cookie', cookie).expect(404);
+      }
+      expect(await posts().findOne({ _id: new Types.ObjectId(post.id) })).toMatchObject({ title: 'Three days in Cairo' });
+    });
+
+    it('validation is checked before ownership only for the body shape; a foreign id with a valid body is still 404', async () => {
+      const post = await createPost();
+      await patch(post.id, otherCookie, {}).expect(400);
+      await patch(post.id, otherCookie, { title: 'x' }).expect(404);
+    });
+
+    it('DELETE returns 204 with no body, removes the post, and a second delete is 404', async () => {
+      const post = await createPost();
+      const res = await http().delete(`/api/posts/${post.id}`).set('Cookie', userCookie).expect(204);
+      expect(res.text).toBe('');
+      expect(await posts().findOne({ _id: new Types.ObjectId(post.id) })).toBeNull();
+      await http().delete(`/api/posts/${post.id}`).set('Cookie', userCookie).expect(404);
+      await patch(post.id, userCookie, { title: 'gone' }).expect(404);
+    });
+
+    it("delete removes the post's comments and likes only, and works when those collections do not exist", async () => {
+      const lonely = await createPost();
+      await http().delete(`/api/posts/${lonely.id}`).set('Cookie', userCookie).expect(204);
+
+      const post = await createPost();
+      const other = await createPost();
+      const postId = new Types.ObjectId(post.id);
+      const otherId = new Types.ObjectId(other.id);
+      await connection.collection('comments').insertMany([{ postId, text: 'a' }, { postId, text: 'b' }, { postId: otherId, text: 'c' }]);
+      await connection.collection('likes').insertMany([{ postId, userId: new Types.ObjectId() }, { postId: otherId, userId: new Types.ObjectId() }]);
+      await http().delete(`/api/posts/${post.id}`).set('Cookie', userCookie).expect(204);
+      expect(await connection.collection('comments').countDocuments({ postId })).toBe(0);
+      expect(await connection.collection('likes').countDocuments({ postId })).toBe(0);
+      expect(await connection.collection('comments').countDocuments({ postId: otherId })).toBe(1);
+      expect(await connection.collection('likes').countDocuments({ postId: otherId })).toBe(1);
+    });
+
+    it("a refused delete (someone else's post) leaves comments and likes untouched", async () => {
+      const post = await createPost();
+      const postId = new Types.ObjectId(post.id);
+      await connection.collection('comments').insertOne({ postId, text: 'keep' });
+      await http().delete(`/api/posts/${post.id}`).set('Cookie', otherCookie).expect(404);
+      expect(await connection.collection('comments').countDocuments({ postId })).toBe(1);
+    });
+  });
 });
