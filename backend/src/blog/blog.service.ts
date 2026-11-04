@@ -1,8 +1,9 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { AuthenticatedUser, MAX_IMAGES_PER_ENTITY, POST_MAX_TAGS, PostStatus } from '../common';
+import { AuthenticatedUser, MAX_IMAGES_PER_ENTITY, paginate, PaginatedResponse, PaginationDto, POST_MAX_TAGS, PostStatus } from '../common';
 import { CreatePostDto } from './dto/create-post.dto';
+import { MyPostRowDto } from './dto/my-post-row.dto';
 import { PostResponseDto } from './dto/post-response.dto';
 import { Post } from './schemas/post.schema';
 
@@ -31,6 +32,18 @@ export class BlogService {
       ...(status === PostStatus.PUBLISHED ? { publishedAt: new Date() } : {}),
     });
     return PostResponseDto.from(post);
+  }
+
+  /**
+   * BLG-03: the caller's own posts, drafts and hidden posts included, newest first.
+   * Ownership is enforced here: the filter is always the caller's id, never a value from the request.
+   */
+  listMine(query: PaginationDto, actor: AuthenticatedUser): Promise<PaginatedResponse<MyPostRowDto>> {
+    return paginate(this.posts, { authorId: new Types.ObjectId(actor.userId) }, query, {
+      map: MyPostRowDto.fromLean,
+      sort: { createdAt: -1, _id: -1 },
+      projection: { body: 0, images: 0, tags: 0 },
+    });
   }
 
   private assertLimit(field: string, items: unknown[] | undefined, max: number): void {

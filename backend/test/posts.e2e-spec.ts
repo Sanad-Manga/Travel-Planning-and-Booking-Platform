@@ -4,7 +4,7 @@ import { getConnectionToken, MongooseModule } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
 import { hashSync } from 'bcryptjs';
 import { MongoMemoryServer } from 'mongodb-memory-server';
-import { Connection } from 'mongoose';
+import { Connection, Types } from 'mongoose';
 import request from 'supertest';
 import { AuthModule } from '../src/auth/auth.module';
 import { BlogModule } from '../src/blog/blog.module';
@@ -201,6 +201,185 @@ describe('BLG-01 create post (e2e)', () => {
     it('creates the indexes needed by listing and search', async () => {
       const keys = (await connection.collection('posts').indexes()).map((i) => Object.keys(i.key).join(','));
       expect(keys).toEqual(expect.arrayContaining(['status,createdAt', 'authorId,status,createdAt', 'tags,status']));
+    });
+  });
+
+  describe('GET /api/posts/mine (BLG-03)', () => {
+    let readerId: string;
+    let readerCookie: string;
+    let otherCookie: string;
+    let emptyCookie: string;
+
+    const seedPosts = (
+      authorId: string,
+      count: number,
+      over: Record<string, unknown> = {},
+    ) =>
+      connection.collection('posts').insertMany(
+        Array.from({ length: count }, (_, i) => ({
+          authorId: new Types.ObjectId(authorId),
+          title: `Post ${i + 1}`,
+          body: 'secret body',
+          tags: ['x'],
+          images: [],
+          status: PostStatus.PUBLISHED,
+          isHidden: false,
+          likeCount: 0,
+          commentCount: 0,
+          createdAt: new Date(Date.UTC(2026, 0, 1, 0, i)),
+          updatedAt: new Date(),
+          ...over,
+        })),
+      );
+
+    beforeAll(async () => {
+      readerId = await insertUser('reader@example.com', Role.USER);
+      await insertUser('other@example.com', Role.USER);
+      readerCookie = await loginCookie('reader@example.com');
+      otherCookie = await loginCookie('other@example.com');
+      await insertUser('empty@example.com', Role.ADMIN);
+      emptyCookie = await loginCookie('empty@example.com');
+      await seedPosts(readerId, 12);
+    });
+
+    it('rejects guests with 401', async () => {
+      await http().get('/api/posts/mine').expect(401);
+    });
+
+    it("returns the caller's own posts, newest first, page size 10 by default, with the pagination envelope", async () => {
+      const res = await http()
+        .get('/api/posts/mine')
+        .set('Cookie', readerCookie)
+        .expect(200);
+      expect(res.body).toMatchObject({
+        page: 1,
+        limit: 10,
+        total: 12,
+        totalPages: 2,
+      });
+      expect(res.body.items).toHaveLength(10);
+      expect(res.body.items[0].title).toBe('Post 12');
+      expect(res.body.items[9].title).toBe('Post 3');
+    });
+
+    it('page 2 holds the remaining rows; a page past the end is empty', async () => {
+      const p2 = await http()
+        .get('/api/posts/mine?page=2')
+        .set('Cookie', readerCookie)
+        .expect(200);
+      expect(p2.body.items.map((i: { title: string }) => i.title)).toEqual([
+        'Post 2',
+        'Post 1',
+      ]);
+      const p3 = await http()
+        .get('/api/posts/mine?page=3')
+        .set('Cookie', readerCookie)
+        .expect(200);
+      expect(p3.body.items).toEqual([]);
+    });
+
+    it('each row shows id, title, status, date, like count and comment count, and no body, images or tags', async () => {
+      const res = await http()
+        .get('/api/posts/mine?limit=1')
+        .set('Cookie', readerCookie)
+        .expect(200);
+      expect(res.body.items[0]).toEqual({
+        id: expect.stringMatching(/^[a-f0-9]{24}$/),
+        title: 'Post 12',
+        status: PostStatus.PUBLISHED,
+        isHidden: false,
+        createdAt: '2026-01-01T00:11:00.000Z',
+        likeCount: 0,
+        commentCount: 0,
+      });
+    });
+
+    it('shows the stored like and comment counts', async () => {
+      await seedPosts(readerId, 1, {
+        title: 'Popular',
+        likeCount: 7,
+        commentCount: 3,
+        createdAt: new Date(Date.UTC(2027, 0, 1)),
+      });
+      const res = await http()
+        .get('/api/posts/mine?limit=1')
+        .set('Cookie', readerCookie)
+        .expect(200);
+      expect(res.body.items[0]).toMatchObject({
+        title: 'Popular',
+        likeCount: 7,
+        commentCount: 3,
+      });
+      await connection.collection('posts').deleteOne({ title: 'Popular' });
+    });
+
+    it('includes drafts and hidden posts of the caller', async () => {
+      await seedPosts(readerId, 1, {
+        title: 'My draft',
+        status: PostStatus.DRAFT,
+        createdAt: new Date(Date.UTC(2027, 0, 1)),
+      });
+      await seedPosts(readerId, 1, {
+        title: 'My hidden',
+        isHidden: true,
+        createdAt: new Date(Date.UTC(2027, 0, 2)),
+      });
+      const res = await http()
+        .get('/api/posts/mine?limit=2')
+        .set('Cookie', readerCookie)
+        .expect(200);
+      expect(res.body.items[0]).toMatchObject({
+        title: 'My hidden',
+        isHidden: true,
+      });
+      expect(res.body.items[1]).toMatchObject({
+        title: 'My draft',
+        status: PostStatus.DRAFT,
+      });
+      await connection
+        .collection('posts')
+        .deleteMany({ title: { $in: ['My draft', 'My hidden'] } });
+    });
+
+    it('a post created through POST /api/posts shows up straight away', async () => {
+      await http()
+        .post('/api/posts')
+        .set('Cookie', otherCookie)
+        .send(validPost({ title: 'Fresh draft' }))
+        .expect(201);
+      const res = await http()
+        .get('/api/posts/mine')
+        .set('Cookie', otherCookie)
+        .expect(200);
+      expect(res.body.items).toHaveLength(1);
+      expect(res.body.items[0]).toMatchObject({
+        title: 'Fresh draft',
+        status: PostStatus.DRAFT,
+      });
+    });
+
+    it("never returns another user's posts, whatever the role", async () => {
+      const other = await http()
+        .get('/api/posts/mine')
+        .set('Cookie', otherCookie)
+        .expect(200);
+      expect(other.body.items.map((i: { title: string }) => i.title)).toEqual([
+        'Fresh draft',
+      ]);
+      const empty = await http().get('/api/posts/mine').set('Cookie', emptyCookie).expect(200);
+      expect(empty.body).toMatchObject({ items: [], total: 0, totalPages: 0 });
+    });
+
+    it('rejects invalid page and limit with the field-level 400, and limit above 50', async () => {
+      const bad = await http()
+        .get('/api/posts/mine?page=0')
+        .set('Cookie', readerCookie)
+        .expect(400);
+      expect(bad.body.details[0].field).toBe('page');
+      await http()
+        .get('/api/posts/mine?limit=51')
+        .set('Cookie', readerCookie)
+        .expect(400);
     });
   });
 });

@@ -44,6 +44,13 @@ export class Post {
   @Prop({ default: false })
   isHidden: boolean;
 
+  // Denormalised counters, kept up to date with $inc by the likes (BLG-05) and comments (BLG-06) code, so lists need no joins.
+  @Prop({ type: Number, default: 0, min: 0 })
+  likeCount: number;
+
+  @Prop({ type: Number, default: 0, min: 0 })
+  commentCount: number;
+
   createdAt?: Date;
   updatedAt?: Date;
 }

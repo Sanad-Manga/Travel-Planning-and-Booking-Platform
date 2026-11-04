@@ -418,3 +418,13 @@ Used the generated airlines module (schema, DTOs, service with the ownership che
 it, running build, lint and all tests, and choosing the open points (who may read, 403 vs 404, 2-3 character code,
 logoUrl as a temporary http(s) URL) that are listed in the PR description for review.
 ================================================
+
+Date: 2026-11-04
+Student: Yusuf Eser
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: BLG-03 (SCRUM) List my own posts incl. drafts
+Prompt:
+Implement ONLY ticket BLG-03 following contracts.md: GET /api/posts/mine returns the caller's own posts including drafts, each row with title, status, date, like count and comment count, paginated with page size 10. List assumptions first.
+How the output was used:
+The assistant added GET /api/posts/mine to the blog controller and BlogService.listMine (filter is always the caller's authorId, newest first, via the shared PaginationDto and paginate()), a MyPostRowDto (id, title, status, isHidden, createdAt, publishedAt?, likeCount, commentCount; no body/images/tags) and e2e tests. Assumptions I accepted: BLG-05/06 do not exist yet, so Post gets denormalised likeCount and commentCount fields (default 0) that those tickets will $inc; "date" is createdAt (plus publishedAt when published); hidden posts are still listed to their author; any logged-in role may call it; the route is declared before any future GET /posts/:id. I ran build, lint, 243 unit tests and 107 e2e tests (in-memory MongoDB) and read every file before committing.
+================================================
