@@ -382,3 +382,18 @@ Prompt:
 Check the reviewer's comment on PR #20: a hotel moderator editing a different hotel must get 403 instead of 404 (hotel profiles are public; new rule in the contracts PR #27). Update the code and the test; everything else stays.
 How the output was used:
 Read the rule in docs/contracts.md on origin/docs/contracts-provider-ownership-403. HotelsService.update now throws 403 when the id is not the moderator's own hotelId (including unknown or malformed ids); 404 remains only if the moderator's own hotel no longer exists. Updated the Swagger error descriptions and the two e2e tests. Re-ran build, lint, unit and e2e tests.
+================================================
+Date: 2026-11-04
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: FLT-01 (SCRUM-23)
+Prompt:
+Implement the FLT-01 airline profile on the NestJS backend: POST /api/airlines (admin creates), GET /api/airlines/:id
+and PATCH /api/airlines/:id (airline moderator edits name, code, logo of their own airline only), following
+docs/contracts.md v1.3, the existing auth guards, and the Jira checklist. Stub the logo until the upload service
+(GEN-08) is merged. Include service and HTTP tests (happy path, validation, wrong role, other airline, duplicate code).
+How the output was used:
+Used the generated airlines module (schema, DTOs, service with the ownership check, controller, tests) after reading
+it, running build, lint and all tests, and choosing the open points (who may read, 403 vs 404, 2-3 character code,
+logoUrl as a temporary http(s) URL) that are listed in the PR description for review.
+================================================
