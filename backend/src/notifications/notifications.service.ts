@@ -29,6 +29,15 @@ export interface NotifyInput {
   link?: string;
 }
 
+/**
+ * True only for an in-app path such as `/bookings/1`. Rejects anything that could
+ * become a clickable `javascript:`/external link on the client - an absolute URL,
+ * a protocol-relative `//host/...` URL, or a bare string with no leading slash.
+ */
+function isAppPath(link: string | undefined): link is string {
+  return typeof link === 'string' && link.startsWith('/') && !link.startsWith('//');
+}
+
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
@@ -46,12 +55,16 @@ export class NotificationsService {
     try {
       if (!Types.ObjectId.isValid(input.userId))
         throw new Error('userId is not a valid id');
+      if (input.link && !isAppPath(input.link))
+        this.logger.warn(
+          `Dropping non-app-path link "${input.link}" on a ${input.type} notification for user ${input.userId}`,
+        );
       await this.model.create({
         userId: new Types.ObjectId(input.userId),
         type: input.type,
         title: input.title,
         message: input.message,
-        ...(input.link ? { link: input.link } : {}),
+        ...(isAppPath(input.link) ? { link: input.link } : {}),
       });
     } catch (error) {
       this.logger.error(

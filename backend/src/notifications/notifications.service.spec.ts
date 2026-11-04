@@ -92,6 +92,35 @@ describe('NotificationsService', () => {
       expect(model.create.mock.calls[0][0]).not.toHaveProperty('link');
     });
 
+    it.each([
+      'javascript:alert(1)',
+      'http://evil.example.com',
+      '//evil.example.com',
+      'bookings/1',
+    ])('drops a link that is not an in-app path: %s', async (link) => {
+      model.create.mockResolvedValue({});
+      await service.notify({
+        userId: USER_ID,
+        type: NotificationType.BOOKING_CANCELLED,
+        title: 't',
+        message: 'm',
+        link,
+      });
+      expect(model.create.mock.calls[0][0]).not.toHaveProperty('link');
+    });
+
+    it('keeps a link that is an in-app path', async () => {
+      model.create.mockResolvedValue({});
+      await service.notify({
+        userId: USER_ID,
+        type: NotificationType.BOOKING_CANCELLED,
+        title: 't',
+        message: 'm',
+        link: '/bookings/1',
+      });
+      expect(model.create.mock.calls[0][0]).toMatchObject({ link: '/bookings/1' });
+    });
+
     it('never throws when saving fails, it logs instead', async () => {
       model.create.mockRejectedValue(new Error('database down'));
 
