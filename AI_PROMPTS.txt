@@ -459,4 +459,13 @@ validator, a service whose update and delete filter on id AND owner in one atomi
 tests. Build, lint, all 313 unit tests and all 126 e2e tests pass locally. The open points (country codes stored
 as the reference-data id, 404 for someone else's itinerary, a 250-country safety cap) are listed in the PR for
 the lead to review.
+
+Date: 2026-11-04
+Student: Yusuf Eser
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: BLG-04 (SCRUM) Edit and delete own posts
+Prompt:
+Implement ONLY ticket BLG-04 following docs/contracts.md: PATCH /api/posts/:id and DELETE /api/posts/:id. An author can edit and delete their own posts; ownership is checked in the service and someone else's (or an unknown or malformed) post returns 404; deleting a post also removes its comments and likes. List assumptions first. Only touch backend/src/blog and posts.e2e-spec.ts.
+How the output was used:
+The assistant added UpdatePostDto (PartialType of CreatePostDto), BlogService.update (one atomic findOneAndUpdate filtered by _id and authorId, $min keeps the first publishedAt, empty body and null values rejected with 400) and BlogService.remove / deletePostAndDependents (reusable for a later admin delete), plus PATCH and DELETE (204) in the controller and 13 e2e tests. Assumptions I accepted: PUBLISHED -> DRAFT is allowed and keeps publishedAt; the author can edit and delete hidden posts; the cascade deletes from the raw collections `comments` and `likes` by ObjectId field `postId` (BLG-05/06 must use these names or change the constant); it is not in a transaction because the in-memory and standalone MongoDB do not support them. I ran build, lint, 243 unit tests and 120 e2e tests (in-memory MongoDB) and read every file before committing.
 ================================================
