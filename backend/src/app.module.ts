@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
+import { AirlinesModule } from './airlines';
 import { AuthModule } from './auth/auth.module';
 import configuration from './config/configuration';
 import { validateEnv } from './config/env.validation';
@@ -25,6 +26,7 @@ import { ReferenceDataModule } from './reference-data/reference-data.module';
     AuthModule,
     NotificationsModule,
     ReferenceDataModule,
+    AirlinesModule,
   ],
 })
 export class AppModule {}

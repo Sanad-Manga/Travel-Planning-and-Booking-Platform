@@ -368,4 +368,16 @@ How the output was used:
 Added the public GET /api/airports controller and response DTOs, and extended ReferenceDataService with listAirports using shared database-side pagination, stable IATA/_id ordering, bounded city/country reference queries, explicit response mapping and controlled errors for inconsistent reference data. Registered the controller in ReferenceDataModule and added only the authorized ReferenceDataModule import and imports-array entry to AppModule, preserving Payments/Auth/Notifications registration and all existing lookup methods.
 Added 18 actual-AppModule integration tests covering official CSV values, guest access with real global guards, DTO fields and ID handling, empty results, 63 test airports, default/custom/maximum pagination, invalid/unknown queries, deterministic pages, dynamic MongoDB updates, missing references, safe database errors, absent mutation routes, existing module registration and generated Swagger over HTTP. The new suite disables dotenv/config file loading, supplies synthetic JWT configuration, and connects only to its own disposable MongoDB server.
 Verification ran in a temporary backend copy without .env, using existing dependencies without installation: focused airports suite PASS (18 tests); npm run build PASS; npm test -- --runInBand PASS (266 tests across 20 suites); npm run lint PASS after fixing a test-formatting lint error; npm run test:e2e -- --runInBand PASS (81 tests across six suites). Read the live Jira checklist without updating it and documented its evidence plus PR-template preparation in the module README. Documented that GEN-12 upserts can retain obsolete records after dataset replacement; FLT-02 adds no deletion/migration. Final repository checks compare hashes, inspect tracked and untracked changes, and check whitespace; no schemas, CSVs, dependencies, common code or other feature modules are changed. No shared database, production seed, commit, push or PR update was used.
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: FLT-01 (SCRUM-23)
+Prompt:
+Implement the FLT-01 airline profile on the NestJS backend: POST /api/airlines (admin creates), GET /api/airlines/:id
+and PATCH /api/airlines/:id (airline moderator edits name, code, logo of their own airline only), following
+docs/contracts.md v1.3, the existing auth guards, and the Jira checklist. Stub the logo until the upload service
+(GEN-08) is merged. Include service and HTTP tests (happy path, validation, wrong role, other airline, duplicate code).
+How the output was used:
+Used the generated airlines module (schema, DTOs, service with the ownership check, controller, tests) after reading
+it, running build, lint and all tests, and choosing the open points (who may read, 403 vs 404, 2-3 character code,
+logoUrl as a temporary http(s) URL) that are listed in the PR description for review.
 ================================================
