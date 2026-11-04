@@ -5,6 +5,7 @@ import { AirlinesModule } from './airlines';
 import { AuthModule } from './auth/auth.module';
 import configuration from './config/configuration';
 import { validateEnv } from './config/env.validation';
+import { ItinerariesModule } from './itineraries';
 import { NotificationsModule } from './notifications';
 import { PaymentsModule } from './payments';
 import { ReferenceDataModule } from './reference-data/reference-data.module';
@@ -27,6 +28,7 @@ import { ReferenceDataModule } from './reference-data/reference-data.module';
     NotificationsModule,
     ReferenceDataModule,
     AirlinesModule,
+    ItinerariesModule,
   ],
 })
 export class AppModule {}
