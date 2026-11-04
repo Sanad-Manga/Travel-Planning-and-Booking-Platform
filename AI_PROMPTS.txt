@@ -355,6 +355,13 @@ Generated the backend/src/hotels module (schema, DTOs, service, controller, modu
 
 ================================================
 Date: 2026-11-04
+Student: Yusuf Eser
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: BLG-01 (SCRUM) Create post as Draft or Published
+Prompt:
+Implement ONLY ticket BLG-01 following docs/contracts.md (repo copy, plus a check of the v1.3 draft): POST /api/posts, a registered user creates a post with required title and body, optional tags and images, saved as Draft or Published; missing title/body gives a field-level 400; guests get 401; Post stores authorId and isHidden (default false); schema indexed for later listing/search. List assumptions first, use the HTL-01 hotels module as the pattern, only touch backend/src/blog, a one-line registration in app.module.ts and backend/test/posts.e2e-spec.ts.
+How the output was used:
+The assistant created backend/src/blog (module, controller, service, Post schema with indexes on status/createdAt, authorId/status/createdAt, tags/status and a text index, create-post and post-response DTOs) and the e2e test. Assumptions I accepted: status is optional and defaults to DRAFT; title max 150, body max 10000 chars; tags normalised (trim, lowercase, dedupe) before the 5-tag/30-char limit; images are unverified {id,url} references (max 5) until UploadService/BLG-10 exists; any logged-in role may post; authorId comes from the session and authorId/isHidden in the body are rejected. I ran build, lint, unit tests and e2e tests (in-memory MongoDB) and read every file before committing.
 Student: Ahmed Sanad
 Tool: Claude (Claude Code, Sonnet 5.5)
 Related Requirement: GEN-11 / SCRUM-33 (booking lifecycle), contracts v1.3 confirmation rule
@@ -368,6 +375,11 @@ I ran lint and the 248 unit tests (the e2e suite does not touch this code).
 Date: 2026-11-04
 Student: Yusuf Eser
 Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: BLG-01 (PR review fixes)
+Prompt:
+Fix the scrum master's review of PR #21: merge the latest develop (keep both AI_PROMPTS.txt sections), restrict post image urls to an /uploads/ path until the upload service (GEN-08 / BLG-10) exists, and prepare the PR base and description changes.
+How the output was used:
+Merged origin/develop (includes #22) and resolved the AI_PROMPTS.txt conflict by keeping both entries. Added a Matches rule on PostImageDto.url (only /uploads/... paths, no scheme, host or ".."), plus an e2e test. Re-ran build, lint, unit and e2e tests. The PR base and description are changed by hand on GitHub.
 Related Requirement: HTL-01 (PR review fixes)
 Prompt:
 Fix the scrum master's review of PR #20: merge the latest develop (keep both AI_PROMPTS.txt sections), restrict hotel photo urls to an /uploads/ path until the upload service (GEN-08) exists, and prepare the PR base and description changes.

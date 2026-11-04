@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AirlinesModule } from './airlines';
 import { AuthModule } from './auth/auth.module';
+import { BlogModule } from './blog/blog.module';
 import configuration from './config/configuration';
 import { validateEnv } from './config/env.validation';
 import { NotificationsModule } from './notifications';
@@ -24,6 +25,7 @@ import { ReferenceDataModule } from './reference-data/reference-data.module';
       useFactory: (config: ConfigService) => ({ uri: config.getOrThrow<string>('MONGODB_URI') }),
     }),
     PaymentsModule,
+    BlogModule,
     AuthModule,
     NotificationsModule,
     HotelsModule,
