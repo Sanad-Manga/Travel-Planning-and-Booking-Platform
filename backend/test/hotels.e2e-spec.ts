@@ -103,7 +103,7 @@ describe('HTL-01 hotel profile (e2e)', () => {
 
   describe('POST /api/hotels', () => {
     it('admin creates a hotel; country comes from the city, hotel is active, id is a string', async () => {
-      const res = await http().post('/api/hotels').set('Cookie', admin).send(validHotel({ name: 'Cairo Palace', photos: [{ id: 'p1', url: '/u/p1.jpg' }] })).expect(201);
+      const res = await http().post('/api/hotels').set('Cookie', admin).send(validHotel({ name: 'Cairo Palace', photos: [{ id: 'p1', url: '/uploads/hotels/p1.jpg' }] })).expect(201);
       expect(res.body).toMatchObject({
         name: 'Cairo Palace',
         cityId: 'CAI',
@@ -111,7 +111,7 @@ describe('HTL-01 hotel profile (e2e)', () => {
         starRating: 4,
         isActive: true,
         amenities: ['Wifi', 'Pool'],
-        photos: [{ id: 'p1', url: '/u/p1.jpg' }],
+        photos: [{ id: 'p1', url: '/uploads/hotels/p1.jpg' }],
       });
       expect(typeof res.body.id).toBe('string');
       expect(res.body._id).toBeUndefined();
@@ -141,8 +141,15 @@ describe('HTL-01 hotel profile (e2e)', () => {
       expect(res.body.details).toEqual([{ field: 'cityId', message: 'cityId must be a seeded city id' }]);
     });
 
+    it('400 for photo urls that are not an /uploads/ path (external, scheme, traversal)', async () => {
+      for (const url of ['https://evil.example/x.jpg', '//evil.example/x.jpg', 'javascript:alert(1)', '/uploads/../etc/passwd', '/other/x.jpg']) {
+        const res = await http().post('/api/hotels').set('Cookie', admin).send(validHotel({ name: 'Url Inn', photos: [{ id: 'p', url }] })).expect(400);
+        expect(res.body.details[0].field).toBe('photos.0.url');
+      }
+    });
+
     it('400 for more than 5 photos', async () => {
-      const photos = Array.from({ length: 6 }, (_, i) => ({ id: `p${i}`, url: `/u/${i}.jpg` }));
+      const photos = Array.from({ length: 6 }, (_, i) => ({ id: `p${i}`, url: `/uploads/hotels/${i}.jpg` }));
       await http().post('/api/hotels').set('Cookie', admin).send(validHotel({ name: 'Photo Inn', photos })).expect(400);
     });
 
@@ -184,9 +191,13 @@ describe('HTL-01 hotel profile (e2e)', () => {
       expect(res.body).toMatchObject({ cityId: 'DXB', countryCode: 'AE' });
     });
 
+    it('rejects a non-upload photo url on PATCH', async () => {
+      await http().patch(`/api/hotels/${hotelA}`).set('Cookie', modA).send({ photos: [{ id: 'x', url: 'https://evil.example/x.jpg' }] }).expect(400);
+    });
+
     it('replaces photos and can clear them', async () => {
-      const set = await http().patch(`/api/hotels/${hotelA}`).set('Cookie', modA).send({ photos: [{ id: 'a', url: '/u/a.png' }] }).expect(200);
-      expect(set.body.photos).toEqual([{ id: 'a', url: '/u/a.png' }]);
+      const set = await http().patch(`/api/hotels/${hotelA}`).set('Cookie', modA).send({ photos: [{ id: 'a', url: '/uploads/hotels/a.png' }] }).expect(200);
+      expect(set.body.photos).toEqual([{ id: 'a', url: '/uploads/hotels/a.png' }]);
       const cleared = await http().patch(`/api/hotels/${hotelA}`).set('Cookie', modA).send({ photos: [] }).expect(200);
       expect(cleared.body.photos).toEqual([]);
     });
@@ -196,7 +207,7 @@ describe('HTL-01 hotel profile (e2e)', () => {
       await http().patch(`/api/hotels/${hotelA}`).set('Cookie', modA).send({ starRating: 0 }).expect(400);
       await http().patch(`/api/hotels/${hotelA}`).set('Cookie', modA).send({ cityId: 'NOPE' }).expect(400);
       await http().patch(`/api/hotels/${hotelA}`).set('Cookie', modA).send({ isActive: false }).expect(400);
-      const photos = Array.from({ length: 6 }, (_, i) => ({ id: `p${i}`, url: `/u/${i}.jpg` }));
+      const photos = Array.from({ length: 6 }, (_, i) => ({ id: `p${i}`, url: `/uploads/hotels/${i}.jpg` }));
       await http().patch(`/api/hotels/${hotelA}`).set('Cookie', modA).send({ photos }).expect(400);
     });
 

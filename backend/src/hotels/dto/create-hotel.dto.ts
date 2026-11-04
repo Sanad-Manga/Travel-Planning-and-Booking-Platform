@@ -8,6 +8,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  Matches,
   Max,
   MaxLength,
   Min,
@@ -48,10 +49,15 @@ export class HotelPhotoDto {
   @MaxLength(100)
   id: string;
 
-  @ApiProperty({ description: 'Url returned by the Upload service (GEN-08).', example: '/uploads/hotels/6730a1f2.jpg' })
+  @ApiProperty({
+    description: 'Url returned by the Upload service (GEN-08). Must be an upload path (/uploads/...) until the service exists.',
+    example: '/uploads/hotels/6730a1f2.jpg',
+  })
   @IsString()
   @IsNotEmpty()
   @MaxLength(500)
+  // Stub until the Upload service (GEN-08) can vouch for ids: only a local /uploads/ path, no scheme, host or "..".
+  @Matches(/^\/uploads\/(?!.*\.\.)[\w\-./]+$/, { message: 'url must be an upload path such as /uploads/hotels/photo.jpg' })
   url: string;
 }
 
