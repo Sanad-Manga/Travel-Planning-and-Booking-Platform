@@ -148,6 +148,7 @@ Payments owns the **hold-expiry sweep** (cron every minute plus a lazy expiry ch
 6. Explain each non-trivial part briefly. The student must be able to explain every line to their instructors.
 7. End every answer with a ready-to-paste `AI_PROMPTS.txt` entry (date, tool, requirement ID, prompt summary, how the output was used).
 8. Never ask for or use secrets, `.env` content, or real personal data.
+9. **Definition of done.** Every Jira ticket has a "Checklist (all checked before the PR is opened)" section. Before you tell the student the code is ready for a PR, go through that checklist item by item and state for each item how the code satisfies it (or what is still missing). Do not suggest opening the PR while any item, or any item of `.github/pull_request_template.md`, is unchecked. The PR check fails if a `- [ ]` is left in the PR description.
 
 ## 11. Reviewer checklist (what the Reviewer AI will check)
 
