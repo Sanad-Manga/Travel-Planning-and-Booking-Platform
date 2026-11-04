@@ -2,8 +2,9 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
-import { JwtAuthGuard, RolesGuard } from '../common';
+import { ACCOUNT_STATUS_CHECKER, JwtAuthGuard, RolesGuard } from '../common';
 import { UsersModule } from '../users/users.module';
+import { UsersService } from '../users/users.service';
 import { ACCESS_TOKEN_TTL_SECONDS } from './auth-cookies';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -26,6 +27,8 @@ import { readJwtSecrets } from './jwt-secrets';
   controllers: [AuthController],
   providers: [
     AuthService,
+    // What JwtAuthGuard uses to confirm the account is still ACTIVE on every request (UsersService.isActive).
+    { provide: ACCOUNT_STATUS_CHECKER, useExisting: UsersService },
     // Global guards run in the order they are listed here: first authenticate, then check the role.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },

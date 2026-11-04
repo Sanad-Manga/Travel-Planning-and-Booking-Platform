@@ -320,3 +320,15 @@ How the output was used:
 The assistant recommended CI only (no CD, since Milestone 1 has no deploy target) and drafted .github/workflows/ci.yml. It runs on every pull request into develop and repeats the manual review steps: npm ci (which catches an out-of-sync package-lock.json, as happened in PR #12), build, lint, unit tests and e2e tests, on Node 22 with the mongod test binary cached. No secrets are needed because the tests use mongodb-memory-server.
 I ran the same five steps locally on develop before opening the PR: build and lint clean, 234 unit tests and 75 e2e tests pass. The "backend" check can be made required in the develop ruleset once the first run is green.
 ================================================
+
+================================================
+Date: 2026-11-04
+Student: Ahmed Sanad
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: Auth hardening (follow-up to ACC-04 / SCRUM-15; related to ACC-06 / SCRUM-38 and suspension in ACC-13..16)
+Prompt:
+A live test showed a suspended user's existing access cookie still returned 200 on every endpoint except /auth/me for up to 15 minutes, because JwtAuthGuard only trusted the signed token. The assistant described three options (accept and document, check the account status on every request, shorten the token); I answered "go with the 2nd option" and then "Yes, build it".
+How the output was used:
+JwtAuthGuard now asks an injected AccountStatusChecker (ACCOUNT_STATUS_CHECKER token in common/guards, provided in AuthModule by UsersService.isActive) whether the account is still ACTIVE, one status-only lookup by _id per request. Suspended, deactivated, deleted or malformed-id accounts get 401; a failed lookup fails closed (500). Role, airlineId and hotelId still come from the token until the next login or refresh. Public routes do not hit the database. docs/contracts.md section 4 updated.
+I ran clean npm ci, build, lint, 243 unit tests and 81 e2e tests (new tests: guard unit tests, UsersService.isActive, and e2e for suspended, deactivated, reactivated, deleted-user and suspended-admin cases) and repeated the live suspended-cookie check against the rebuilt app.
+================================================
