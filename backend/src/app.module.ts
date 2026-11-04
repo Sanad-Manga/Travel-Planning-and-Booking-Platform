@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AuthModule } from './auth/auth.module';
+import { BlogModule } from './blog/blog.module';
 import configuration from './config/configuration';
 import { validateEnv } from './config/env.validation';
 import { NotificationsModule } from './notifications';
@@ -23,6 +24,7 @@ import { PaymentsModule } from './payments';
     PaymentsModule,
     AuthModule,
     NotificationsModule,
+    BlogModule,
   ],
 })
 export class AppModule {}
