@@ -78,6 +78,38 @@ export function runBookingProviderConformanceTests(
     ).resolves.toBe(false);
   });
 
+  it('markConfirmed confirms a PENDING_PAYMENT booking, and calling it again is a no-op that still succeeds', async () => {
+    const { provider } = await makeFixture();
+    await expect(
+      provider.markConfirmed(CONFORMANCE_BOOKING_ID, 'pi_test_1'),
+    ).resolves.toBe(true);
+    expect((await provider.getStatus(CONFORMANCE_BOOKING_ID))?.status).toBe(
+      BookingStatus.CONFIRMED,
+    );
+    await expect(
+      provider.markConfirmed(CONFORMANCE_BOOKING_ID, 'pi_test_1'),
+    ).resolves.toBe(true);
+  });
+
+  it('markConfirmed returns false, changing nothing, for an unknown or already expired booking', async () => {
+    const { provider, unknownId } = await makeFixture();
+    await expect(provider.markConfirmed(unknownId, 'pi_test_1')).resolves.toBe(
+      false,
+    );
+
+    await provider.applyStatus(
+      CONFORMANCE_BOOKING_ID,
+      BookingStatus.PENDING_PAYMENT,
+      BookingStatus.EXPIRED,
+    );
+    await expect(
+      provider.markConfirmed(CONFORMANCE_BOOKING_ID, 'pi_test_1'),
+    ).resolves.toBe(false);
+    expect((await provider.getStatus(CONFORMANCE_BOOKING_ID))?.status).toBe(
+      BookingStatus.EXPIRED,
+    );
+  });
+
   it('findExpiredHolds only returns a PENDING_PAYMENT booking whose hold is at or before `now`', async () => {
     const { provider } = await makeFixture();
     const due = await provider.findExpiredHolds(

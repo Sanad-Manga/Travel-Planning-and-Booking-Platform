@@ -19,7 +19,7 @@ type DueOutcome = 'skipped' | 'expired' | 'confirmed';
 
 /**
  * Owns every booking status change (GEN-11). Booking owners never set `status` themselves:
- * they call `transition()`, and read paths call `expireIfDue()` (the lazy expiry check).
+ * they call `transition()` (or `confirmPaid()` for a paid booking), and read paths call `expireIfDue()` (the lazy expiry check).
  */
 @Injectable()
 export class BookingLifecycle {
@@ -43,6 +43,13 @@ export class BookingLifecycle {
     bookingId: string,
     to: BookingStatus,
   ): Promise<void> {
+    if (to === BookingStatus.CONFIRMED) {
+      // contracts v1.3: a bare status write skips the payment reference, the held-to-booked
+      // conversion and the notification. Confirmation always goes through confirmPaid().
+      throw new ConflictException(
+        'Use confirmPaid() to confirm a booking: it must store the payment reference',
+      );
+    }
     const provider = this.providers.get(type);
 
     const current = await provider.getStatus(bookingId);
@@ -64,6 +71,27 @@ export class BookingLifecycle {
   }
 
   /**
+   * Confirm a paid booking through its owner's `markConfirmed(id, paymentRef)`. Safe to call twice
+   * for the same payment (the webhook and the late-paid expiry path may both arrive). 404 if the
+   * booking does not exist, 409 if it is no longer PENDING_PAYMENT (e.g. already expired).
+   */
+  async confirmPaid(
+    type: BookingType,
+    bookingId: string,
+    paymentRef: string,
+  ): Promise<void> {
+    const provider = this.providers.get(type);
+    if (!(await provider.getStatus(bookingId))) {
+      throw new NotFoundException(`${type} booking not found`);
+    }
+    if (!(await provider.markConfirmed(bookingId, paymentRef))) {
+      throw new ConflictException(
+        'Booking can no longer be confirmed; it is not waiting for payment',
+      );
+    }
+  }
+
+  /**
    * A PENDING_PAYMENT booking's hold has run out: decide what happens to it via PaymentActivity
    * rather than expiring unconditionally, since a payment may be in flight and protected by the
    * pause (see payment-activity.ts). Shared by the lazy check and the sweep.
@@ -73,13 +101,20 @@ export class BookingLifecycle {
     bookingId: string,
     now: Date,
   ): Promise<DueOutcome> {
-    const result = await this.paymentActivity.prepareExpiry(type, bookingId, now);
+    const result = await this.paymentActivity.prepareExpiry(
+      type,
+      bookingId,
+      now,
+    );
     if (result === 'SKIP') return 'skipped';
 
-    const to = result === 'PAID' ? BookingStatus.CONFIRMED : BookingStatus.EXPIRED;
     try {
-      await this.transition(type, bookingId, to);
-      return result === 'PAID' ? 'confirmed' : 'expired';
+      if (result === 'EXPIRE') {
+        await this.transition(type, bookingId, BookingStatus.EXPIRED);
+        return 'expired';
+      }
+      await this.confirmPaid(type, bookingId, result.paymentRef);
+      return 'confirmed';
     } catch (error) {
       // Already moved or gone by the time we tried to write: nothing left to do here.
       if (
