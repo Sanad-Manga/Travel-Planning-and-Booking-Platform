@@ -45,6 +45,51 @@ clean `npm ci` myself, and checked that Swagger opens at /api/docs and that a ba
 
 ================================================
 Date: 2026-11-03
+Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: GEN-11 (SCRUM-33)
+Prompt:
+Pasted docs/contracts.md, a context file for my module (Payments & Policies) and the SCRUM-33 ticket text, then:
+"Implement only this ticket, following contracts.md. List your assumptions first."
+Follow-ups: asked what the contract is missing for the ticket (no way to save a status change or to find expired holds),
+then to build the state machine and hold-expiry sweep against a stub of those missing pieces.
+
+How the output was used:
+Used the generated BookingLifecycle service, transition table, provider registry and Jest tests in backend/src/payments.
+Kept the contract's four allowed transitions exactly. The provider interface methods getStatus, applyStatus and
+findExpiredHolds are proposals (the contract does not have them) and are waiting for the lead's answer before merge.
+The only other file touched is app.module.ts (one import for PaymentsModule).
+
+Date: 2026-11-03
+Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code, Sonnet 5)
+Related Requirement: GEN-11 (SCRUM-33)
+Prompt:
+Pasted the lead's PR #8 review (approved the 3 proposed interface methods with one change:
+getStatus/applyStatus/findExpiredHolds approved; findExpiredHolds gets an afterId cursor;
+applyStatus now releases inventory itself, in one transaction, when `to` is EXPIRED or CANCELLED,
+replacing the separate markExpired step; BookingLifecycleProvider renamed to one BookingProvider
+interface) plus a new rule: a booking whose payment is PROCESSING is protected from expiry for up
+to PAYMENT_PAUSE_MAX_MINUTES (5), via a new PaymentActivity.prepareExpiry() the sweep/expireIfDue
+call before ever expiring a hold. Asked for one new commit on the branch with build/lint/test
+output and this entry.
+
+How the output was used:
+Renamed the interface to BookingProvider; removed markExpired (and the "release can fail" handling
+that went with it) since applyStatus now owns the release; added findExpiredHolds's afterId cursor
+and used it in the sweep so a skipped or endlessly-failing booking can never be re-fetched forever
+or block bookings further down the list; added PaymentActivity (payment-activity.ts) with a stub
+that always returns EXPIRE (no Stripe yet - PAY-01 provides the real one) wired into PaymentsModule
+behind the PAYMENT_ACTIVITY token; added a shared BookingProvider conformance test
+(booking-provider.conformance.ts) that Flights B / Hotels B can run against their real
+implementations, self-tested here against a FakeBookingProvider.
+One honest gap: the PROCESSING-PaymentIntent timing (pause, cap, cancel-then-check-status) is
+PAY-01's actual logic, which doesn't exist yet. The new tests here drive BookingLifecycle through
+each of PaymentActivity's three possible answers (SKIP/PAID/EXPIRE) via a configurable fake, which
+tests my code's reaction to that signal correctly, but is not a real test of Stripe's timing -
+I said so plainly in the PR/Jira reply rather than implying it's been tested end to end.
+I ran build, lint and the unit tests myself on a clean checkout: build and lint clean, 58/58 tests
+passing (booking-lifecycle.service.spec.ts, payments.module.spec.ts, booking-provider.conformance.spec.ts).
 Student: Ziad Mohamed
 Tool: Claude (claude.ai chat)
 Related Requirement: ACC-01, ACC-04, ACC-19, GEN-13
@@ -52,9 +97,7 @@ Prompt:
 Asked Claude to read contracts.md, the project description PDF, the Jira Sprint 1 tickets and the repo skeleton, then plan the Auth & Accounts implementation and write this Claude Code prompt.
 How the output was used:
 Used the plan (user/auth module split, guard design, cookie and login decisions) as the basis for the implementation prompt below.
-================================================
 
-================================================
 Date: 2026-11-03
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
@@ -63,9 +106,7 @@ Prompt:
 Implement SCRUM-14 (ACC-01, register with email, password and consent) after reading docs/contracts.md and the skeleton: users module (User schema, UsersService with findByEmail/findById/create), auth module, RegisterDto, UserResponseDto, POST /api/auth/register with Swagger decorators, unit tests and an e2e test with mongodb-memory-server. Design decisions given: role always USER, 409 with a field-level detail for a duplicate email, bcryptjs salted hash, never return the hash, no cookies on register.
 How the output was used:
 Generated the users and auth modules, the DTOs, the unit tests and the e2e test; lint, build, unit and e2e tests were run locally. I must review: the field name acceptTerms for consent (the contract does not name it), the 72-character password maximum (bcrypt ignores bytes beyond 72), the bcrypt cost of 10, and that the only edit outside my modules is the AuthModule import in app.module.ts. I will run the Swagger tests manually before the PR is merged.
-================================================
 
-================================================
 Date: 2026-11-03
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
@@ -74,9 +115,7 @@ Prompt:
 Implement SCRUM-15 (ACC-04, login plus the shared guards) on top of the registration branch: POST /api/auth/login (password checked before status, generic 401, 403 for suspended, dummy-hash comparison for unknown emails), GET /api/auth/me, global JwtAuthGuard with @Public(), RolesGuard with @Roles(), @CurrentUser(), JWT via @nestjs/jwt (no passport) with the access token in an httpOnly cookie set through one shared helper, JWT secrets validated at start-up. Tests: me without cookie 401, login sets an httpOnly cookie, wrong password 401, suspended 403, role guard 403 and 200, public route without a cookie.
 How the output was used:
 Generated the guards, decorators and interfaces in common/ (additions only), the login and me endpoints, the cookie helper, the secret validation and the unit and e2e tests; lint, build, unit and e2e tests were run locally. I must review: the 15-minute access token, that GET /me also returns 401 when the account is no longer ACTIVE, that the only edits to existing common/ lines are the exports in index.ts and the cookie-name comment in constants.ts, and the lead must approve the common/ additions. Branch is based on the ACC-01 branch, so its PR must be retargeted to develop after ACC-01 merges.
-================================================
 
-================================================
 Date: 2026-11-03
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
@@ -85,9 +124,7 @@ Prompt:
 Implement SCRUM-16 (ACC-19, tokens in httpOnly cookies only) on top of the login branch: issue a refresh token cookie (httpOnly, SameSite Lax, path /api/auth, max age 30 minutes, secure from config) next to the access cookie through the one shared cookie helper, and add tests that assert the Set-Cookie flags, that no token appears in any response body, and that Swagger cookie auth is wired. No refresh endpoint and no logout yet.
 How the output was used:
 Generated the refresh token signing (separate secret), the cookie helper changes and the cookie e2e tests; lint, build, unit and e2e tests were run locally. I must review: the refresh token only carries the user id, and nothing can use it yet (the refresh endpoint, revocation and logout are SCRUM-38 in Sprint 2). The Swagger "Try it out" check is automated against the generated OpenAPI document and a cookie-jar login flow; I will confirm it manually in the browser at /api/docs.
-================================================
 
-================================================
 Date: 2026-11-03
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
@@ -96,9 +133,7 @@ Prompt:
 Implement SCRUM-17 (GEN-13, backend-enforced validation and salted hashing): write a short docs/api/validation-pattern.md (how to write a DTO, how errors look, where business rules live) using the register DTO as the example, plus tests proving field-level errors, rejection of extra fields, and that two identical passwords produce different hashes that are not the plaintext. Keep it small and do not duplicate what the register PR already covers.
 How the output was used:
 Generated the pattern document and one extra e2e test file (wrong types, unknown field on login, empty body, 72-character limit, identical passwords giving different hashes); lint, build, unit and e2e tests were run locally. I must review the document against how the team actually writes DTOs, and the lead should confirm it is the pattern everyone copies. The register tests already covered field-level errors and extra fields, so they are linked from the document instead of duplicated.
-================================================
 
-================================================
 Date: 2026-11-03
 Student: Ziad Mohamed
 Tool: Claude (claude.ai chat)
@@ -107,9 +142,7 @@ Prompt:
 Asked Claude to review the Sprint 1 Claude Code report and the register DTO/auth code.
 How the output was used:
 It found that @MaxLength(72) counts characters while bcrypt's limit is 72 bytes, and I used that finding to write the fix prompt.
-================================================
 
-================================================
 Date: 2026-11-03
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
@@ -118,9 +151,7 @@ Prompt:
 The fix prompt for the 72-byte password limit: replace the character-based @MaxLength(72) on the register password with a UTF-8 byte-based validator, fix the Swagger metadata, replace the old test with byte-based tests (ASCII, Arabic), and update the validation pattern document.
 How the output was used:
 Added a reusable @MaxByteLength decorator (auth/validators) with a unit test, a PASSWORD_MAX_BYTES constant in auth/auth.constants.ts, used it in RegisterDto (other password rules untouched, the letter rule still accepts Latin letters only), removed maxLength from the Swagger field, replaced the old 72-character e2e test with four byte-based cases and updated docs/api/validation-pattern.md. Lint, build, unit and e2e tests were run locally. I should review the error message wording and confirm the letter-rule question with the lead.
-================================================
 
-================================================
 Date: 2026-11-03
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
@@ -129,9 +160,7 @@ Prompt:
 Implement the lead's additional request on PR #7: add POST /api/auth/refresh (ACC-06, session expiry) as a stateless sliding 30-minute session. Read the refresh cookie, verify it with the refresh secret, re-read the user and their role from the database (401 if missing or not ACTIVE), issue a new access and a new refresh token, clear both cookies on any failure, add a random jti to refresh tokens, and make startup fail when the access and refresh secrets are equal. No logout, no revocation, no Sprint 2 work.
 How the output was used:
 Generated AuthService.refresh, the controller route, a clearAuthCookies helper built from the same option builders as setAuthCookies, the jti claim, the equal-secrets check and the unit and e2e tests. A clean npm ci, build, lint, unit tests and e2e tests were run locally. I must review: the refresh route is @Public and the controller clears the cookies when the service throws 401, the jti is not stored anywhere yet (SCRUM-38 will use it), and that everyone's local .env must now have two DIFFERENT JWT secrets or the app will not start.
-================================================
 
-================================================
 Date: 2026-11-03
 Student: Ziad Mohamed
 Tool: Claude (claude.ai chat)
@@ -140,9 +169,7 @@ Prompt:
 I asked why Arabic passwords were rejected on register.
 How the output was used:
 Claude explained that the letter rule /[A-Za-z]/ only accepts Latin letters. I confirmed it with a node one-liner and used that to write the fix prompt.
-================================================
 
-================================================
 Date: 2026-11-03
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
@@ -151,9 +178,7 @@ Prompt:
 Change the register password letter rule from /[A-Za-z]/ to the Unicode-aware /\p{L}/u so Arabic letters count, keep every other rule (minimum length, digit rule, 72-byte maximum), add e2e tests for Arabic and Latin passwords, digits only, letters only and the 72-byte limit on Arabic input, and update the validation pattern document.
 How the output was used:
 Changed the one @Matches rule in RegisterDto (it was the only place with that rule in backend/src/auth/), updated the code sample in docs/api/validation-pattern.md and added a Unicode describe block to test/validation.e2e-spec.ts. Build, lint, unit and e2e tests were run locally. I must review that \p{L} also accepts letters from any other script, and the digit rule is unchanged (\d matches only 0-9).
-================================================
 
-================================================
 Date: 2026-11-03
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
@@ -162,9 +187,7 @@ Prompt:
 Asked why VS Code shows an error in backend/tsconfig.json and to solve it.
 How the output was used:
 The error came from VS Code's newer bundled TypeScript warning that the baseUrl option is deprecated. Nothing in the project uses baseUrl (all imports are relative), so it was removed. The ignoreDeprecations workaround was not used because the project's pinned TypeScript 5.9.3 rejects that value. Build, lint and unit tests pass. tsconfig.json belongs to the skeleton, so the lead should be told about this one-line change.
-================================================
 
-================================================
 Date: 2026-11-03
 Student: Ahmed Sanad
 Tool: Claude (Claude Code, Sonnet 5.5), used as a code reviewer
