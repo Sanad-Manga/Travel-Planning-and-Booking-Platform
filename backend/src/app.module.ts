@@ -1,8 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
+import { AuthModule } from './auth/auth.module';
 import configuration from './config/configuration';
 import { validateEnv } from './config/env.validation';
+import { PaymentsModule } from './payments';
 
 // Feature modules (auth, flights, hotels, ...) are added here by their owners in their own PRs.
 @Module({
@@ -17,6 +19,8 @@ import { validateEnv } from './config/env.validation';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({ uri: config.getOrThrow<string>('MONGODB_URI') }),
     }),
+    PaymentsModule,
+    AuthModule,
   ],
 })
 export class AppModule {}

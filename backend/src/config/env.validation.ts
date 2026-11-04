@@ -37,7 +37,8 @@ export function validateEnv(raw: Record<string, unknown>): Record<string, unknow
     PORT: port,
     FRONTEND_URL: String(raw.FRONTEND_URL ?? 'http://localhost:3000'),
     MONGODB_URI: mongodbUri,
-    COOKIE_SECURE: String(raw.COOKIE_SECURE ?? 'false') === 'true',
+    // Secure cookies are the default in production (PDF 8.1); local http dev opts out with COOKIE_SECURE=false.
+    COOKIE_SECURE: String(raw.COOKIE_SECURE ?? String(raw.NODE_ENV === 'production')) === 'true',
     HOLD_MINUTES: holdMinutes,
     PLATFORM_CURRENCY: String(raw.PLATFORM_CURRENCY ?? 'USD'),
   };
