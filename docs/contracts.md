@@ -48,6 +48,7 @@
 - Session expires after 30 minutes without authenticated requests. Logout clears cookies and revokes the refresh token.
 - Roles (`common/enums`): `USER`, `ADMIN`, `AIRLINE_MODERATOR`, `HOTEL_MODERATOR`.
 - Account status: `ACTIVE`, `SUSPENDED`, `DEACTIVATED`. Only `ACTIVE` can log in.
+- **The global `JwtAuthGuard` checks account status on every authenticated request.** A suspended or deactivated user's existing access cookie gets 401 on any endpoint immediately, not after the token expires (SCRUM-122).
 - The authenticated principal (`@CurrentUser()`) is `{ userId, role, airlineId?, hotelId? }`. A moderator has exactly one of `airlineId` / `hotelId`.
 - Guards/decorators from `common`: `JwtAuthGuard` (global; use `@Public()` for open routes), `RolesGuard` with `@Roles(Role.ADMIN)`.
 - **Ownership is checked in the service, not the controller**: users only touch their own bookings/itineraries/posts/comments/reviews; moderators only their own airline/hotel (compare `airlineId`/`hotelId` from the principal to the resource). Return 404 for another user's private resource, 403 for wrong role.
@@ -99,20 +100,27 @@ Everything below is injected via NestJS DI. Owners publish the signature first; 
 |---|---|---|---|
 | `NotificationsService.notify` | Payments | `notify({ userId, type, title, message, link? }): Promise<void>` | everyone who tells users something |
 | `AuditService.log` | Admin | `log({ actorId, action, targetType, targetId, details? }): Promise<void>` | admin actions, moderation |
-| `UploadService.save / remove` | Blog | `save(file, { kind, ownerId }): Promise<{ id, url }>`, `remove(id)`; enforces JPG/PNG, 5 MB, count limits | airlines, hotels, itineraries, blog |
+| `UploadService.save / remove` | Admin / seeding / uploads (Walid) | `save(file, { kind, ownerId }): Promise<{ id, url }>`, `remove(id)`; enforces JPG/PNG, 5 MB, count limits | airlines, hotels, itineraries, blog |
 | `BookingLifecycle.transition` | Payments | `transition(type, bookingId, to: BookingStatus): Promise<void>`; rejects illegal transitions | booking owners |
 | `RefundsService.issue` | Payments | `issue({ bookingType, bookingId, amountCents, reason }): Promise<Refund>`; called on every cancellation with a positive refund | flight/hotel cancel, flight cancel by airline |
-| `RefundCalculator.compute` | Payments | `compute({ tiers, daysBefore, totalCents }): number`: tier with highest threshold not above days remaining, else 0 | flight/hotel cancel preview + cancel |
+| `FxService.convert` | Payments (`fx` module) | `convert(amount, from, to): Promise<{ amount, rateDate }>`; rates fetched once per day and cached in the database | itineraries (budget summary) |
+| `RefundCalculator.compute` | Payments | `compute({ tiers, daysBefore, totalCents }): number`: tier with highest threshold not above days remaining, else 0 | flight/hotel cancel preview + cancel; reads tiers through the airlines/hotels owners' exported getters |
 | Booking provider interface (`BookingProvider`) | Flights B, Hotels B | `getPayable(id, userId)` -> `{ amountCents, currency, status, holdExpiresAt }`, `markConfirmed(id, paymentRef)`, `getPolicies(id)` (there is no `markExpired`: expiry goes through `applyStatus`), plus the lifecycle methods below | Payments (payment, webhook, expiry sweep, policy acceptance) |
 | `BookingProvider` lifecycle methods | Flights B, Hotels B | `getStatus(id)` -> `{ status, holdExpiresAt? }`; `applyStatus(id, from, to): Promise<boolean>` (atomic conditional update on `_id` AND `status = from`; `false` if the booking was no longer in `from`); `findExpiredHolds(now, limit, afterId?)` -> overdue `PENDING_PAYMENT` bookings ordered by `_id`, after `afterId` when given | `BookingLifecycle` only |
 | `BookingProviderRegistry` | Payments | `register(type, provider)`; owners register their provider on module init so Payments never imports their modules | booking owners (register), `BookingLifecycle` (lookup) |
 | `PaymentActivity.prepareExpiry` | Payments | `prepareExpiry(type, bookingId, now): Promise<'SKIP' \| 'PAID' \| 'EXPIRE'>`; `SKIP` = a payment is in flight and inside the pause cap, `PAID` = cancelling the PaymentIntent found it already succeeded (booking must be confirmed, not expired), `EXPIRE` = safe to expire | `BookingLifecycle` (sweep and lazy check) |
-| `ReferenceDataService` | Admin | read access to countries, cities, airports, attractions, currencies by ID | flights, hotels, itineraries, users |
+| `ReferenceDataService` | Admin | read access to countries, cities, airports, attractions, currencies by ID, plus list queries: airports by city or country, cities by country, countries, attractions by city (`ReferenceDataModule` is imported in `AppModule`) | flights, hotels, itineraries, users |
 | `isHidden` flag | field on `Post`, `Comment`, `Review`, `Itinerary` | hidden content is returned only to its author and admins | blog, reviews, itineraries, reports |
 
 Payments owns the **hold-expiry sweep** (cron every minute plus a lazy expiry check whenever a booking is read) for both booking collections. Booking owners only create `PENDING_PAYMENT` bookings with `holdExpiresAt`.
 
 `BookingLifecycle.transition()` is the only code that changes `BookingStatus`. It validates against the transition table, calls `applyStatus`, and the owner's `applyStatus` releases inventory in the same MongoDB transaction when `to` is `EXPIRED` or `CANCELLED` (no separate best-effort release step). Booking owners check that the caller owns the booking BEFORE calling `transition()`. Before expiring, the sweep and the lazy check call `PaymentActivity.prepareExpiry`; the sweep walks overdue bookings by `_id` with `afterId` so skipped bookings are neither re-fetched in a loop nor starve later ones.
+
+**Confirmation rule.** Every path that confirms a paid booking, including `BookingLifecycle.settleDueBooking` when `PaymentActivity.prepareExpiry` returns `PAID`, must call the owner's `markConfirmed(id, paymentRef)` and store `paymentRef`. A bare `transition(..., CONFIRMED)` is not allowed: it skips the reference, the held-to-booked conversion and the notification. `markConfirmed` must be idempotent and callable from both the webhook and the late-paid expiry path.
+
+**Cancellation policy split.** Tier storage, validation and routes (`PUT /api/airlines/:id/cancellation-policy`, `PUT /api/hotels/:id/policies`) live in the airlines and hotels modules and are owned by their module owners. Payments owns `RefundCalculator.compute` and never copies or edits the tier data.
+
+**Flight status job.** The DEPARTED job (FLT-30) lives in the flights module and is owned by Flights A.
 
 ## 8. Concurrency rules (flight seats, hotel rooms)
 
@@ -129,14 +137,15 @@ Payments owns the **hold-expiry sweep** (cron every minute plus a lazy expiry ch
 
 | Owner | Provides | Needs from |
 |---|---|---|
-| Auth | Guards, `@CurrentUser`, login/session, profile (incl. preferred currency) | Admin (seed admin) |
-| Admin | Seeding + `ReferenceDataService`, audit log, moderator creation, suspend/reactivate, provider deactivate/reactivate (`PATCH /api/admin/providers/:type/:id/deactivate` and `/reactivate`, `:type` = `hotel` or `airline`; separate from suspending the moderator; hidden from search and not bookable, existing CONFIRMED bookings stay valid; affected parties notified), reports | Auth (guards), airlines/hotels exist (moderator link), Notifications |
-| You (lead) | Skeleton, `common/`, airlines, flights, cabins, baggage rules, hotels, rooms, availability | Seeding (airports/cities), Upload |
-| Flights B | Search, holds, flight booking, e-ticket, cancel | Flights A (cabins), Payments (confirm/refund), Notifications |
-| Hotels B | Search, holds, hotel booking, cancel, reviews | Hotels A (rooms/availability), Payments, Notifications |
-| Payments | Stripe, webhook, refunds, notifications, lifecycle, cancellation-tier calc | Booking provider interface |
-| Itineraries | Itineraries, days, budgets, FX, clone | Seeding (cities/currencies), Upload, Hotels B / Flights B search |
-| Blog | Posts, comments, likes, tags, search, Upload service | Auth (guards) |
+| Auth (Ziad Mohamed) | Guards, `@CurrentUser`, login/session, profile (incl. preferred currency) | Admin (seed admin) |
+| Admin / seeding / uploads (Mohamed Walid) | Seeding + `ReferenceDataService` (incl. list queries), `UploadService`, audit log, moderator creation, suspend/reactivate, provider deactivate/reactivate (`PATCH /api/admin/providers/:type/:id/deactivate` and `/reactivate`, `:type` = `hotel` or `airline`; separate from suspending the moderator; hidden from search and not bookable, existing CONFIRMED bookings stay valid; affected parties notified), reports | Auth (guards), airlines/hotels exist (moderator link), Notifications |
+| Flights A (Ahmed Sanad) | Skeleton, `common/`, airlines, flights, cabins, baggage rules, airline cancellation tiers, flight status job | Seeding (airports/cities), Upload |
+| Hotels A (Yusuf Eser) | Hotels, rooms, availability, hotel policies (check-in/out times, cancellation tiers) | Seeding (cities), Upload |
+| Flights B (Abdulrahman Hosny) | Search, holds, flight booking, e-ticket, cancel | Flights A (cabins), Payments (confirm/refund), Notifications |
+| Hotels B (Hessain Elrefaey) | Search, holds, hotel booking, cancel, reviews, reservations list for the hotel moderator (HTL-22) | Hotels A (rooms/availability), Payments, Notifications |
+| Payments (Abdelrahman ElGabarty) | Stripe, webhook, refunds, notifications, lifecycle, `RefundCalculator`, FX (`fx` module) | Booking provider interface |
+| Itineraries (Yassin) | Itineraries, days, budgets, clone | Seeding (cities/currencies), Upload, Payments (`FxService`), Hotels B / Flights B search |
+| Blog (Yusuf Eser) | Posts, comments, likes, tags, search | Auth (guards), Upload |
 
 ## 10. Rules for the AI assistant
 
