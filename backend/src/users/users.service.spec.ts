@@ -40,6 +40,43 @@ describe('UsersService', () => {
     expect(model.findById).toHaveBeenCalledWith('abc');
   });
 
+  describe('isActive', () => {
+    const lean = jest.fn();
+    const ID = '674a1b2c3d4e5f6a7b8c9d0e';
+
+    beforeEach(() => {
+      select.mockReturnValue({ lean });
+      lean.mockReturnValue(query);
+    });
+
+    it('reads only the status of that user', async () => {
+      exec.mockResolvedValue({ status: 'ACTIVE' });
+      await service.isActive(ID);
+      expect(model.findById).toHaveBeenCalledWith(ID);
+      expect(select).toHaveBeenCalledWith('status');
+    });
+
+    it('true for ACTIVE', async () => {
+      exec.mockResolvedValue({ status: 'ACTIVE' });
+      await expect(service.isActive(ID)).resolves.toBe(true);
+    });
+
+    it.each(['SUSPENDED', 'DEACTIVATED'])('false for %s', async (status) => {
+      exec.mockResolvedValue({ status });
+      await expect(service.isActive(ID)).resolves.toBe(false);
+    });
+
+    it('false when the user does not exist', async () => {
+      exec.mockResolvedValue(null);
+      await expect(service.isActive(ID)).resolves.toBe(false);
+    });
+
+    it('false for a malformed id, without querying the database', async () => {
+      await expect(service.isActive('not-an-id')).resolves.toBe(false);
+      expect(model.findById).not.toHaveBeenCalled();
+    });
+  });
+
   it('create passes the input to the model', async () => {
     const input = { name: 'Ali', email: 'ali@example.com', passwordHash: 'h', consentAcceptedAt: new Date() };
     model.create.mockResolvedValue({ id: '1' });

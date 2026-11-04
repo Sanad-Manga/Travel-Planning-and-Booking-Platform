@@ -16,14 +16,19 @@ const contextFor = (request: Partial<AuthenticatedRequest>): ExecutionContext =>
 describe('JwtAuthGuard', () => {
   const reflector = { getAllAndOverride: jest.fn() };
   const jwtService = { verifyAsync: jest.fn() };
-  const guard = new JwtAuthGuard(jwtService as unknown as JwtService, reflector as unknown as Reflector);
+  const accounts = { isActive: jest.fn() };
+  const guard = new JwtAuthGuard(jwtService as unknown as JwtService, reflector as unknown as Reflector, accounts);
 
-  beforeEach(() => jest.resetAllMocks());
+  beforeEach(() => {
+    jest.resetAllMocks();
+    accounts.isActive.mockResolvedValue(true);
+  });
 
-  it('lets @Public routes through without looking at the cookie', async () => {
+  it('lets @Public routes through without looking at the cookie or the account', async () => {
     reflector.getAllAndOverride.mockReturnValue(true);
     await expect(guard.canActivate(contextFor({ cookies: {} }))).resolves.toBe(true);
     expect(jwtService.verifyAsync).not.toHaveBeenCalled();
+    expect(accounts.isActive).not.toHaveBeenCalled();
   });
 
   it('401 when the cookie is missing', async () => {
@@ -45,6 +50,29 @@ describe('JwtAuthGuard', () => {
     const request: Partial<AuthenticatedRequest> = { cookies: { access_token: 'x' } };
     await expect(guard.canActivate(contextFor(request))).resolves.toBe(true);
     expect(request.user).toEqual({ userId: 'u1', role: Role.HOTEL_MODERATOR, hotelId: 'h1' });
+    expect(accounts.isActive).toHaveBeenCalledWith('u1');
+  });
+
+  it('401 when the account is no longer active (suspended, deactivated or deleted) even with a valid token', async () => {
+    jwtService.verifyAsync.mockResolvedValue({ sub: 'u1', role: Role.USER });
+    accounts.isActive.mockResolvedValue(false);
+    const request: Partial<AuthenticatedRequest> = { cookies: { access_token: 'x' } };
+    await expect(guard.canActivate(contextFor(request))).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(request.user).toBeUndefined();
+  });
+
+  it('does not check the account when the token itself is already invalid', async () => {
+    jwtService.verifyAsync.mockRejectedValue(new Error('jwt expired'));
+    await expect(guard.canActivate(contextFor({ cookies: { access_token: 'x' } }))).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(accounts.isActive).not.toHaveBeenCalled();
+  });
+
+  it('fails closed: if the account lookup itself fails, the error propagates and nobody gets in', async () => {
+    jwtService.verifyAsync.mockResolvedValue({ sub: 'u1', role: Role.USER });
+    accounts.isActive.mockRejectedValue(new Error('database down'));
+    const request: Partial<AuthenticatedRequest> = { cookies: { access_token: 'x' } };
+    await expect(guard.canActivate(contextFor(request))).rejects.toThrow('database down');
+    expect(request.user).toBeUndefined();
   });
 });
 
