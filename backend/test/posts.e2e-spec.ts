@@ -173,11 +173,18 @@ describe('BLG-01 create post (e2e)', () => {
     });
 
     it('rejects more than 5 images and malformed image references', async () => {
-      const six = Array.from({ length: 6 }, (_, i) => ({ id: `i${i}`, url: `/u/${i}.jpg` }));
+      const six = Array.from({ length: 6 }, (_, i) => ({ id: `i${i}`, url: `/uploads/posts/${i}.jpg` }));
       const tooMany = await http().post('/api/posts').set('Cookie', userCookie).send(validPost({ images: six })).expect(400);
       expect(tooMany.body.details[0].field).toBe('images');
       const bad = await http().post('/api/posts').set('Cookie', userCookie).send(validPost({ images: [{ id: 'x' }] })).expect(400);
       expect(bad.body.details[0].field).toBe('images.0.url');
+    });
+
+    it('rejects image urls that are not an /uploads/ path (external, scheme, traversal)', async () => {
+      for (const url of ['https://evil.example/x.jpg', '//evil.example/x.jpg', 'javascript:alert(1)', '/uploads/../etc/passwd', '/other/x.jpg']) {
+        const res = await http().post('/api/posts').set('Cookie', userCookie).send(validPost({ images: [{ id: 'i', url }] })).expect(400);
+        expect(res.body.details[0].field).toBe('images.0.url');
+      }
     });
 
     it('rejects an invalid status', async () => {

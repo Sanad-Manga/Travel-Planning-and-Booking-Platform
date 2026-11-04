@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import { ArrayMaxSize, IsArray, IsEnum, IsNotEmpty, IsOptional, IsString, MaxLength, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsEnum, IsNotEmpty, IsOptional, IsString, Matches, MaxLength, ValidateNested } from 'class-validator';
 import { MAX_IMAGES_PER_ENTITY, POST_MAX_TAGS, PostStatus, TAG_MAX_LENGTH } from '../../common';
 import { POST_BODY_MAX_LENGTH, POST_TITLE_MAX_LENGTH } from '../blog.constants';
 
@@ -27,10 +27,15 @@ export class PostImageDto {
   @MaxLength(100)
   id: string;
 
-  @ApiProperty({ description: 'Url returned by the Upload service (GEN-08).', example: '/uploads/posts/6730a1f2.jpg' })
+  @ApiProperty({
+    description: 'Url returned by the Upload service (GEN-08). Must be an upload path (/uploads/...) until the service exists.',
+    example: '/uploads/posts/6730a1f2.jpg',
+  })
   @IsString()
   @IsNotEmpty()
   @MaxLength(500)
+  // Stub until the Upload service (GEN-08) can vouch for ids (BLG-10): only a local /uploads/ path, no scheme, host or "..".
+  @Matches(/^\/uploads\/(?!.*\.\.)[\w\-./]+$/, { message: 'url must be an upload path such as /uploads/posts/photo.jpg' })
   url: string;
 }
 
