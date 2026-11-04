@@ -12,15 +12,13 @@ The runtime dependency `csv-parse` is pinned to `7.0.3` in
 installation or manifest change is needed. `csv-stringify` generates CSV and
 cannot parse it. No additional npm script is required.
 
-Team-lead approval of the existing shared dependency-file changes has not been
-verified. This approval status is separate from the dependency's availability in
-the manifest and lockfile.
+The team lead approved the `csv-parse` dependency when reviewing PR #12.
 
-Place the unchanged university files at `backend/data/Countries.csv`, `Cities.csv`,
-`Airports.csv`, and `Attractions.csv`. The files were untracked at inspection.
-Ahmed Sanad must decide whether to include them in Git; otherwise a fresh clone
-must obtain them from the university source/team lead before seeding. Do not
-substitute generated records. The original files are not changed by this module.
+The university files are tracked in Git at `backend/data/Countries.csv`,
+`Cities.csv`, `Airports.csv`, and `Attractions.csv` (the university's "Mock Data"
+sheet). To use a different official set, pass its folder as the optional CLI
+argument below; the headers must match exactly. Do not substitute generated
+records. The original files are not changed by this module.
 
 From `backend/`, after configuring the intended database in the existing `.env`:
 

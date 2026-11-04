@@ -1,12 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { BookingType } from '../common';
 
-/**
- * Minutes a booking's hold is protected while its payment is PROCESSING, before the pause
- * is force-ended (lead's new rule for SCRUM-33). The real PaymentActivity (PAY-01) uses this;
- * the stub below does not need it, since nothing is ever PROCESSING without Stripe wired up.
- */
-export const PAYMENT_PAUSE_MAX_MINUTES = 5;
+// PAYMENT_PAUSE_MAX_MINUTES (the longest a PROCESSING payment may pause hold expiry) lives in
+// common/constants.ts. The real PaymentActivity (PAY-01) uses it; the stub below does not need it,
+// since nothing is ever PROCESSING without Stripe wired up.
 
 export type PrepareExpiryResult = 'SKIP' | 'PAID' | 'EXPIRE';
 

@@ -9,6 +9,12 @@ loadEnv({ quiet: true });
 /** How long flight seats / hotel rooms are held while a booking waits for payment. */
 export const HOLD_MINUTES = Number(process.env.HOLD_MINUTES) > 0 ? Number(process.env.HOLD_MINUTES) : 10;
 
+/**
+ * Minutes a booking's hold is protected while its payment is PROCESSING, before the pause is
+ * force-ended (docs/contracts.md section 6 and 8).
+ */
+export const PAYMENT_PAUSE_MAX_MINUTES = 5;
+
 /** The single platform currency for prices, payments and refunds (PAY-04). */
 export const PLATFORM_CURRENCY = process.env.PLATFORM_CURRENCY || 'USD';
 

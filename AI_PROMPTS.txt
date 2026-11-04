@@ -320,3 +320,15 @@ How the output was used:
 The assistant recommended CI only (no CD, since Milestone 1 has no deploy target) and drafted .github/workflows/ci.yml. It runs on every pull request into develop and repeats the manual review steps: npm ci (which catches an out-of-sync package-lock.json, as happened in PR #12), build, lint, unit tests and e2e tests, on Node 22 with the mongod test binary cached. No secrets are needed because the tests use mongodb-memory-server.
 I ran the same five steps locally on develop before opening the PR: build and lint clean, 234 unit tests and 75 e2e tests pass. The "backend" check can be made required in the develop ruleset once the first run is green.
 ================================================
+
+================================================
+Date: 2026-11-04
+Student: Ahmed Sanad
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: Team tooling / cleanup (low-priority audit findings, no numbered requirement)
+Prompt:
+After a cloud agent produced a project audit, I asked the assistant to sort the findings and then "all the low prio we can fix now right?". I said yes to one small chore PR.
+How the output was used:
+The assistant checked each finding in the code and fixed four: PAYMENT_PAUSE_MAX_MINUTES moved from payments/payment-activity.ts into common/constants.ts (where docs/contracts.md section 6 says constants live); the test helpers fake-booking-provider.ts and booking-provider.conformance.ts are excluded from tsconfig.build.json so they are not compiled into dist; two unused values (holdMinutes, platformCurrency) removed from config/configuration.ts (the constants read the env directly); the reference-data README no longer says the CSVs are untracked or that dependency approval is unverified.
+I ran npm ci, build, lint, unit tests and e2e tests on develop with the change, and checked that dist no longer contains the two test helpers. Behaviour is unchanged.
+================================================
