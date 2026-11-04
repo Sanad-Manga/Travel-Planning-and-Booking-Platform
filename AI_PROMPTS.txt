@@ -213,3 +213,52 @@ How the output was used:
 The reviewer suggested completing a flight's confirmed bookings when the flight is marked DEPARTED, done by Flights A.
 I accepted it and added it to docs/contracts.md (v1.2) and to my own ticket. The review also found that markExpired was still listed in the contract after PR #8 removed it, so that was fixed too.
 ================================================
+
+================================================
+Date: 2026-11-03
+Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: GEN-01 (SCRUM-32)
+Prompt:
+Pasted docs/contracts.md, a context file for my module (Payments & Policies) and the SCRUM-32 ticket text, then:
+"Implement only this ticket, following contracts.md. List your assumptions first."
+Follow-ups: asked how to handle the auth guards, which are not on develop yet (SCRUM-15),
+and how to test the service without a database.
+
+How the output was used:
+Used the generated notifications module (schema, NotificationsService.notify/list/unreadCount/markRead, controller, DTOs)
+and its Jest tests in backend/src/notifications. notify() keeps the signature from contracts.md section 7 and never throws.
+GET /api/notifications/unread-count is an addition to the two endpoints in the ticket (proposal to the lead).
+current-user.stub.ts is a temporary stand-in for @CurrentUser() and must be replaced once SCRUM-15 is merged.
+The only other file touched is app.module.ts (one import for NotificationsModule).
+================================================
+
+================================================
+Date: 2026-11-04
+Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code, Sonnet 5)
+Related Requirement: GEN-01 (SCRUM-32)
+Prompt:
+SCRUM-15 merged to develop. Asked to rebase the SCRUM-32 branch onto the new develop, delete the temporary
+current-user.stub.ts, wire the real @CurrentUser() from common/, and confirm nothing else needs to change now
+that the real JwtAuthGuard/RolesGuard are global. Original draft PR (barely any real work in it, opened only
+to track the ticket while blocked on SCRUM-15) was closed; this is a clean PR off current develop instead.
+
+How the output was used:
+Rebuilt feature/GEN-01-notifications off current origin/develop. Deleted current-user.stub.ts and changed
+notifications.controller.ts's one import to CurrentUser from '../common'. The controller needs no @Roles()
+(any logged-in role can have notifications, per the ticket).
+
+Ran the real build/lint/test this time instead of assuming: tsc --noEmit and eslint were clean, but
+notifications.controller.spec.ts's three "without a logged-in user -> 401" tests started failing. Cause: that
+test builds an isolated Nest testing module with only NotificationsController, so the real global JwtAuthGuard
+(registered via APP_GUARD in AuthModule) is never present there - the test's own fake-auth middleware just set
+req.user from a header and otherwise did nothing. The old stub decorator used to throw UnauthorizedException
+itself when req.user was missing, which accidentally covered for that; the real CurrentUser() decorator just
+returns request.user as-is and relies entirely on the guard, so removing the stub removed that accidental
+safety net from the test. Fixed by making the test's fake-auth middleware reject with the same
+UnauthorizedException('Authentication required') the real guard throws when there is no header/cookie, so the
+test now simulates the guard instead of depending on the decorator to self-enforce. Production is unaffected
+(AuthModule's APP_GUARD is global across the real app); this was a test-isolation gap, not a runtime bug.
+All 43 notifications tests pass after the fix; full build and lint clean.
+================================================

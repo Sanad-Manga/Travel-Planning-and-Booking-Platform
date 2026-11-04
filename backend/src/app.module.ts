@@ -4,6 +4,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { AuthModule } from './auth/auth.module';
 import configuration from './config/configuration';
 import { validateEnv } from './config/env.validation';
+import { NotificationsModule } from './notifications';
 import { PaymentsModule } from './payments';
 
 // Feature modules (auth, flights, hotels, ...) are added here by their owners in their own PRs.
@@ -21,6 +22,7 @@ import { PaymentsModule } from './payments';
     }),
     PaymentsModule,
     AuthModule,
+    NotificationsModule,
   ],
 })
 export class AppModule {}
