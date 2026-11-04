@@ -201,3 +201,15 @@ How the output was used:
 The reviewer drafted contracts v1.1 (section 6 constant, section 7 provider/registry/PaymentActivity rows, section 8
 pause rules). I reviewed the wording against GEN-11 and the requirements sheet before committing it.
 ================================================
+
+================================================
+Date: 2026-11-04
+Student: Ahmed Sanad
+Tool: Claude (Claude Code, Sonnet 5.5), used as a code reviewer
+Related Requirement: GEN-11, HTL-23, FLT-30 (flight status change)
+Prompt:
+Asked who should move flight bookings from CONFIRMED to COMPLETED, following the module owners and the project PDF.
+How the output was used:
+The reviewer suggested completing a flight's confirmed bookings when the flight is marked DEPARTED, done by Flights A.
+I accepted it and added it to docs/contracts.md (v1.2) and to my own ticket. The review also found that markExpired was still listed in the contract after PR #8 removed it, so that was fixed too.
+================================================
