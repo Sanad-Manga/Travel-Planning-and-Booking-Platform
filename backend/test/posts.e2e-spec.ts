@@ -415,8 +415,8 @@ describe('BLG-01 create post (e2e)', () => {
 
     it('replaces images and enforces the same validation as create', async () => {
       const post = await createPost();
-      const res = await patch(post.id, userCookie, { images: [{ id: 'i1', url: '/u/1.jpg' }] }).expect(200);
-      expect(res.body.images).toEqual([{ id: 'i1', url: '/u/1.jpg' }]);
+      const res = await patch(post.id, userCookie, { images: [{ id: 'i1', url: '/uploads/posts/1.jpg' }] }).expect(200);
+      expect(res.body.images).toEqual([{ id: 'i1', url: '/uploads/posts/1.jpg' }]);
       await patch(post.id, userCookie, { title: '   ' }).expect(400);
       await patch(post.id, userCookie, { tags: ['1', '2', '3', '4', '5', '6'] }).expect(400);
       await patch(post.id, userCookie, { status: 'ARCHIVED' }).expect(400);
