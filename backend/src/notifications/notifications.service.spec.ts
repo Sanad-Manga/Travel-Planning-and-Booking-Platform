@@ -97,6 +97,9 @@ describe('NotificationsService', () => {
       'http://evil.example.com',
       '//evil.example.com',
       'bookings/1',
+      '/\\evil.example.com',
+      '/\n/evil.example.com',
+      '/\t/evil.example.com',
     ])('drops a link that is not an in-app path: %s', async (link) => {
       model.create.mockResolvedValue({});
       await service.notify({

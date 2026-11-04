@@ -33,9 +33,17 @@ export interface NotifyInput {
  * True only for an in-app path such as `/bookings/1`. Rejects anything that could
  * become a clickable `javascript:`/external link on the client - an absolute URL,
  * a protocol-relative `//host/...` URL, or a bare string with no leading slash.
+ * Backslashes and control characters (tab, line break) are rejected too: browsers strip the
+ * control characters and treat `/\` like `//`, so `"/\n/host"` and `/\host` would turn external.
  */
 function isAppPath(link: string | undefined): link is string {
-  return typeof link === 'string' && link.startsWith('/') && !link.startsWith('//');
+  if (typeof link !== 'string' || !link.startsWith('/')) return false;
+  if (link[1] === '/' || link[1] === '\\') return false;
+  for (const char of link) {
+    const code = char.charCodeAt(0);
+    if (code <= 0x1f || code === 0x7f || char === '\\') return false;
+  }
+  return true;
 }
 
 @Injectable()
