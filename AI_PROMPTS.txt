@@ -308,3 +308,15 @@ Ran npm 10.9.2 install --package-lock-only --ignore-scripts --no-audit --no-fund
 Verified npm ci --no-audit --no-fund from two fresh temporary backend copies with no pre-existing node_modules or .env: Node 22.14.0/npm 10.9.2 PASS and Node 24.14.0/npm 11.13.0 PASS. Two earlier corrected-lock installation attempts were interrupted during redundant large MongoDB binary downloads; the successful retries used fresh directories and MONGOMS_DOWNLOAD_DIR pointing to an already downloaded MongoDB 8.2.6 binary cache, with lifecycle scripts enabled.
 On each freshly installed copy, npm run build PASS; npm test -- --runInBand PASS (55 tests, four suites); npm run lint PASS; npm run test:e2e -- --runInBand PASS (six tests). Existing reference-data integration tests used their own disposable MongoDB servers; no production seed or shared database connection was executed. Temporary backend copies excluded all environment files. Repository verification checks the actual Git diff, whitespace, and before/after file hashes; only package-lock.json and this prompt-log append are changed. No commits, pushes, or PR updates were performed.
 ================================================
+
+================================================
+Date: 2026-11-04
+Student: Ahmed Sanad
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: Team tooling (not a numbered requirement) - CI check on pull requests
+Prompt:
+"Is it time we invest in a CI/CD/lint check in GitHub, even if it is not requested, so reviewing is faster than checking it manually each time?" Then: "yes" to making the branch and the PR.
+How the output was used:
+The assistant recommended CI only (no CD, since Milestone 1 has no deploy target) and drafted .github/workflows/ci.yml. It runs on every pull request into develop and repeats the manual review steps: npm ci (which catches an out-of-sync package-lock.json, as happened in PR #12), build, lint, unit tests and e2e tests, on Node 22 with the mongod test binary cached. No secrets are needed because the tests use mongodb-memory-server.
+I ran the same five steps locally on develop before opening the PR: build and lint clean, 234 unit tests and 75 e2e tests pass. The "backend" check can be made required in the develop ruleset once the first run is green.
+================================================
