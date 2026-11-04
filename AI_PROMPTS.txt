@@ -332,3 +332,11 @@ How the output was used:
 The assistant checked each finding in the code and fixed four: PAYMENT_PAUSE_MAX_MINUTES moved from payments/payment-activity.ts into common/constants.ts (where docs/contracts.md section 6 says constants live); the test helpers fake-booking-provider.ts and booking-provider.conformance.ts are excluded from tsconfig.build.json so they are not compiled into dist; two unused values (holdMinutes, platformCurrency) removed from config/configuration.ts (the constants read the env directly); the reference-data README no longer says the CSVs are untracked or that dependency approval is unverified.
 I ran npm ci, build, lint, unit tests and e2e tests on develop with the change, and checked that dist no longer contains the two test helpers. Behaviour is unchanged.
 ================================================
+Date: 2026-11-04
+Student: Yusuf Eser
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: HTL-01
+Prompt:
+Implement only HTL-01 (admin creates a hotel via POST /api/hotels, hotel moderator edits only their own hotel via PATCH /api/hotels/:id: name, address, city/country from the seeded list, description, photos, star class, amenities) following contracts.md; list assumptions first.
+How the output was used:
+Generated the backend/src/hotels module (schema, DTOs, service, controller, module), registered HotelsModule in app.module.ts and added test/hotels.e2e-spec.ts. I reviewed every line, ran tsc, eslint and the e2e spec against an in-memory MongoDB.
