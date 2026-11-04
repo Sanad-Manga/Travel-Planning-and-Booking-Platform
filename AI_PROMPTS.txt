@@ -344,6 +344,14 @@ How the output was used:
 The assistant checked each finding in the code and fixed four: PAYMENT_PAUSE_MAX_MINUTES moved from payments/payment-activity.ts into common/constants.ts (where docs/contracts.md section 6 says constants live); the test helpers fake-booking-provider.ts and booking-provider.conformance.ts are excluded from tsconfig.build.json so they are not compiled into dist; two unused values (holdMinutes, platformCurrency) removed from config/configuration.ts (the constants read the env directly); the reference-data README no longer says the CSVs are untracked or that dependency approval is unverified.
 I ran npm ci, build, lint, unit tests and e2e tests on develop with the change, and checked that dist no longer contains the two test helpers. Behaviour is unchanged.
 ================================================
+Date: 2026-11-04
+Student: Yusuf Eser
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: HTL-01
+Prompt:
+Implement only HTL-01 (admin creates a hotel via POST /api/hotels, hotel moderator edits only their own hotel via PATCH /api/hotels/:id: name, address, city/country from the seeded list, description, photos, star class, amenities) following contracts.md; list assumptions first.
+How the output was used:
+Generated the backend/src/hotels module (schema, DTOs, service, controller, module), registered HotelsModule in app.module.ts and added test/hotels.e2e-spec.ts. I reviewed every line, ran tsc, eslint and the e2e spec against an in-memory MongoDB.
 
 ================================================
 Date: 2026-11-04
@@ -357,6 +365,23 @@ BookingProvider gets markConfirmed(id, paymentRef) (atomic, idempotent). Payment
 I ran lint and the 248 unit tests (the e2e suite does not touch this code).
 ================================================
 
+Date: 2026-11-04
+Student: Yusuf Eser
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: HTL-01 (PR review fixes)
+Prompt:
+Fix the scrum master's review of PR #20: merge the latest develop (keep both AI_PROMPTS.txt sections), restrict hotel photo urls to an /uploads/ path until the upload service (GEN-08) exists, and prepare the PR base and description changes.
+How the output was used:
+Merged origin/develop and resolved the AI_PROMPTS.txt conflict by keeping both entries. Added a Matches rule on HotelPhotoDto.url (only /uploads/... paths, no scheme, host or ".."), plus e2e tests for POST and PATCH. Re-ran build, lint, unit and e2e tests. The PR base and description are changed by hand on GitHub.
+
+Date: 2026-11-04
+Student: Yusuf Eser
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: HTL-01 (PR review change)
+Prompt:
+Check the reviewer's comment on PR #20: a hotel moderator editing a different hotel must get 403 instead of 404 (hotel profiles are public; new rule in the contracts PR #27). Update the code and the test; everything else stays.
+How the output was used:
+Read the rule in docs/contracts.md on origin/docs/contracts-provider-ownership-403. HotelsService.update now throws 403 when the id is not the moderator's own hotelId (including unknown or malformed ids); 404 remains only if the moderator's own hotel no longer exists. Updated the Swagger error descriptions and the two e2e tests. Re-ran build, lint, unit and e2e tests.
 ================================================
 Date: 2026-11-04
 Student: Mohamed Walid
