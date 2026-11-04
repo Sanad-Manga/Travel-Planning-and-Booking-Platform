@@ -10,7 +10,7 @@ export default () => {
     port: Number(env.PORT ?? 3001),
     frontendUrl: env.FRONTEND_URL ?? 'http://localhost:3000',
     mongodbUri: env.MONGODB_URI as string,
-    cookieSecure: String(env.COOKIE_SECURE ?? 'false') === 'true',
+    cookieSecure: String(env.COOKIE_SECURE ?? String(process.env.NODE_ENV === 'production')) === 'true',
     holdMinutes: Number(env.HOLD_MINUTES ?? 10),
     platformCurrency: env.PLATFORM_CURRENCY ?? 'USD',
   };

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
+import { AuthModule } from './auth/auth.module';
 import configuration from './config/configuration';
 import { validateEnv } from './config/env.validation';
 
@@ -17,6 +18,7 @@ import { validateEnv } from './config/env.validation';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({ uri: config.getOrThrow<string>('MONGODB_URI') }),
     }),
+    AuthModule,
   ],
 })
 export class AppModule {}
