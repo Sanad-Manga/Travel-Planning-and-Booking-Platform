@@ -47,7 +47,7 @@
 - JWT access + refresh tokens in **httpOnly, Secure, SameSite cookies**. Never in localStorage/sessionStorage or response bodies. `GET /api/auth/me` returns the current user.
 - Session expires after 30 minutes without authenticated requests. Logout clears cookies and revokes the refresh token.
 - Roles (`common/enums`): `USER`, `ADMIN`, `AIRLINE_MODERATOR`, `HOTEL_MODERATOR`.
-- Account status: `ACTIVE`, `SUSPENDED`, `DEACTIVATED`. Only `ACTIVE` can log in, and `JwtAuthGuard` re-checks the status on every authenticated request (one lookup by id), so a suspended or deactivated user gets 401 immediately, not when the 15-minute access token expires. `role`, `airlineId` and `hotelId` still come from the token and update at the next login or refresh.
+- Account status: `ACTIVE`, `SUSPENDED`, `DEACTIVATED`. Only `ACTIVE` can log in.
 - The authenticated principal (`@CurrentUser()`) is `{ userId, role, airlineId?, hotelId? }`. A moderator has exactly one of `airlineId` / `hotelId`.
 - Guards/decorators from `common`: `JwtAuthGuard` (global; use `@Public()` for open routes), `RolesGuard` with `@Roles(Role.ADMIN)`.
 - **Ownership is checked in the service, not the controller**: users only touch their own bookings/itineraries/posts/comments/reviews; moderators only their own airline/hotel (compare `airlineId`/`hotelId` from the principal to the resource). Return 404 for another user's private resource, 403 for wrong role.
