@@ -8,6 +8,7 @@ import configuration from './config/configuration';
 import { validateEnv } from './config/env.validation';
 import { NotificationsModule } from './notifications';
 import { PaymentsModule } from './payments';
+import { ReferenceDataModule } from './reference-data/reference-data.module';
 
 // Feature modules (auth, flights, hotels, ...) are added here by their owners in their own PRs.
 @Module({
@@ -26,6 +27,7 @@ import { PaymentsModule } from './payments';
     AuthModule,
     NotificationsModule,
     BlogModule,
+    ReferenceDataModule,
     AirlinesModule,
   ],
 })
