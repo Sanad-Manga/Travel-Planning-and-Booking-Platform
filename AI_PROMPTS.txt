@@ -381,3 +381,37 @@ Used the generated airlines module (schema, DTOs, service with the ownership che
 it, running build, lint and all tests, and choosing the open points (who may read, 403 vs 404, 2-3 character code,
 logoUrl as a temporary http(s) URL) that are listed in the PR description for review.
 ================================================
+
+================================================
+Date: 2026-11-04
+Student: Yassin Yahya
+Tool: Claude (Claude Code)
+Related Requirement: ITN-01 to ITN-26 (planning only, no code)
+Prompt:
+Read docs/contracts.md, the Milestone 1 project description and the mandatory requirements sheet, analyse the
+existing backend on develop, retrieve my Jira tickets and map each one to its requirement ID, dependencies and
+blockers, then recommend a safe implementation order. Do not write code yet.
+How the output was used:
+Used the analysis to see which modules already exist, which teammates' work my itinerary tickets depend on
+(auth guards, reference data, uploads, hotel and flight search) and to pick ITN-01 as the first ticket, since
+every other ITN ticket needs an itinerary to exist. No code came from this prompt.
+================================================
+
+================================================
+Date: 2026-11-04
+Student: Yassin Yahya
+Tool: Claude (Claude Code)
+Related Requirement: ITN-01 (SCRUM-35)
+Prompt:
+Implement ITN-01 in backend/src/itineraries: POST /api/itineraries (create, private by default),
+PATCH /api/itineraries/:id (owner edits title, countries, start date) and DELETE /api/itineraries/:id (owner
+deletes), following docs/contracts.md v1.3, the merged auth guards, ReferenceDataService and the Jira checklist.
+Include service tests and HTTP tests (validation, wrong role, someone else's itinerary, clones untouched by a
+delete), then open the PR and update Jira.
+How the output was used:
+Used the generated module: schema with authorId and isHidden for Blog/Reports, DTOs with a YYYY-MM-DD date
+validator, a service whose update and delete filter on id AND owner in one atomic query, the controller and the
+tests. Build, lint, all 313 unit tests and all 126 e2e tests pass locally. The open points (country codes stored
+as the reference-data id, 404 for someone else's itinerary, a 250-country safety cap) are listed in the PR for
+the lead to review.
+================================================
