@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
+import { AirlinesModule } from './airlines';
 import { AuthModule } from './auth/auth.module';
 import { BlogModule } from './blog/blog.module';
 import configuration from './config/configuration';
@@ -25,6 +26,7 @@ import { PaymentsModule } from './payments';
     AuthModule,
     NotificationsModule,
     BlogModule,
+    AirlinesModule,
   ],
 })
 export class AppModule {}

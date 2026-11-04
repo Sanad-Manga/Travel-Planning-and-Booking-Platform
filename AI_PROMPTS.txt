@@ -372,3 +372,18 @@ Prompt:
 Fix the scrum master's review of PR #21: merge the latest develop (keep both AI_PROMPTS.txt sections), restrict post image urls to an /uploads/ path until the upload service (GEN-08 / BLG-10) exists, and prepare the PR base and description changes.
 How the output was used:
 Merged origin/develop (includes #22) and resolved the AI_PROMPTS.txt conflict by keeping both entries. Added a Matches rule on PostImageDto.url (only /uploads/... paths, no scheme, host or ".."), plus an e2e test. Re-ran build, lint, unit and e2e tests. The PR base and description are changed by hand on GitHub.
+================================================
+Date: 2026-11-04
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: FLT-01 (SCRUM-23)
+Prompt:
+Implement the FLT-01 airline profile on the NestJS backend: POST /api/airlines (admin creates), GET /api/airlines/:id
+and PATCH /api/airlines/:id (airline moderator edits name, code, logo of their own airline only), following
+docs/contracts.md v1.3, the existing auth guards, and the Jira checklist. Stub the logo until the upload service
+(GEN-08) is merged. Include service and HTTP tests (happy path, validation, wrong role, other airline, duplicate code).
+How the output was used:
+Used the generated airlines module (schema, DTOs, service with the ownership check, controller, tests) after reading
+it, running build, lint and all tests, and choosing the open points (who may read, 403 vs 404, 2-3 character code,
+logoUrl as a temporary http(s) URL) that are listed in the PR description for review.
+================================================
