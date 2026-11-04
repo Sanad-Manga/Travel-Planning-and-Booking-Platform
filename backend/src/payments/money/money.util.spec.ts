@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { InternalServerErrorException } from '@nestjs/common';
 import { PLATFORM_CURRENCY } from '../../common/constants';
 import { assertPlatformCurrency, formatMoney, isValidCents, toMoney } from './money.util';
 
@@ -7,8 +7,8 @@ describe('assertPlatformCurrency', () => {
     expect(() => assertPlatformCurrency(PLATFORM_CURRENCY)).not.toThrow();
   });
 
-  it('throws BadRequestException for any other currency', () => {
-    expect(() => assertPlatformCurrency('EUR')).toThrow(BadRequestException);
+  it('throws InternalServerErrorException for any other currency', () => {
+    expect(() => assertPlatformCurrency('EUR')).toThrow(InternalServerErrorException);
   });
 
   it('includes the given context label in the error message', () => {
@@ -47,11 +47,11 @@ describe('toMoney', () => {
   });
 
   it('throws for a negative amount', () => {
-    expect(() => toMoney(-1)).toThrow(BadRequestException);
+    expect(() => toMoney(-1)).toThrow(InternalServerErrorException);
   });
 
   it('throws for a non-integer amount', () => {
-    expect(() => toMoney(19.99)).toThrow(BadRequestException);
+    expect(() => toMoney(19.99)).toThrow(InternalServerErrorException);
   });
 });
 

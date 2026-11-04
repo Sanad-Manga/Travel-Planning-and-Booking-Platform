@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { InternalServerErrorException } from '@nestjs/common';
 import { PLATFORM_CURRENCY } from '../../common/constants';
 import { MoneyDto } from './money.dto';
 
@@ -14,7 +14,7 @@ import { MoneyDto } from './money.dto';
  */
 export function assertPlatformCurrency(currency: string, context = 'amount'): void {
   if (currency !== PLATFORM_CURRENCY) {
-    throw new BadRequestException(
+    throw new InternalServerErrorException(
       `${context} currency "${currency}" does not match the platform currency (${PLATFORM_CURRENCY})`,
     );
   }
@@ -28,13 +28,14 @@ export function isValidCents(value: unknown): value is number {
 /**
  * Builds a `MoneyDto` for an amount already known to be in platform
  * currency, after validating it is a legal cents value. Throws
- * `BadRequestException` rather than silently truncating a float, since a
- * non-integer amount means a caller computed money in major units
- * (dollars) instead of minor units (cents) somewhere upstream.
+ * `InternalServerErrorException` rather than silently truncating a float - this is a
+ * bug in the calling code, not bad client input - since a non-integer amount means a
+ * caller computed money in major units (dollars) instead of minor units (cents)
+ * somewhere upstream.
  */
 export function toMoney(amountCents: number): MoneyDto {
   if (!isValidCents(amountCents)) {
-    throw new BadRequestException(
+    throw new InternalServerErrorException(
       `amountCents must be a non-negative integer, got ${amountCents}`,
     );
   }
