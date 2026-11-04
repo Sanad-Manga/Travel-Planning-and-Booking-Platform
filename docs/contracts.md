@@ -51,7 +51,7 @@
 - **The global `JwtAuthGuard` checks account status on every authenticated request.** A suspended or deactivated user's existing access cookie gets 401 on any endpoint immediately, not after the token expires (SCRUM-122).
 - The authenticated principal (`@CurrentUser()`) is `{ userId, role, airlineId?, hotelId? }`. A moderator has exactly one of `airlineId` / `hotelId`.
 - Guards/decorators from `common`: `JwtAuthGuard` (global; use `@Public()` for open routes), `RolesGuard` with `@Roles(Role.ADMIN)`.
-- **Ownership is checked in the service, not the controller**: users only touch their own bookings/itineraries/posts/comments/reviews; moderators only their own airline/hotel (compare `airlineId`/`hotelId` from the principal to the resource). Return 404 for another user's private resource, 403 for wrong role.
+- **Ownership is checked in the service, not the controller**: users only touch their own bookings/itineraries/posts/comments/reviews; moderators only their own airline/hotel (compare `airlineId`/`hotelId` from the principal to the resource). Return 404 for another user's private resource, 403 for wrong role. **A moderator editing a different airline or hotel gets 403** (the airline/hotel profile is public, so there is nothing to hide). Use 404 only when the resource itself is private to its owner (bookings, itineraries, drafts, notifications).
 - Passwords: min 8 chars, at least one letter and one digit; stored only as salted hashes (bcrypt).
 
 ## 5. Shared enums (in `common/enums`, do not redefine elsewhere)
