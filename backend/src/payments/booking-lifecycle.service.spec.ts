@@ -38,6 +38,7 @@ class FakePaymentActivity implements PaymentActivity {
 const NOW = new Date('2026-11-20T12:00:00.000Z');
 const PAST = new Date('2026-11-20T11:59:00.000Z');
 const FUTURE = new Date('2026-11-20T12:10:00.000Z');
+const PAID: PrepareExpiryResult = { outcome: 'PAID', paymentRef: 'pi_1' };
 const ALL_STATUSES = Object.values(BookingStatus);
 
 describe('BookingLifecycle', () => {
@@ -72,16 +73,24 @@ describe('BookingLifecycle', () => {
       [BookingStatus.CONFIRMED, BookingStatus.CANCELLED],
     ];
 
-    it.each(legal)('allows %s -> %s (flight and hotel)', async (from, to) => {
-      flights.add('f1', from);
-      hotels.add('h1', from);
+    // PENDING_PAYMENT -> CONFIRMED is legal in the table but only via confirmPaid() (it needs a paymentRef).
+    const viaTransition = legal.filter(
+      ([, to]) => to !== BookingStatus.CONFIRMED,
+    );
 
-      await lifecycle.transition(BookingType.FLIGHT, 'f1', to);
-      await lifecycle.transition(BookingType.HOTEL, 'h1', to);
+    it.each(viaTransition)(
+      'allows %s -> %s (flight and hotel)',
+      async (from, to) => {
+        flights.add('f1', from);
+        hotels.add('h1', from);
 
-      expect(flights.status('f1')).toBe(to);
-      expect(hotels.status('h1')).toBe(to);
-    });
+        await lifecycle.transition(BookingType.FLIGHT, 'f1', to);
+        await lifecycle.transition(BookingType.HOTEL, 'h1', to);
+
+        expect(flights.status('f1')).toBe(to);
+        expect(hotels.status('h1')).toBe(to);
+      },
+    );
 
     it('matches the contract table: exactly the four legal moves', () => {
       const pairs = ALL_STATUSES.flatMap((from) =>
@@ -109,12 +118,20 @@ describe('BookingLifecycle', () => {
       },
     );
 
+    it('rejects a bare transition to CONFIRMED (contracts v1.3: use confirmPaid)', async () => {
+      flights.add('f1', BookingStatus.PENDING_PAYMENT, PAST);
+      await expect(
+        lifecycle.transition(BookingType.FLIGHT, 'f1', BookingStatus.CONFIRMED),
+      ).rejects.toThrow(/confirmPaid/);
+      expect(flights.status('f1')).toBe(BookingStatus.PENDING_PAYMENT);
+    });
+
     it('throws 404 for an unknown booking', async () => {
       await expect(
         lifecycle.transition(
           BookingType.HOTEL,
           'missing',
-          BookingStatus.CONFIRMED,
+          BookingStatus.EXPIRED,
         ),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
@@ -123,7 +140,7 @@ describe('BookingLifecycle', () => {
       flights.add('f1', BookingStatus.PENDING_PAYMENT, PAST);
 
       const results = await Promise.allSettled([
-        lifecycle.transition(BookingType.FLIGHT, 'f1', BookingStatus.CONFIRMED),
+        lifecycle.confirmPaid(BookingType.FLIGHT, 'f1', 'pi_1'),
         lifecycle.transition(BookingType.FLIGHT, 'f1', BookingStatus.EXPIRED),
       ]);
 
@@ -145,7 +162,7 @@ describe('BookingLifecycle', () => {
         paymentActivity,
       );
       await expect(
-        empty.transition(BookingType.FLIGHT, 'f1', BookingStatus.CONFIRMED),
+        empty.transition(BookingType.FLIGHT, 'f1', BookingStatus.EXPIRED),
       ).rejects.toThrow('No booking provider registered for FLIGHT');
     });
   });
@@ -210,12 +227,41 @@ describe('BookingLifecycle', () => {
 
     it('confirms instead of expiring when PaymentActivity reports PAID (e.g. a cancel-reveals-succeeded race)', async () => {
       flights.add('f1', BookingStatus.PENDING_PAYMENT, PAST);
-      paymentActivity.queue('f1', 'PAID');
+      paymentActivity.queue('f1', PAID);
 
       await expect(
         lifecycle.expireIfDue(BookingType.FLIGHT, 'f1', NOW),
       ).resolves.toBe(true);
       expect(flights.status('f1')).toBe(BookingStatus.CONFIRMED);
+      expect(flights.paymentRefs.get('f1')).toBe('pi_1'); // confirmed through markConfirmed, with the reference
+    });
+  });
+
+  describe('confirmPaid', () => {
+    it('confirms through the owner and stores the payment reference', async () => {
+      hotels.add('h1', BookingStatus.PENDING_PAYMENT, FUTURE);
+      await lifecycle.confirmPaid(BookingType.HOTEL, 'h1', 'pi_9');
+      expect(hotels.status('h1')).toBe(BookingStatus.CONFIRMED);
+      expect(hotels.paymentRefs.get('h1')).toBe('pi_9');
+    });
+
+    it('is idempotent for the same payment (webhook and late-paid path both arrive)', async () => {
+      flights.add('f1', BookingStatus.PENDING_PAYMENT, FUTURE);
+      await lifecycle.confirmPaid(BookingType.FLIGHT, 'f1', 'pi_9');
+      await expect(
+        lifecycle.confirmPaid(BookingType.FLIGHT, 'f1', 'pi_9'),
+      ).resolves.toBeUndefined();
+    });
+
+    it('404 for an unknown booking, 409 once the booking has expired', async () => {
+      await expect(
+        lifecycle.confirmPaid(BookingType.FLIGHT, 'nope', 'pi_9'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      flights.add('f1', BookingStatus.EXPIRED);
+      await expect(
+        lifecycle.confirmPaid(BookingType.FLIGHT, 'f1', 'pi_9'),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(flights.status('f1')).toBe(BookingStatus.EXPIRED);
     });
   });
 
@@ -318,7 +364,7 @@ describe('BookingLifecycle', () => {
 
     it('confirms instead of expiring when PaymentActivity reports PAID during a sweep', async () => {
       flights.add('f1', BookingStatus.PENDING_PAYMENT, PAST);
-      paymentActivity.queue('f1', 'PAID');
+      paymentActivity.queue('f1', PAID);
 
       await expect(lifecycle.sweepExpiredHolds(NOW)).resolves.toBe(0); // confirmed, not counted as "expired"
       expect(flights.status('f1')).toBe(BookingStatus.CONFIRMED);

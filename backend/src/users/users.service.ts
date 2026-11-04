@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
+import { AccountStatus } from '../common';
 import { User, UserDocument } from './schemas/user.schema';
 
 export interface CreateUserInput {
@@ -23,6 +24,16 @@ export class UsersService {
 
   findById(id: string): Promise<UserDocument | null> {
     return this.userModel.findById(id).exec();
+  }
+
+  /**
+   * Used by the global JwtAuthGuard on every authenticated request, so it reads only the status
+   * (indexed `_id` lookup, no full document). Unknown or malformed ids are simply "not active".
+   */
+  async isActive(id: string): Promise<boolean> {
+    if (!Types.ObjectId.isValid(id)) return false;
+    const user = await this.userModel.findById(id).select('status').lean().exec();
+    return user?.status === AccountStatus.ACTIVE;
   }
 
   /** New users are always role USER / status ACTIVE (schema defaults). */

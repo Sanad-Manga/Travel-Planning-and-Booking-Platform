@@ -325,6 +325,18 @@ I ran the same five steps locally on develop before opening the PR: build and li
 Date: 2026-11-04
 Student: Ahmed Sanad
 Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: Auth hardening (follow-up to ACC-04 / SCRUM-15; related to ACC-06 / SCRUM-38 and suspension in ACC-13..16)
+Prompt:
+A live test showed a suspended user's existing access cookie still returned 200 on every endpoint except /auth/me for up to 15 minutes, because JwtAuthGuard only trusted the signed token. The assistant described three options (accept and document, check the account status on every request, shorten the token); I answered "go with the 2nd option" and then "Yes, build it".
+How the output was used:
+JwtAuthGuard now asks an injected AccountStatusChecker (ACCOUNT_STATUS_CHECKER token in common/guards, provided in AuthModule by UsersService.isActive) whether the account is still ACTIVE, one status-only lookup by _id per request. Suspended, deactivated, deleted or malformed-id accounts get 401; a failed lookup fails closed (500). Role, airlineId and hotelId still come from the token until the next login or refresh. Public routes do not hit the database. The matching contract line is in the contracts v1.3 PR, not in this one.
+I ran clean npm ci, build, lint, 243 unit tests and 81 e2e tests (new tests: guard unit tests, UsersService.isActive, and e2e for suspended, deactivated, reactivated, deleted-user and suspended-admin cases) and repeated the live suspended-cookie check against the rebuilt app.
+================================================
+
+================================================
+Date: 2026-11-04
+Student: Ahmed Sanad
+Tool: Claude (Claude Code, Sonnet 5.5)
 Related Requirement: Team tooling / cleanup (low-priority audit findings, no numbered requirement)
 Prompt:
 After a cloud agent produced a project audit, I asked the assistant to sort the findings and then "all the low prio we can fix now right?". I said yes to one small chore PR.
@@ -340,3 +352,15 @@ Prompt:
 Implement only HTL-01 (admin creates a hotel via POST /api/hotels, hotel moderator edits only their own hotel via PATCH /api/hotels/:id: name, address, city/country from the seeded list, description, photos, star class, amenities) following contracts.md; list assumptions first.
 How the output was used:
 Generated the backend/src/hotels module (schema, DTOs, service, controller, module), registered HotelsModule in app.module.ts and added test/hotels.e2e-spec.ts. I reviewed every line, ran tsc, eslint and the e2e spec against an in-memory MongoDB.
+
+================================================
+Date: 2026-11-04
+Student: Ahmed Sanad
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: GEN-11 / SCRUM-33 (booking lifecycle), contracts v1.3 confirmation rule
+Prompt:
+A cloud agent's audit flagged that SCRUM-33 is marked Done but BookingLifecycle still confirms a paid booking with a bare transition to CONFIRMED, which contracts v1.3 forbids. I asked the assistant to fix everything it flagged in the way it judged best.
+How the output was used:
+BookingProvider gets markConfirmed(id, paymentRef) (atomic, idempotent). PaymentActivity.prepareExpiry now reports a paid booking as { outcome: 'PAID', paymentRef } so the reference is not lost. BookingLifecycle gets confirmPaid(type, id, paymentRef) (404 unknown, 409 not waiting for payment); the late-paid path in settleDueBooking uses it, and transition(..., CONFIRMED) is rejected with a clear message. The fake provider and the shared conformance tests cover markConfirmed. No real provider or Stripe code exists yet, so nothing else changes.
+I ran lint and the 248 unit tests (the e2e suite does not touch this code).
+================================================

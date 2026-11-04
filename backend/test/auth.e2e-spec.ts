@@ -173,4 +173,56 @@ describe('login, /me and the global guards (e2e)', () => {
       await http().get('/api/probe/admin-only').set('Cookie', tokenFrom(admin)).expect(200);
     });
   });
+
+  // The access token is valid for 15 minutes, but the guard also checks the account on every request,
+  // so changing the account status in the database takes effect on the very next request.
+  describe('account status is re-checked on every request', () => {
+    const setStatus = (email: string, status: string) =>
+      testApp.connection.collection('users').updateOne({ email }, { $set: { status } });
+
+    it.each(['SUSPENDED', 'DEACTIVATED'])('a user who is %s after logging in gets 401 on the next request', async (status) => {
+      const email = `status-${status.toLowerCase()}@example.com`;
+      await insertUser(email);
+      const session = await login(email).expect(200);
+      const cookie = tokenFrom(session);
+
+      await http().get('/api/probe/any-user').set('Cookie', cookie).expect(200);
+      await setStatus(email, status);
+
+      const res = await http().get('/api/probe/any-user').set('Cookie', cookie).expect(401);
+      expect(res.body).toMatchObject({ statusCode: 401, error: 'Unauthorized', path: '/api/probe/any-user' });
+      await http().get('/api/auth/me').set('Cookie', cookie).expect(401);
+    });
+
+    it('a suspended admin is 401 on an @Roles(ADMIN) route, not 200', async () => {
+      await insertUser('admin-to-suspend@example.com', { role: Role.ADMIN });
+      const cookie = tokenFrom(await login('admin-to-suspend@example.com').expect(200));
+      await http().get('/api/probe/admin-only').set('Cookie', cookie).expect(200);
+
+      await setStatus('admin-to-suspend@example.com', 'SUSPENDED');
+      await http().get('/api/probe/admin-only').set('Cookie', cookie).expect(401);
+    });
+
+    it('reactivating the account makes the same cookie work again', async () => {
+      await insertUser('reactivated@example.com');
+      const cookie = tokenFrom(await login('reactivated@example.com').expect(200));
+
+      await setStatus('reactivated@example.com', 'SUSPENDED');
+      await http().get('/api/probe/any-user').set('Cookie', cookie).expect(401);
+      await setStatus('reactivated@example.com', 'ACTIVE');
+      await http().get('/api/probe/any-user').set('Cookie', cookie).expect(200);
+    });
+
+    it('a correctly signed token for a user that no longer exists -> 401', async () => {
+      const ghost = await new JwtService({ secret: TEST_ACCESS_SECRET }).signAsync({
+        sub: new Types.ObjectId().toHexString(),
+        role: Role.USER,
+      });
+      await http().get('/api/probe/any-user').set('Cookie', `access_token=${ghost}`).expect(401);
+    });
+
+    it('public routes still work for everyone', async () => {
+      await http().get('/api/probe/public').expect(200);
+    });
+  });
 });
