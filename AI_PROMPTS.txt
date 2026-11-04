@@ -46,6 +46,21 @@ clean `npm ci` myself, and checked that Swagger opens at /api/docs and that a ba
 ================================================
 Date: 2026-11-03
 Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code, Sonnet 5)
+Related Requirement: PAY-04 (SCRUM-34)
+Prompt:
+Pasted docs/contracts.md, a context file for my module (Payments & Policies) and the SCRUM-34 ticket text, then:
+"Implement only this ticket, following contracts.md. List your assumptions first."
+Assumptions I gave the AI: PLATFORM_CURRENCY and the ...Cents naming convention already exist in common/constants.ts
+(from SCRUM-13) and I cannot edit common/ without the lead's approval, so the ticket's own deliverable in MY module is a
+reusable enforcement of the convention (a validator + DTO + helpers), not a new constant.
+
+How the output was used:
+Used the generated backend/src/payments/money/ (MoneyDto, IsPlatformCurrency validator, assertPlatformCurrency,
+isValidCents, toMoney, formatMoney helpers) and its Jest tests as-is. This is the shared "one platform currency,
+integer cents" building block for PAY-01/PAY-03 (Stripe payments and refunds), which I own and haven't started yet.
+I ran build, lint and the unit tests myself (18 tests, all passing) on a clean checkout. No endpoint exists for this
+ticket (Swagger: n/a per the ticket), so there is nothing to test in Swagger.
 Tool: Claude (Claude Code, Sonnet 5.5)
 Related Requirement: GEN-11 (SCRUM-33)
 Prompt:
@@ -200,9 +215,7 @@ the resulting rules to docs/contracts.md.
 How the output was used:
 The reviewer drafted contracts v1.1 (section 6 constant, section 7 provider/registry/PaymentActivity rows, section 8
 pause rules). I reviewed the wording against GEN-11 and the requirements sheet before committing it.
-================================================
 
-================================================
 Date: 2026-11-04
 Student: Mohamed Walid
 Tool: OpenAI Codex
@@ -237,9 +250,7 @@ Asked who should move flight bookings from CONFIRMED to COMPLETED, following the
 How the output was used:
 The reviewer suggested completing a flight's confirmed bookings when the flight is marked DEPARTED, done by Flights A.
 I accepted it and added it to docs/contracts.md (v1.2) and to my own ticket. The review also found that markExpired was still listed in the contract after PR #8 removed it, so that was fixed too.
-================================================
 
-================================================
 Date: 2026-11-04
 Student: Mohamed Walid
 Tool: OpenAI Codex
