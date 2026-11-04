@@ -1,4 +1,4 @@
-# Project Contracts (v1.2)
+# Project Contracts (v1.3)
 
 **Instructions to the AI assistant reading this:** you are helping one student implement one ticket of a team NestJS + MongoDB project. This file is the team's binding contract. Follow it exactly. If your code would conflict with it, the file wins. If the file seems wrong or incomplete for the ticket, stop and tell the student to raise it with the lead; do not work around it or invent your own version. If the ticket or any needed signature is missing, ask for it before writing code. Before coding, list your assumptions and anything you need from another module. A separate Reviewer AI will check the student's PR against this file and the ticket, using the checklist in section 11, so self-check your output against it.
 
@@ -9,7 +9,7 @@
 - Backend: NestJS + TypeScript + MongoDB Atlas (Mongoose). Frontend: Next.js (later).
 - Folders: `backend/`, `frontend/`, `docs/requirements`, `docs/api`, `AI_PROMPTS.txt`, `README.md`, `.env.example`.
 - One folder per feature module: `backend/src/<module>/` with `<module>.module.ts`, `.controller.ts`, `.service.ts`, `schemas/`, `dto/`.
-- Modules: `auth`, `users`, `admin`, `airlines`, `flights`, `flight-bookings`, `hotels`, `hotel-bookings`, `reviews`, `payments`, `refunds`, `notifications`, `uploads`, `audit`, `itineraries`, `blog`, `reports`, `reference-data`, `common`.
+- Modules: `auth`, `users`, `admin`, `airlines`, `flights`, `flight-bookings`, `hotels`, `hotel-bookings`, `reviews`, `payments`, `fx`, `refunds`, `notifications`, `uploads`, `audit`, `itineraries`, `blog`, `reports`, `reference-data`, `common`.
 - Shared code only in `backend/src/common/` (guards, decorators, enums, pagination, filters, constants). Changing `common/` needs the lead's approval.
 - Never edit another person's module. Ask the owner or the lead.
 
