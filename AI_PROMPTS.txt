@@ -452,3 +452,16 @@ tests. Build, lint, all 313 unit tests and all 126 e2e tests pass locally. The o
 as the reference-data id, 404 for someone else's itinerary, a 250-country safety cap) are listed in the PR for
 the lead to review.
 ================================================
+
+================================================
+Date: 2026-11-04
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: GEN-12 follow-up (SCRUM-18)
+Prompt:
+Implement Ahmed Sanad's follow-up requests for ReferenceDataService: airports by city, airports by country, cities by country and attractions by city, with tests; preserve existing methods and the FLT-02 endpoint. Verify the already merged AppModule registration without unnecessary edits. Add an npm run seed shortcut that builds first, reuses the existing CLI and environment handling, forwards the optional data-directory argument and adds no dependencies. Keep CSVs, schemas, shared code and teammate modules unchanged; do not access real .env credentials, seed the shared Atlas database, commit, push or create a PR. The supplied attachment ends midway through the attractions test-case list; the clearly specified behavior was covered consistently for all four methods.
+How the output was used:
+Added four internal list methods returning complete Airport[], City[] or Attraction[] arrays through one MongoDB-side filtered/projected/sorted query each. They reuse existing relationship indexes, preserve exact official IDs and IANA time zones, exclude MongoDB metadata, return [] for no matches, and keep all existing signatures and the paginated airport endpoint unchanged. Documented the new names as proposed for Ahmed's review and explained complete-result arrays versus HTTP pagination. Verified that ReferenceDataModule is already registered in AppModule and exports the service; added a consumer-module DI test without modifying either module.
+Added package.json preseed (npm run build) and seed (node --env-file=.env dist/reference-data/seed/seed.js) scripts. A real shortcut test exposed Windows custom-path escaping with an initial combined build-and-seed command; splitting the build into preseed fixed it. The final shortcut tests build from missing output, seed default data from a synthetic env file and forward a custom directory containing spaces while preserving explicit environment precedence. All shortcut execution targets only the test's own generated MongoMemoryServer URI, and no developer .env is copied or read.
+Added 13 query/shortcut integration tests covering filters, multiple and empty groups, unrelated-record exclusion, exact IDs, fields/time zones, deterministic sorting, larger groups, normal Nest DI and real npm execution. Verification in an environment-free temporary backend copy using existing dependencies: npm run build PASS; npm run lint PASS; npm test -- --runInBand PASS (326 tests across 25 suites); npm run test:e2e -- --runInBand PASS (162 tests across 10 suites). Documented usage, interface tradeoffs, observed results and the unchanged obsolete-record reconciliation limitation in the module README. Final Git/whitespace/hash checks verify scope. No dependencies were installed or upgraded; no production seed, shared database connection, AppModule/schema/CSV/common changes, commit, push or PR update was performed.
+================================================

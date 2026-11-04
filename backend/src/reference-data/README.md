@@ -115,7 +115,8 @@ The runtime dependency `csv-parse` is pinned to `7.0.3` in
 `backend/package.json` and included in `backend/package-lock.json`. From
 `backend/`, use `npm ci` to install the locked dependencies; no separate parser
 installation or manifest change is needed. `csv-stringify` generates CSV and
-cannot parse it. No additional npm script is required.
+cannot parse it. The seed shortcut below reuses the existing CLI without adding
+dependencies.
 
 The team lead approved the `csv-parse` dependency when reviewing PR #12.
 
@@ -128,15 +129,35 @@ records. The original files are not changed by this module.
 From `backend/`, after configuring the intended database in the existing `.env`:
 
 ```powershell
-npm run build
-node --env-file=.env dist/reference-data/seed/seed.js
+npm run seed
 ```
+
+The `preseed` npm lifecycle hook runs `npm run build` first and, only if it succeeds, executes
+`node --env-file=.env dist/reference-data/seed/seed.js`. This works with the
+project's Node 22+ requirement and regenerates missing/stale compiled output.
+It matches the existing env-file workflow: `backend/.env` must exist, and explicit
+process environment values take precedence over values in that file. No seed runs
+during installation or normal application startup.
+
+To use a custom official data directory, including paths containing spaces:
+
+```powershell
+npm run seed -- "C:\official reference data"
+```
+
+npm forwards the argument to the existing CLI, not the separate `preseed` build.
+Keeping `seed` as a direct Node command also preserves paths with spaces under
+Windows npm argument escaping. For an authorized
+later manual execution, the original two-step build/Node command remains valid.
 
 Alternatively supply `MONGODB_URI` explicitly in the process environment and run:
 
 ```powershell
 node dist/reference-data/seed/seed.js
 ```
+
+This direct CLI alternative requires a prior `npm run build` and does not require
+an env file when `MONGODB_URI` is already supplied explicitly.
 
 The CLI itself never loads `.env` or `AppModule`. `--env-file=.env` is an explicit
 Node 22+ option for an authorized later execution. Do not run the command against
@@ -187,11 +208,11 @@ leave partial results, and the seed does not promise all-collection atomicity.
 
 Verified input: **8 countries, 8 cities, 8 airports, 8 attractions, 7 currencies**.
 
-## Service integration — proposed signatures for team review
+## Service integration and GEN-12 query follow-up
 
-The existing contract approves the service's lookup responsibility, but supplies
-no method names. No existing usages/signatures were found. These new methods need
-team review before consumers adopt them:
+The existing ID lookups and their signatures are preserved, including the methods
+already consumed by hotels and itineraries. The four additional list-query names
+are proposed for Ahmed's review before new consumers adopt them:
 
 ```typescript
 findCountryById(code: string): Promise<Country | null>
@@ -199,7 +220,34 @@ findCityById(city_id: string): Promise<City | null>
 findAirportById(iata_code: string): Promise<Airport | null>
 findAttractionById(attraction_id: string): Promise<Attraction | null>
 findCurrencyById(code: string): Promise<Currency | null>
+listAirportsByCity(cityId: string): Promise<Airport[]>
+listAirportsByCountry(countryCode: string): Promise<Airport[]>
+listCitiesByCountry(countryCode: string): Promise<City[]>
+listAttractionsByCity(cityId: string): Promise<Attraction[]>
 ```
+
+The four internal list methods are the GEN-12 follow-up interface proposed for
+Ahmed's review. No prior implementations or consumers of these names were found.
+They filter by the exact official `city_id` or `country_code`, without trimming,
+recasing or replacing identifiers. Unknown parents and known parents with no
+matches both return `[]`; no separate parent-existence query is needed.
+
+Airport results include `iata_code`, `name`, `city_id`, `country_code` and the
+stored `time_zone`; cities include `city_id`, `name`, `country_code`; attractions
+include `attraction_id`, `name`, `city_id`. Like the existing ID lookups, the lists
+exclude `_id`, `__v` and timestamps. They are internal reference records, not HTTP
+response DTOs. Sorting is ascending by the unique official identifier (`iata_code`,
+`city_id` or `attraction_id`); attraction IDs use lexical, not numeric, ordering.
+
+These internal methods intentionally return every match as a plain array rather
+than silently applying the HTTP endpoint's pagination cap. Each performs one
+MongoDB-side filtered/projected/sorted query using existing relationship indexes,
+with no whole-collection in-memory filtering, counts, enrichment or N+1 queries.
+The returned array's memory use scales with the matching group. If consumers later
+need to stream groups too large to materialize, agree an explicit cursor/paged
+interface rather than truncating these methods' complete-result contract.
+Existing lookups and the paginated `GET /api/airports` method/signature are unchanged;
+no additional HTTP routes, schemas, indexes, migrations or deletion behavior are added.
 
 The lookup return types are the schema classes' official fields only. Lookups are exact
 and case-sensitive, return `null` when absent, and exclude `_id`, `__v` and
@@ -215,6 +263,9 @@ authorized these two integration changes; Ahmed Sanad must review this shared-fi
 modification. Existing Payments, Auth and Notifications registration is unchanged.
 Root registration exposes the controller; sibling consumers still import the
 module themselves to inject the service. The standalone seed CLI remains independent.
+The GEN-12 follow-up verified that registration/export already exists, so neither
+AppModule nor ReferenceDataModule required changes. Its consumer-module integration
+test injects the exported service through normal NestJS module imports.
 
 ## Verification
 
@@ -246,6 +297,45 @@ default/custom/maximum pagination, deterministic pages, validation, read-only
 routing, failure responses, Swagger schemas and existing module registration.
 Regression commands are run from a temporary backend copy without `.env` so no
 developer credentials or shared Atlas connection are used.
+
+`reference-data.queries.integration.spec.ts` exercises all four internal queries
+through a consumer module and disposable MongoDB. It covers multiple matches,
+unrelated records, official fields and IANA zones, stable order, known/unknown empty
+groups, exact identifiers and groups above the HTTP page limit.
+`seed/seed-shortcut.integration.spec.ts` runs the real npm shortcut in a temporary
+copy with no compiled output, links existing dependencies without installing any,
+and writes only a synthetic `.env` pointing to its own disposable MongoDB server.
+It checks build-before-seed, default datasets, a custom directory containing spaces,
+explicit environment precedence and absence of the URI in command output. It never
+reads or copies the developer's `.env` or seeds the team's shared database.
+
+### GEN-12 follow-up verification (2026-11-04)
+
+- Build and ESLint: PASS.
+- Full Jest regression: PASS, 326 tests across 25 suites, including 13 new
+  query/shortcut tests. Existing ID lookups and the public airports API still pass.
+- Full e2e regression: PASS, 162 tests across 10 suites.
+- The first shortcut attempt exposed Windows argument escaping with a combined
+  `npm run build && node ...` script. Separate `preseed`/`seed` scripts corrected
+  this; the final tests verify custom paths with spaces and env-file precedence.
+- Four internal filters, multiple matches, exclusion of unrelated records,
+  complete official fields/IDs, IANA zones, stable ordering, empty groups and
+  larger groups are verified against actual disposable MongoDB collections.
+- AppModule registration/export already exists; normal consumer-module injection
+  is tested. AppModule, ReferenceDataModule, existing HTTP routes, schemas/indexes,
+  CSVs and the lockfile remain unchanged. package.json changes only the two scripts.
+- The npm shortcut was executed only in temporary copies with synthetic `.env`
+  files and a generated disposable URI. No real credentials or shared database
+  were used, no packages were installed, and no commit/push/PR update was performed.
+
+For the follow-up PR checklist: scope is the reference-data service/tests/docs,
+the explicitly requested shared package scripts and the AI log. New method names
+need Ahmed's interface review; existing consumers/signatures are preserved. The
+internal read-only queries add no HTTP routes, auth/ownership rules, money/date
+fields or concurrency-sensitive writes. Existing Swagger, pagination and auth
+behavior are regression-tested. GEN-12's upserts, validation and obsolete-record
+retention policy are unchanged. Publication and Jira/PR checkbox updates remain
+the student's responsibility; this task creates no PR.
 
 Observed on 2026-11-04: build PASS; Jest PASS (55 tests across four suites, including
 eight isolated MongoDB/CLI tests); ESLint PASS; existing e2e PASS (six tests);
