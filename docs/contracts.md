@@ -1,4 +1,4 @@
-# Project Contracts (v1.1)
+# Project Contracts (v1.2)
 
 **Instructions to the AI assistant reading this:** you are helping one student implement one ticket of a team NestJS + MongoDB project. This file is the team's binding contract. Follow it exactly. If your code would conflict with it, the file wins. If the file seems wrong or incomplete for the ticket, stop and tell the student to raise it with the lead; do not work around it or invent your own version. If the ticket or any needed signature is missing, ask for it before writing code. Before coding, list your assumptions and anything you need from another module. A separate Reviewer AI will check the student's PR against this file and the ticket, using the checklist in section 11, so self-check your output against it.
 
@@ -75,6 +75,8 @@ NotificationType: BOOKING_CONFIRMED | BOOKING_CANCELLED | REFUND_UPDATE | FLIGHT
 
 State transitions of `BookingStatus` go through `BookingLifecycle.transition()` (owned by Payments). Nobody sets `status` directly.
 
+**Completion (`CONFIRMED -> COMPLETED`):** hotel bookings are completed after check-out (HTL-23, Hotels B). Flight bookings are completed by Flights A: when a flight is marked `DEPARTED`, it calls `BookingLifecycle.transition(FLIGHT, bookingId, COMPLETED)` for each of that flight's `CONFIRMED` bookings. Cancelled flights never complete; their bookings follow the cancellation path.
+
 ## 6. Business constants (in `common/constants.ts`, read from env where noted)
 
 | Constant | Value |
@@ -101,7 +103,7 @@ Everything below is injected via NestJS DI. Owners publish the signature first; 
 | `BookingLifecycle.transition` | Payments | `transition(type, bookingId, to: BookingStatus): Promise<void>`; rejects illegal transitions | booking owners |
 | `RefundsService.issue` | Payments | `issue({ bookingType, bookingId, amountCents, reason }): Promise<Refund>`; called on every cancellation with a positive refund | flight/hotel cancel, flight cancel by airline |
 | `RefundCalculator.compute` | Payments | `compute({ tiers, daysBefore, totalCents }): number`: tier with highest threshold not above days remaining, else 0 | flight/hotel cancel preview + cancel |
-| Booking provider interface (`BookingProvider`) | Flights B, Hotels B | `getPayable(id, userId)` -> `{ amountCents, currency, status, holdExpiresAt }`, `markConfirmed(id, paymentRef)`, `markExpired(id)`, `getPolicies(id)`, plus the lifecycle methods below | Payments (payment, webhook, expiry sweep, policy acceptance) |
+| Booking provider interface (`BookingProvider`) | Flights B, Hotels B | `getPayable(id, userId)` -> `{ amountCents, currency, status, holdExpiresAt }`, `markConfirmed(id, paymentRef)`, `getPolicies(id)` (there is no `markExpired`: expiry goes through `applyStatus`), plus the lifecycle methods below | Payments (payment, webhook, expiry sweep, policy acceptance) |
 | `BookingProvider` lifecycle methods | Flights B, Hotels B | `getStatus(id)` -> `{ status, holdExpiresAt? }`; `applyStatus(id, from, to): Promise<boolean>` (atomic conditional update on `_id` AND `status = from`; `false` if the booking was no longer in `from`); `findExpiredHolds(now, limit, afterId?)` -> overdue `PENDING_PAYMENT` bookings ordered by `_id`, after `afterId` when given | `BookingLifecycle` only |
 | `BookingProviderRegistry` | Payments | `register(type, provider)`; owners register their provider on module init so Payments never imports their modules | booking owners (register), `BookingLifecycle` (lookup) |
 | `PaymentActivity.prepareExpiry` | Payments | `prepareExpiry(type, bookingId, now): Promise<'SKIP' \| 'PAID' \| 'EXPIRE'>`; `SKIP` = a payment is in flight and inside the pause cap, `PAID` = cancelling the PaymentIntent found it already succeeded (booking must be confirmed, not expired), `EXPIRE` = safe to expire | `BookingLifecycle` (sweep and lazy check) |
