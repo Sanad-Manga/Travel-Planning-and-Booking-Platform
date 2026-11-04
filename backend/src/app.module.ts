@@ -7,6 +7,7 @@ import { BlogModule } from './blog/blog.module';
 import configuration from './config/configuration';
 import { validateEnv } from './config/env.validation';
 import { NotificationsModule } from './notifications';
+import { HotelsModule } from './hotels/hotels.module';
 import { PaymentsModule } from './payments';
 import { ReferenceDataModule } from './reference-data/reference-data.module';
 
@@ -27,6 +28,7 @@ import { ReferenceDataModule } from './reference-data/reference-data.module';
     BlogModule,
     AuthModule,
     NotificationsModule,
+    HotelsModule,
     ReferenceDataModule,
     AirlinesModule,
   ],
