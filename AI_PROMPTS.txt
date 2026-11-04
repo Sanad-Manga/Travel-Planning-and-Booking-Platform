@@ -344,3 +344,15 @@ How the output was used:
 The assistant checked each finding in the code and fixed four: PAYMENT_PAUSE_MAX_MINUTES moved from payments/payment-activity.ts into common/constants.ts (where docs/contracts.md section 6 says constants live); the test helpers fake-booking-provider.ts and booking-provider.conformance.ts are excluded from tsconfig.build.json so they are not compiled into dist; two unused values (holdMinutes, platformCurrency) removed from config/configuration.ts (the constants read the env directly); the reference-data README no longer says the CSVs are untracked or that dependency approval is unverified.
 I ran npm ci, build, lint, unit tests and e2e tests on develop with the change, and checked that dist no longer contains the two test helpers. Behaviour is unchanged.
 ================================================
+
+================================================
+Date: 2026-11-04
+Student: Ahmed Sanad
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: GEN-11 / SCRUM-33 (booking lifecycle), contracts v1.3 confirmation rule
+Prompt:
+A cloud agent's audit flagged that SCRUM-33 is marked Done but BookingLifecycle still confirms a paid booking with a bare transition to CONFIRMED, which contracts v1.3 forbids. I asked the assistant to fix everything it flagged in the way it judged best.
+How the output was used:
+BookingProvider gets markConfirmed(id, paymentRef) (atomic, idempotent). PaymentActivity.prepareExpiry now reports a paid booking as { outcome: 'PAID', paymentRef } so the reference is not lost. BookingLifecycle gets confirmPaid(type, id, paymentRef) (404 unknown, 409 not waiting for payment); the late-paid path in settleDueBooking uses it, and transition(..., CONFIRMED) is rejected with a clear message. The fake provider and the shared conformance tests cover markConfirmed. No real provider or Stripe code exists yet, so nothing else changes.
+I ran lint and the 248 unit tests (the e2e suite does not touch this code).
+================================================
