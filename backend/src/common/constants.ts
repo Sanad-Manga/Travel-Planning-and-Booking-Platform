@@ -19,8 +19,8 @@ export const SESSION_INACTIVITY_MINUTES = 30;
 export const PASSWORD_MIN_LENGTH = 8;
 
 /**
- * PLACEHOLDER cookie names, used by the Swagger cookie-auth scheme.
- * The Auth owner (SCRUM-15) confirms the real names; change them here only.
+ * Cookie names, used by the Swagger cookie-auth scheme and by the auth guard.
+ * Confirmed by the Auth owner (SCRUM-15); change them here only.
  */
 export const ACCESS_TOKEN_COOKIE = 'access_token';
 export const REFRESH_TOKEN_COOKIE = 'refresh_token';
