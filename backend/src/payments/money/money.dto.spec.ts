@@ -4,8 +4,10 @@ import { MoneyDto } from './money.dto';
 
 function makeDto(amountCents: unknown, currency: unknown): MoneyDto {
   const dto = new MoneyDto();
-  (dto as any).amountCents = amountCents;
-  (dto as any).currency = currency;
+  // Object.assign merges structurally (Partial<T> & U) without needing an `any` cast,
+  // which is what we want here: deliberately putting invalid/wrong-typed values onto
+  // the DTO's fields to exercise class-validator's decorators below.
+  Object.assign(dto, { amountCents, currency });
   return dto;
 }
 
