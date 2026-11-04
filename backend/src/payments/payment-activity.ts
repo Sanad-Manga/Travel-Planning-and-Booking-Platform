@@ -5,7 +5,13 @@ import { BookingType } from '../common';
 // common/constants.ts. The real PaymentActivity (PAY-01) uses it; the stub below does not need it,
 // since nothing is ever PROCESSING without Stripe wired up.
 
-export type PrepareExpiryResult = 'SKIP' | 'PAID' | 'EXPIRE';
+/** The payment succeeded; `paymentRef` is the provider's payment reference to store on the booking. */
+export interface PaidResult {
+  outcome: 'PAID';
+  paymentRef: string;
+}
+
+export type PrepareExpiryResult = 'SKIP' | 'EXPIRE' | PaidResult;
 
 /**
  * Decides what should happen to a PENDING_PAYMENT booking whose hold has run out, given
@@ -13,7 +19,7 @@ export type PrepareExpiryResult = 'SKIP' | 'PAID' | 'EXPIRE';
  * PaymentIntents) provides the real implementation. Per the lead's rule:
  *  - SKIP: a payment is PROCESSING and within PAYMENT_PAUSE_MAX_MINUTES of entering that
  *    state. The hold is paused — leave the booking alone.
- *  - PAID: the pause ended because Stripe says the PaymentIntent succeeded (whether that was
+ *  - { outcome: 'PAID', paymentRef }: the pause ended because Stripe says the PaymentIntent succeeded (whether that was
  *    learned before the cap, or discovered when cancelling it after the cap). Confirm the
  *    booking instead of expiring it.
  *  - EXPIRE: nothing is in flight, or a payment reached FAILED/CANCELLED, or the cap was

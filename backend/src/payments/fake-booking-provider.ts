@@ -1,5 +1,8 @@
 import { BookingStatus } from '../common';
-import { BookingProvider, BookingStatusSnapshot } from './booking-provider.interface';
+import {
+  BookingProvider,
+  BookingStatusSnapshot,
+} from './booking-provider.interface';
 
 /**
  * In-memory stand-in for a booking owner, shared by booking-lifecycle.service.spec.ts and
@@ -10,6 +13,7 @@ import { BookingProvider, BookingStatusSnapshot } from './booking-provider.inter
 export class FakeBookingProvider implements BookingProvider {
   readonly bookings = new Map<string, BookingStatusSnapshot>();
   readonly failApplyFor = new Set<string>();
+  readonly paymentRefs = new Map<string, string>();
   findCalls = 0;
 
   add(
@@ -38,6 +42,19 @@ export class FakeBookingProvider implements BookingProvider {
     const booking = this.bookings.get(id);
     if (!booking || booking.status !== from) return false;
     booking.status = to;
+    return true;
+  }
+
+  async markConfirmed(id: string, paymentRef: string): Promise<boolean> {
+    const booking = this.bookings.get(id);
+    if (!booking) return false;
+    if (booking.status === BookingStatus.CONFIRMED) {
+      return this.paymentRefs.get(id) === paymentRef; // idempotent for the same payment
+    }
+    if (booking.status !== BookingStatus.PENDING_PAYMENT) return false;
+    booking.status = BookingStatus.CONFIRMED;
+    booking.holdExpiresAt = null;
+    this.paymentRefs.set(id, paymentRef);
     return true;
   }
 
