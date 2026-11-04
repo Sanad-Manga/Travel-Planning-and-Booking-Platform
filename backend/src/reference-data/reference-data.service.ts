@@ -1,13 +1,15 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
+import { paginate, PaginatedResponse, PaginationDto } from '../common';
+import { AirportResponseDto } from './dto/airport-response.dto';
 import { Country } from './schemas/country.schema';
 import { City } from './schemas/city.schema';
 import { Airport } from './schemas/airport.schema';
 import { Attraction } from './schemas/attraction.schema';
 import { Currency } from './schemas/currency.schema';
 
-/** Internal lookups by official ID. These records are not HTTP response DTOs. */
+/** Official-ID lookups and paginated airport response mapping. */
 @Injectable()
 export class ReferenceDataService {
   constructor(
@@ -57,5 +59,67 @@ export class ReferenceDataService {
       .select('code -_id')
       .lean<Currency>()
       .exec();
+  }
+
+  async listAirports(
+    pagination: PaginationDto,
+  ): Promise<PaginatedResponse<AirportResponseDto>> {
+    const page = await paginate(this.airports, {}, pagination, {
+      sort: { iata_code: 1, _id: 1 },
+      projection: 'iata_code name city_id country_code time_zone',
+      map: (airport: Airport & { _id: Types.ObjectId }) => ({
+        id: airport._id.toString(),
+        iataCode: airport.iata_code,
+        name: airport.name,
+        cityId: airport.city_id,
+        countryCode: airport.country_code,
+        timeZone: airport.time_zone,
+      }),
+    });
+    if (!page.items.length) return { ...page, items: [] };
+
+    // Resolve only this page's official references, avoiding ObjectId population and N+1 queries.
+    const [cities, countries] = await Promise.all([
+      this.cities
+        .find({
+          city_id: {
+            $in: [...new Set(page.items.map((airport) => airport.cityId))],
+          },
+        })
+        .select('city_id name country_code -_id')
+        .lean<City[]>()
+        .exec(),
+      this.countries
+        .find({
+          code: {
+            $in: [...new Set(page.items.map((airport) => airport.countryCode))],
+          },
+        })
+        .select('code name -_id')
+        .lean<Pick<Country, 'code' | 'name'>[]>()
+        .exec(),
+    ]);
+    const citiesById = new Map(cities.map((city) => [city.city_id, city]));
+    const countriesByCode = new Map(
+      countries.map((country) => [country.code, country]),
+    );
+    const items: AirportResponseDto[] = page.items.map((airport) => {
+      const city = citiesById.get(airport.cityId);
+      const country = countriesByCode.get(airport.countryCode);
+      if (!city || !country || city.country_code !== country.code) {
+        throw new InternalServerErrorException(
+          'Airport reference data is incomplete or inconsistent',
+        );
+      }
+      return {
+        id: airport.id,
+        iataCode: airport.iataCode,
+        name: airport.name,
+        city: { cityId: city.city_id, name: city.name },
+        country: { code: country.code, name: country.name },
+        timeZone: airport.timeZone,
+      };
+    });
+    return { ...page, items };
   }
 }
