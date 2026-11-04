@@ -204,6 +204,31 @@ pause rules). I reviewed the wording against GEN-11 and the requirements sheet b
 
 ================================================
 Date: 2026-11-04
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: GEN-12 (SCRUM-18)
+Prompt:
+Implement official reference-data seeding after inspecting docs/contracts.md and the existing NestJS backend. Preserve the four official CSV datasets and their identifiers; derive currencies; validate complete input; provide idempotent, recoverable MongoDB upserts and ReferenceDataService lookups. Add actual Jest and isolated MongoDB tests, verify build/test/lint, respect module ownership, avoid the shared Atlas database and .env contents, and document integration requirements and observed results.
+How the output was used:
+Created the reference-data schemas, CSV loader/validator, explicit seed CLI, Nest module and service, tests, and module setup/interface documentation. Verified with disposable MongoDB instances only. Proposed csv-parse as the required parsing dependency and documented shared-file integration for lead review. No application startup seeding or adjacent-ticket endpoints were added.
+
+Date: 2026-11-04
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: GEN-12 (SCRUM-18)
+Prompt:
+Independently review the completed reference-data implementation against docs/contracts.md. Inspect source, official datasets, schemas, upserts, service integration, dependency metadata and actual Jest tests. Report evidence-backed defects and optional improvements without modifying files, installing dependencies, running the seed, or accessing the shared Atlas database or .env contents.
+How the output was used:
+Received an APPROVE verdict with no blocking implementation defects. The read-only review identified stale dependency/setup documentation and suggested optional concurrent-seeding and existing-duplicate index-failure tests. It confirmed manifest/lockfile consistency statically; it did not rerun installation, build, tests or seeding, and made no file changes.
+
+Date: 2026-11-04
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: GEN-12 (SCRUM-18)
+Prompt:
+Explicitly authorize documentation cleanup in backend/src/reference-data/README.md and AI_PROMPTS.txt only. Correct outdated dependency information and append entries documenting the independent review and this cleanup. Do not modify implementation files, install dependencies, commit, push, or create a PR. Verify the documentation changes afterward.
+How the output was used:
+Updated the README to reflect csv-parse@7.0.3 already declared in the manifest and lockfile, documented npm ci setup, separated unverified team-lead approval from dependency availability, and distinguished initial verification from the independent review. Appended the review and cleanup entries without overwriting previous log entries. Verification checks documentation content, whitespace and repository file hashes; implementation tests and seeding are not rerun for this documentation-only change.
 Student: Ahmed Sanad
 Tool: Claude (Claude Code, Sonnet 5.5), used as a code reviewer
 Related Requirement: GEN-11, HTL-23, FLT-30 (flight status change)
@@ -212,4 +237,18 @@ Asked who should move flight bookings from CONFIRMED to COMPLETED, following the
 How the output was used:
 The reviewer suggested completing a flight's confirmed bookings when the flight is marked DEPARTED, done by Flights A.
 I accepted it and added it to docs/contracts.md (v1.2) and to my own ticket. The review also found that markExpired was still listed in the contract after PR #8 removed it, so that was fixed too.
+================================================
+
+================================================
+Date: 2026-11-04
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: GEN-12 (SCRUM-18)
+Prompt:
+Investigate and fix the npm lockfile reproducibility issue identified during PR #12 review, including the missing webpack dependency. Preserve existing dependency versions and csv-parse@7.0.3, regenerate the lockfile with npm install, verify genuinely clean installations and backend regression checks, and do not access .env, the shared Atlas database, or run production seeding. Do not commit, push, or update the PR.
+How the output was used:
+Reproduced the original lockfile's "Missing: webpack@5.112.2 from lock file" error with npm 10.9.2 on both Node 24.14.0 and Ahmed's exact Node 22.14.0; the original lockfile installed successfully with npm 11.13.0. Inspection showed @nestjs/cli@11.0.24 pins webpack@5.106.2, while its nested schema-utils@4.8.2 declares an optional webpack peer of ^5.112.0. Commit 7906537 had removed the nested webpack@5.112.2 peer entry needed by npm 10's dependency resolution.
+Ran npm 10.9.2 install --package-lock-only --ignore-scripts --no-audit --no-fund from backend. npm restored exactly the missing 43-line node_modules/@nestjs/cli/node_modules/webpack/node_modules/webpack entry, including npm-generated registry and integrity metadata. package.json and all existing locked package versions remained unchanged; csv-parse stayed at 7.0.3.
+Verified npm ci --no-audit --no-fund from two fresh temporary backend copies with no pre-existing node_modules or .env: Node 22.14.0/npm 10.9.2 PASS and Node 24.14.0/npm 11.13.0 PASS. Two earlier corrected-lock installation attempts were interrupted during redundant large MongoDB binary downloads; the successful retries used fresh directories and MONGOMS_DOWNLOAD_DIR pointing to an already downloaded MongoDB 8.2.6 binary cache, with lifecycle scripts enabled.
+On each freshly installed copy, npm run build PASS; npm test -- --runInBand PASS (55 tests, four suites); npm run lint PASS; npm run test:e2e -- --runInBand PASS (six tests). Existing reference-data integration tests used their own disposable MongoDB servers; no production seed or shared database connection was executed. Temporary backend copies excluded all environment files. Repository verification checks the actual Git diff, whitespace, and before/after file hashes; only package-lock.json and this prompt-log append are changed. No commits, pushes, or PR updates were performed.
 ================================================
