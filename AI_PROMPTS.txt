@@ -470,6 +470,15 @@ How the output was used:
 The assistant added UpdatePostDto (PartialType of CreatePostDto), BlogService.update (one atomic findOneAndUpdate filtered by _id and authorId, $min keeps the first publishedAt, empty body and null values rejected with 400) and BlogService.remove / deletePostAndDependents (reusable for a later admin delete), plus PATCH and DELETE (204) in the controller and 13 e2e tests. Assumptions I accepted: PUBLISHED -> DRAFT is allowed and keeps publishedAt; the author can edit and delete hidden posts; the cascade deletes from the raw collections `comments` and `likes` by ObjectId field `postId` (BLG-05/06 must use these names or change the constant); it is not in a transaction because the in-memory and standalone MongoDB do not support them. I ran build, lint, 243 unit tests and 120 e2e tests (in-memory MongoDB) and read every file before committing.
 ================================================
 Date: 2026-11-05
+Student: Ahmed Sanad
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: FLT-03 (SCRUM-24) Create flight (local times in, UTC stored)
+Prompt:
+Start on SCRUM-24. Implement ONLY FLT-03: POST /api/flights for an airline moderator of their own airline, with flight number, departure and arrival airport, and departure and arrival date-times entered in each airport local time and stored in UTC. Reject identical airports, arrival not after departure (UTC), departure in the past, and a duplicate flight number for the same airline on the same departure date. Airports must come from the seeded list. Follow docs/contracts.md.
+How the output was used:
+The assistant added the flights module (schema with a unique index on airline + flight number + local departure date, create DTO, response DTO, service, controller), a small Intl-based local-time-to-UTC helper (no new dependency; a daylight-saving gap is rejected, a repeated hour takes the earlier instant), and the tests (helper, service integration, HTTP e2e). Decisions I accepted: the airline comes from the login, not the body; input fields are departureLocalTime and arrivalLocalTime; the response returns departureAt and arrivalAt in UTC plus both IANA zones; every broken rule is reported at once as a field-level 400; "same departure date" means the date at the departure airport. I ran build, lint, unit and e2e tests and read every file before committing.
+================================================
+Date: 2026-11-05
 Student: Yassin Yahya
 Tool: Claude (Claude Code)
 Related Requirement: ITN-03 (SCRUM-36)
