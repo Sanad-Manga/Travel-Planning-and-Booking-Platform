@@ -211,8 +211,9 @@ Verified input: **8 countries, 8 cities, 8 airports, 8 attractions, 7 currencies
 ## Service integration and GEN-12 query follow-up
 
 The existing ID lookups and their signatures are preserved, including the methods
-already consumed by hotels and itineraries. The four additional list-query names
-are proposed for Ahmed's review before new consumers adopt them:
+already consumed by hotels and itineraries. The five list-query signatures below
+cover SCRUM-126; the existing four are unchanged and `listCountries()` is the
+specific addition requested in Ahmed's PR #29 review:
 
 ```typescript
 findCountryById(code: string): Promise<Country | null>
@@ -223,12 +224,15 @@ findCurrencyById(code: string): Promise<Currency | null>
 listAirportsByCity(cityId: string): Promise<Airport[]>
 listAirportsByCountry(countryCode: string): Promise<Airport[]>
 listCitiesByCountry(countryCode: string): Promise<City[]>
+listCountries(): Promise<Country[]>
 listAttractionsByCity(cityId: string): Promise<Attraction[]>
 ```
 
-The four internal list methods are the GEN-12 follow-up interface proposed for
-Ahmed's review. No prior implementations or consumers of these names were found.
-They filter by the exact official `city_id` or `country_code`, without trimming,
+The five internal list methods implement the GEN-12 follow-up. `listCountries()` addresses Ahmed's missing-method finding on
+PR #29 for SCRUM-126. It reads all country records dynamically and returns only
+`code`, `name` and `currency`, ordered by the unique official `code`; an empty
+country collection returns `[]`. It adds no HTTP endpoint or dataset assumptions.
+The other four methods filter by the exact official `city_id` or `country_code`, without trimming,
 recasing or replacing identifiers. Unknown parents and known parents with no
 matches both return `[]`; no separate parent-existence query is needed.
 
@@ -236,12 +240,14 @@ Airport results include `iata_code`, `name`, `city_id`, `country_code` and the
 stored `time_zone`; cities include `city_id`, `name`, `country_code`; attractions
 include `attraction_id`, `name`, `city_id`. Like the existing ID lookups, the lists
 exclude `_id`, `__v` and timestamps. They are internal reference records, not HTTP
-response DTOs. Sorting is ascending by the unique official identifier (`iata_code`,
-`city_id` or `attraction_id`); attraction IDs use lexical, not numeric, ordering.
+response DTOs. Country records contain `code`, `name`, `currency`. Sorting is
+ascending by the unique official identifier (`iata_code`, `city_id`, `code` or
+`attraction_id`); attraction IDs use lexical, not numeric, ordering.
 
 These internal methods intentionally return every match as a plain array rather
 than silently applying the HTTP endpoint's pagination cap. Each performs one
-MongoDB-side filtered/projected/sorted query using existing relationship indexes,
+MongoDB-side projected/sorted query, filtering the four grouped lists through
+existing relationship indexes and ordering countries through their code index,
 with no whole-collection in-memory filtering, counts, enrichment or N+1 queries.
 The returned array's memory use scales with the matching group. If consumers later
 need to stream groups too large to materialize, agree an explicit cursor/paged
@@ -298,10 +304,13 @@ routing, failure responses, Swagger schemas and existing module registration.
 Regression commands are run from a temporary backend copy without `.env` so no
 developer credentials or shared Atlas connection are used.
 
-`reference-data.queries.integration.spec.ts` exercises all four internal queries
+`reference-data.queries.integration.spec.ts` exercises all five internal queries
 through a consumer module and disposable MongoDB. It covers multiple matches,
 unrelated records, official fields and IANA zones, stable order, known/unknown empty
-groups, exact identifiers and groups above the HTTP page limit.
+groups, exact identifiers and groups above the HTTP page limit. Country coverage
+also uses the existing GEN-12 seed with official CSV data, checks metadata
+exclusion against stored documents, and exercises empty, one-row, three-row and
+80-row country collections.
 `seed/seed-shortcut.integration.spec.ts` runs the real npm shortcut in a temporary
 copy with no compiled output, links existing dependencies without installing any,
 and writes only a synthetic `.env` pointing to its own disposable MongoDB server.
@@ -336,6 +345,43 @@ fields or concurrency-sensitive writes. Existing Swagger, pagination and auth
 behavior are regression-tested. GEN-12's upserts, validation and obsolete-record
 retention policy are unchanged. Publication and Jira/PR checkbox updates remain
 the student's responsibility; this task creates no PR.
+
+### PR #29 review correction — SCRUM-126 (2026-11-06)
+
+Ahmed's review identified the missing fifth list method. This focused correction
+adds `listCountries(): Promise<Country[]>` using one MongoDB query, ascending
+official-code ordering and a projection of `code`, `name`, `currency` only.
+It preserves the four existing lists, all ID lookups and the airport endpoint.
+
+Observed verification: relevant query integration suite PASS (16 tests, including
+five new country cases); full Jest PASS (331 tests, 25 suites); full e2e PASS
+(162 tests, 10 suites); build PASS; ESLint PASS. New cases verify official seeded
+data, exact names/currencies/codes, repeated deterministic ordering, absence of
+stored metadata, an empty collection and datasets of one, three and 80 countries.
+All database execution used disposable MongoDB in an environment-free copy;
+no developer credentials or shared Atlas database were used.
+
+Every live [SCRUM-126 acceptance criterion](https://ahmedsanadprojects.atlassian.net/browse/SCRUM-126)
+was checked against the implementation:
+
+| Criterion | Status and evidence |
+| --- | --- |
+| Airports by city | PASS: existing `listAirportsByCity()` and its integration tests are unchanged |
+| Airports by country | PASS: existing `listAirportsByCountry()` and its integration tests are unchanged |
+| Cities by country | PASS: existing `listCitiesByCountry()` and its integration tests are unchanged |
+| Countries | PASS: `listCountries()` returns all official fields in code order, excludes metadata and returns `[]` when empty |
+| Attractions by city | PASS: existing `listAttractionsByCity()` and its integration tests are unchanged |
+| ReferenceDataModule in AppModule | PASS: registration and service export already exist; neither module is edited |
+| README documents the new methods | PASS: all five signatures and their behavior are documented above |
+| Available to dependent tickets | PASS: normal consumer-module injection is tested; no consumer changes or existing signature changes are required |
+| No new route | PASS: the addition is an internal service method; existing HTTP controller is untouched |
+
+The Jira checklist is also reviewed: each list has disposable-MongoDB integration
+coverage with seeded records; existing find-by-ID behavior passes regression
+tests; registration is present; README is updated. This is a correction to the
+existing PR #29, not a new PR. PR metadata/shared-checkbox and Jira updates remain
+with the student; no remote state was changed. Schemas, CSVs, package manifests,
+lockfile, seed shortcut and teammate modules remain untouched.
 
 Observed on 2026-11-04: build PASS; Jest PASS (55 tests across four suites, including
 eight isolated MongoDB/CLI tests); ESLint PASS; existing e2e PASS (six tests);

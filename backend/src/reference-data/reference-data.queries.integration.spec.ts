@@ -9,6 +9,8 @@ import {
 } from './reference-data.models';
 import { ReferenceDataModule } from './reference-data.module';
 import { ReferenceDataService } from './reference-data.service';
+import { loadReferenceData } from './seed/reference-data.loader';
+import { seedReferenceData } from './seed/seed-reference-data';
 
 jest.mock('dotenv', () => ({
   ...jest.requireActual<typeof import('dotenv')>('dotenv'),
@@ -142,6 +144,55 @@ describe('internal reference lists through an importing consumer module', () => 
     expect(result).toEqual([cities[1], cities[0]]);
     expect(await service.listCitiesByCountry('AA')).toEqual(result);
   });
+
+  it('lists all official seeded countries in code order with names/currencies and no MongoDB metadata', async () => {
+    const data = await loadReferenceData();
+    await Promise.all([
+      models.countries.deleteMany({}),
+      models.cities.deleteMany({}),
+      models.airports.deleteMany({}),
+      models.attractions.deleteMany({}),
+      models.currencies.deleteMany({}),
+    ]);
+    await seedReferenceData(models, data);
+    await models.countries.collection.updateOne(
+      { code: data.countries[0].code },
+      { $set: { __v: 12, internalNote: 'must not be returned' } },
+    );
+    const stored = await models.countries.collection.findOne({
+      code: data.countries[0].code,
+    });
+    expect(stored).toMatchObject({
+      _id: expect.anything(),
+      createdAt: expect.any(Date),
+      updatedAt: expect.any(Date),
+      __v: 12,
+    });
+    const expected = [...data.countries].sort((left, right) =>
+      left.code.localeCompare(right.code),
+    );
+    expect(await service.listCountries()).toEqual(expected);
+    expect(await service.listCountries()).toEqual(expected);
+  });
+
+  it('returns [] when the countries collection is empty', async () => {
+    await models.countries.deleteMany({});
+    expect(await service.listCountries()).toEqual([]);
+  });
+
+  it.each([1, 3, 80])(
+    'lists every country for a dataset of %i rows, without a fixed count or HTTP page cap',
+    async (size) => {
+      await models.countries.deleteMany({});
+      const countries = Array.from({ length: size }, (_, index) => ({
+        code: `${String.fromCharCode(65 + Math.floor(index / 26))}${String.fromCharCode(65 + (index % 26))}`,
+        name: `Country fixture ${index}`,
+        currency: ['USD', 'EUR', 'JPY'][index % 3],
+      }));
+      await models.countries.insertMany([...countries].reverse());
+      expect(await service.listCountries()).toEqual(countries);
+    },
+  );
 
   it('returns attractions in official attraction_id order with no MongoDB metadata', async () => {
     const result = await service.listAttractionsByCity('city-a');

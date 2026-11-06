@@ -89,6 +89,15 @@ export class ReferenceDataService {
       .exec();
   }
 
+  listCountries(): Promise<Country[]> {
+    return this.countries
+      .find()
+      .sort({ code: 1 })
+      .select('code name currency -_id')
+      .lean<Country[]>()
+      .exec();
+  }
+
   listAttractionsByCity(cityId: string): Promise<Attraction[]> {
     return this.attractions
       .find({ city_id: cityId })
