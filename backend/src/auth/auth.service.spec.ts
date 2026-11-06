@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
@@ -11,7 +11,13 @@ const ID = '6730a1f2c3d4e5f607182930';
 
 describe('AuthService', () => {
   let service: AuthService;
-  const usersService = { findByEmail: jest.fn(), findById: jest.fn(), create: jest.fn() };
+  const usersService = {
+    findByEmail: jest.fn(),
+    findById: jest.fn(),
+    findByIdWithPassword: jest.fn(),
+    replacePasswordHash: jest.fn(),
+    create: jest.fn(),
+  };
   const jwtService = { signAsync: jest.fn(), verifyAsync: jest.fn() };
   const dto = { name: 'Ali', email: 'ali@example.com', password: 'Passw0rdOK', acceptTerms: true };
   const storedHash = hashSync('Passw0rdOK', 4);
@@ -190,6 +196,54 @@ describe('AuthService', () => {
     it('401 when the user no longer exists', async () => {
       usersService.findById.mockResolvedValue(null);
       await expect(service.refresh('x')).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+  });
+
+  describe('changePassword (ACC-08)', () => {
+    const change = { currentPassword: 'Passw0rdOK', newPassword: 'N3wPassw0rd' };
+
+    beforeEach(() => {
+      usersService.findByIdWithPassword.mockResolvedValue(userDoc());
+      usersService.replacePasswordHash.mockResolvedValue(true);
+    });
+
+    it('stores the new password only as a salted bcrypt hash, compare-and-set on the old hash', async () => {
+      await service.changePassword(ID, change);
+      const [id, expectedHash, newHash] = usersService.replacePasswordHash.mock.calls[0];
+      expect(id).toBe(ID);
+      expect(expectedHash).toBe(storedHash);
+      expect(newHash).not.toContain(change.newPassword);
+      expect(newHash).toMatch(/^\$2[aby]\$10\$/);
+      await expect(compare(change.newPassword, newHash)).resolves.toBe(true);
+    });
+
+    it('uses a fresh salt every time (two changes to the same password give different hashes)', async () => {
+      await service.changePassword(ID, change);
+      await service.changePassword(ID, change);
+      const hashes = usersService.replacePasswordHash.mock.calls.map((c) => c[2]);
+      expect(hashes[0]).not.toBe(hashes[1]);
+    });
+
+    it('rejects a wrong current password with a field-level 400 and changes nothing', async () => {
+      const error = await service.changePassword(ID, { ...change, currentPassword: 'WrongPass1' }).catch((e: BadRequestException) => e);
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect((error as BadRequestException).getResponse()).toMatchObject({
+        details: [{ field: 'currentPassword', message: expect.any(String) }],
+      });
+      expect(usersService.replacePasswordHash).not.toHaveBeenCalled();
+    });
+
+    it('409 when another request changed the password in between (nothing overwritten)', async () => {
+      usersService.replacePasswordHash.mockResolvedValue(false);
+      await expect(service.changePassword(ID, change)).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('401 when the user is gone or no longer ACTIVE', async () => {
+      usersService.findByIdWithPassword.mockResolvedValueOnce(null);
+      await expect(service.changePassword(ID, change)).rejects.toBeInstanceOf(UnauthorizedException);
+      usersService.findByIdWithPassword.mockResolvedValueOnce(userDoc({ status: AccountStatus.SUSPENDED }));
+      await expect(service.changePassword(ID, change)).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(usersService.replacePasswordHash).not.toHaveBeenCalled();
     });
   });
 

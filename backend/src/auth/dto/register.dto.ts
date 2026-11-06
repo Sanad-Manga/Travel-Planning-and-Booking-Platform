@@ -1,9 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { Equals, IsEmail, IsNotEmpty, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import { Equals, IsEmail, IsNotEmpty, IsString, MaxLength } from 'class-validator';
 import { PASSWORD_MIN_LENGTH } from '../../common';
-import { PASSWORD_MAX_BYTES } from '../auth.constants';
-import { MaxByteLength } from '../validators/max-byte-length.decorator';
+import { IsValidPassword } from '../validators/password.decorator';
 
 // Runs before validation: " Ali@Mail.COM " becomes "ali@mail.com". Non-strings are left for the validators to reject.
 const trimString = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
@@ -28,15 +27,8 @@ export class RegisterDto {
     minLength: PASSWORD_MIN_LENGTH,
     description: 'At least 8 characters, with at least one letter and one digit. At most 72 bytes in UTF-8.',
   })
-  @IsString()
-  @MinLength(PASSWORD_MIN_LENGTH, { message: `password must be at least ${PASSWORD_MIN_LENGTH} characters` })
-  // bcrypt only uses the first 72 BYTES, so a longer password would silently be truncated. Bytes, not characters.
-  @MaxByteLength(PASSWORD_MAX_BYTES, {
-    message: 'password is too long (maximum 72 bytes; non-English characters use 2 or more bytes each)',
-  })
-  // \p{L} = any Unicode letter (Latin, Arabic, ...); the `u` flag makes JavaScript understand \p{...}.
-  @Matches(/\p{L}/u, { message: 'password must contain at least one letter' })
-  @Matches(/\d/, { message: 'password must contain at least one digit' })
+  // The shared rule (also used by change password and the admin reset): see validators/password.decorator.ts.
+  @IsValidPassword()
   password: string;
 
   @ApiProperty({ example: true, description: 'Must be true: the user accepts the terms and the privacy policy.' })
