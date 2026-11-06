@@ -4,7 +4,7 @@ import { getConnectionToken, MongooseModule } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
 import { hashSync } from 'bcryptjs';
 import { MongoMemoryServer } from 'mongodb-memory-server';
-import { Connection } from 'mongoose';
+import { Connection, Types } from 'mongoose';
 import request from 'supertest';
 import { AuthModule } from '../src/auth/auth.module';
 import { Role } from '../src/common';
@@ -422,12 +422,14 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
         .set('Cookie', alice)
         .send({ countryCodes: ['XX'] })
         .expect(400);
-      // Visibility is changed by ITN-20, not by this ticket.
-      await http()
+      const res = await http()
         .patch(`/api/itineraries/${id}`)
         .set('Cookie', alice)
-        .send({ visibility: 'PUBLIC' })
+        .send({ visibility: 'SECRET' })
         .expect(400);
+      expect(res.body.details).toEqual([
+        expect.objectContaining({ field: 'visibility' }),
+      ]);
     });
 
     it('404 for an id that does not exist', async () => {
@@ -436,6 +438,108 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
         .set('Cookie', alice)
         .send({ title: 'x' })
         .expect(404);
+    });
+  });
+
+  describe('visibility (ITN-20)', () => {
+    const setVisibility = (cookie: string, id: string, visibility: string) =>
+      http()
+        .patch(`/api/itineraries/${id}`)
+        .set('Cookie', cookie)
+        .send({ visibility });
+
+    it('a new itinerary is private: others get 404', async () => {
+      const created = await createAs(alice);
+      expect(created).toMatchObject({ visibility: 'PRIVATE' });
+      await http()
+        .get(`/api/itineraries/${created.id}`)
+        .set('Cookie', bob)
+        .expect(404);
+    });
+
+    it('the owner sets it PUBLIC: another user reads it (200, same body)', async () => {
+      const { id } = await createAs(alice);
+      const shared = await setVisibility(alice, id, 'PUBLIC').expect(200);
+      expect(shared.body).toMatchObject({ id, visibility: 'PUBLIC' });
+
+      const res = await http()
+        .get(`/api/itineraries/${id}`)
+        .set('Cookie', bob)
+        .expect(200);
+      expect(res.body).toEqual(shared.body);
+    });
+
+    it('a public itinerary stays read-only to others: edit, visibility and delete give 404', async () => {
+      const { id } = await createAs(alice);
+      await setVisibility(alice, id, 'PUBLIC').expect(200);
+
+      await http()
+        .patch(`/api/itineraries/${id}`)
+        .set('Cookie', bob)
+        .send({ title: 'Hijacked' })
+        .expect(404);
+      await setVisibility(bob, id, 'PRIVATE').expect(404);
+      await http()
+        .delete(`/api/itineraries/${id}`)
+        .set('Cookie', bob)
+        .expect(404);
+
+      const res = await http()
+        .get(`/api/itineraries/${id}`)
+        .set('Cookie', alice)
+        .expect(200);
+      expect(res.body).toMatchObject({
+        title: valid.title,
+        visibility: 'PUBLIC',
+      });
+    });
+
+    it('setting it PRIVATE hides it from others on the next request', async () => {
+      const { id } = await createAs(alice);
+      await setVisibility(alice, id, 'PUBLIC').expect(200);
+      await http().get(`/api/itineraries/${id}`).set('Cookie', bob).expect(200);
+
+      await setVisibility(alice, id, 'PRIVATE').expect(200);
+      await http().get(`/api/itineraries/${id}`).set('Cookie', bob).expect(404);
+      await http()
+        .get(`/api/itineraries/${id}`)
+        .set('Cookie', alice)
+        .expect(200);
+    });
+
+    it('a public itinerary of a deactivated author is hidden from others', async () => {
+      const erin = await loginAs('erin@example.com');
+      const { id } = await createAs(erin);
+      await setVisibility(erin, id, 'PUBLIC').expect(200);
+      await connection
+        .collection('users')
+        .updateOne(
+          { email: 'erin@example.com' },
+          { $set: { status: 'DEACTIVATED' } },
+        );
+      await http().get(`/api/itineraries/${id}`).set('Cookie', bob).expect(404);
+    });
+
+    it('a public itinerary hidden by an admin is hidden from others', async () => {
+      const { id } = await createAs(alice);
+      await setVisibility(alice, id, 'PUBLIC').expect(200);
+      await connection
+        .collection('itineraries')
+        .updateOne(
+          { _id: new Types.ObjectId(id) },
+          { $set: { isHidden: true } },
+        );
+      await http().get(`/api/itineraries/${id}`).set('Cookie', bob).expect(404);
+    });
+
+    it('400 for an unknown visibility value, 401 without a cookie, 403 for an admin', async () => {
+      const { id } = await createAs(alice);
+      await setVisibility(alice, id, 'public').expect(400);
+      await http()
+        .patch(`/api/itineraries/${id}`)
+        .send({ visibility: 'PUBLIC' })
+        .expect(401);
+      await setVisibility(admin, id, 'PUBLIC').expect(403);
     });
   });
 

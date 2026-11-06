@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ReferenceDataModule } from '../reference-data/reference-data.module';
+import { UsersModule } from '../users/users.module';
 import { ItinerariesController } from './itineraries.controller';
 import { ItinerariesService } from './itineraries.service';
 import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema';
@@ -12,6 +13,8 @@ import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema';
     ]),
     // Countries are validated through ReferenceDataService, never by reading the collection directly.
     ReferenceDataModule,
+    // ITN-20: a public itinerary is shown to others only while its author's account is ACTIVE (ACC-12).
+    UsersModule,
   ],
   controllers: [ItinerariesController],
   providers: [ItinerariesService],

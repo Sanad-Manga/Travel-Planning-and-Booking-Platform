@@ -31,7 +31,7 @@ export class Itinerary {
   @Prop({ type: String, required: true })
   startDate: string;
 
-  /** Private by default (ITN-01). ITN-20 adds the endpoint that changes it. */
+  /** Private by default (ITN-01). The owner changes it with PATCH /api/itineraries/:id (ITN-20). */
   @Prop({
     type: String,
     enum: Object.values(Visibility),

@@ -5,7 +5,7 @@ import {
 } from '@nestjs/mongoose';
 import { Test, TestingModule } from '@nestjs/testing';
 import { MongoMemoryServer } from 'mongodb-memory-server';
-import { Connection, Model, Types } from 'mongoose';
+import { Collection, Connection, Model, Types } from 'mongoose';
 import { AuthenticatedUser, Role, Visibility } from '../common';
 import { ItinerariesModule } from './itineraries.module';
 import { ItinerariesService } from './itineraries.service';
@@ -18,6 +18,7 @@ describe('ItinerariesService (ITN-01) with an isolated MongoDB', () => {
   let moduleRef: TestingModule;
   let model: Model<Itinerary>;
   let service: ItinerariesService;
+  let users: Collection;
 
   const userWithId = (): AuthenticatedUser => ({
     userId: new Types.ObjectId().toString(),
@@ -44,15 +45,14 @@ describe('ItinerariesService (ITN-01) with an isolated MongoDB', () => {
     service = moduleRef.get(ItinerariesService);
     await model.init();
 
+    const connection = moduleRef.get<Connection>(getConnectionToken());
+    users = connection.collection('users');
     // The seeded countries this module is allowed to accept (the real seed has many more).
-    await moduleRef
-      .get<Connection>(getConnectionToken())
-      .collection('countries')
-      .insertMany([
-        { code: 'EG', name: 'Egypt', currency: 'EGP' },
-        { code: 'AE', name: 'United Arab Emirates', currency: 'AED' },
-        { code: 'GB', name: 'United Kingdom', currency: 'GBP' },
-      ]);
+    await connection.collection('countries').insertMany([
+      { code: 'EG', name: 'Egypt', currency: 'EGP' },
+      { code: 'AE', name: 'United Arab Emirates', currency: 'AED' },
+      { code: 'GB', name: 'United Kingdom', currency: 'GBP' },
+    ]);
   });
 
   beforeEach(async () => {
@@ -187,25 +187,77 @@ describe('ItinerariesService (ITN-01) with an isolated MongoDB', () => {
     });
   });
 
-  describe('findMine (ITN-03)', () => {
+  describe('findOne (ITN-03, ITN-20)', () => {
+    /** The author's account as UsersService.isActive reads it. */
+    const setAuthorStatus = (status: string) =>
+      users.updateOne(
+        { _id: new Types.ObjectId(owner.userId) },
+        { $set: { status } },
+        { upsert: true },
+      );
+
+    beforeEach(() => setAuthorStatus('ACTIVE'));
+
     it('returns the full itinerary to its owner', async () => {
       const created = await service.create(owner, validDto);
-      await expect(service.findMine(owner, created.id)).resolves.toEqual(
+      await expect(service.findOne(owner, created.id)).resolves.toEqual(
         created,
       );
     });
 
-    it("answers 404 for someone else's itinerary, even a public one", async () => {
+    it('lets another user read a public itinerary', async () => {
       const { id } = await service.create(owner, validDto);
-      await model.updateOne({ _id: id }, { visibility: Visibility.PUBLIC });
-      await expect(service.findMine(stranger, id)).rejects.toMatchObject({
+      const shared = await service.update(owner, id, {
+        visibility: Visibility.PUBLIC,
+      });
+      await expect(service.findOne(stranger, id)).resolves.toEqual(shared);
+    });
+
+    it("answers 404 for someone else's private itinerary", async () => {
+      const { id } = await service.create(owner, validDto);
+      await expect(service.findOne(stranger, id)).rejects.toMatchObject({
         status: 404,
       });
     });
 
+    it('hides a public itinerary again as soon as it is set private', async () => {
+      const { id } = await service.create(owner, validDto);
+      await service.update(owner, id, { visibility: Visibility.PUBLIC });
+      await service.update(owner, id, { visibility: Visibility.PRIVATE });
+      await expect(service.findOne(stranger, id)).rejects.toMatchObject({
+        status: 404,
+      });
+    });
+
+    it('answers 404 to others for a public itinerary hidden by an admin, but not to its owner', async () => {
+      const { id } = await service.create(owner, validDto);
+      await model.updateOne(
+        { _id: id },
+        { visibility: Visibility.PUBLIC, isHidden: true },
+      );
+      await expect(service.findOne(stranger, id)).rejects.toMatchObject({
+        status: 404,
+      });
+      await expect(service.findOne(owner, id)).resolves.toMatchObject({
+        isHidden: true,
+      });
+    });
+
+    it.each(['SUSPENDED', 'DEACTIVATED'])(
+      'answers 404 to others for a public itinerary whose author is %s',
+      async (status) => {
+        const { id } = await service.create(owner, validDto);
+        await service.update(owner, id, { visibility: Visibility.PUBLIC });
+        await setAuthorStatus(status);
+        await expect(service.findOne(stranger, id)).rejects.toMatchObject({
+          status: 404,
+        });
+      },
+    );
+
     it('answers 404 for an id that does not exist', async () => {
       await expect(
-        service.findMine(owner, new Types.ObjectId().toString()),
+        service.findOne(owner, new Types.ObjectId().toString()),
       ).rejects.toMatchObject({ status: 404 });
     });
   });
@@ -224,6 +276,31 @@ describe('ItinerariesService (ITN-01) with an isolated MongoDB', () => {
         countryCodes: ['EG'],
         startDate: '2027-01-05',
         visibility: Visibility.PRIVATE,
+      });
+    });
+
+    it('lets the owner set visibility to PUBLIC and back to PRIVATE (ITN-20)', async () => {
+      const { id } = await service.create(owner, validDto);
+      await expect(
+        service.update(owner, id, { visibility: Visibility.PUBLIC }),
+      ).resolves.toMatchObject({ visibility: Visibility.PUBLIC });
+      await expect(
+        service.update(owner, id, { visibility: Visibility.PRIVATE }),
+      ).resolves.toMatchObject({ visibility: Visibility.PRIVATE });
+    });
+
+    it('keeps a public itinerary read-only to others: 404 and no change (ITN-20)', async () => {
+      const { id } = await service.create(owner, validDto);
+      await service.update(owner, id, { visibility: Visibility.PUBLIC });
+      await expect(
+        service.update(stranger, id, { visibility: Visibility.PRIVATE }),
+      ).rejects.toMatchObject({ status: 404 });
+      await expect(
+        service.update(stranger, id, { title: 'Hijacked' }),
+      ).rejects.toMatchObject({ status: 404 });
+      expect(await model.findById(id).lean()).toMatchObject({
+        title: validDto.title,
+        visibility: Visibility.PUBLIC,
       });
     });
 

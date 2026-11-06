@@ -10,8 +10,10 @@ import {
   paginate,
   PaginatedResponse,
   PaginationDto,
+  Visibility,
 } from '../common';
 import { ReferenceDataService } from '../reference-data/reference-data.service';
+import { UsersService } from '../users/users.service';
 import { CreateItineraryDto } from './dto/create-itinerary.dto';
 import {
   ItineraryResponseDto,
@@ -26,6 +28,7 @@ export class ItinerariesService {
   constructor(
     @InjectModel(Itinerary.name) private readonly model: Model<Itinerary>,
     private readonly referenceData: ReferenceDataService,
+    private readonly users: UsersService,
   ) {}
 
   /**
@@ -67,26 +70,44 @@ export class ItinerariesService {
   }
 
   /**
-   * ITN-03: the owner opens one itinerary. Someone else's (even a public one) answers 404 here,
-   * like a missing one (ACC-11); public viewing is a separate read-only route (ITN-21).
+   * ITN-03: the owner opens one of their itineraries.
+   * ITN-20: another user may also open it when it is PUBLIC, not hidden by an admin, and its author's account
+   * is still ACTIVE (a suspended or deactivated author's public itineraries are hidden, ACC-12). Reading is
+   * all they get: edit and delete still filter on the owner. Anything else answers 404, like a missing one,
+   * so a private itinerary's existence is not revealed. Visibility is read on every request, so setting
+   * PRIVATE hides it from the next request on.
    */
-  async findMine(
+  async findOne(
     user: AuthenticatedUser,
     id: string,
   ): Promise<ItineraryResponseDto> {
     const itinerary = await this.model
-      .findOne({ _id: id, authorId: new Types.ObjectId(user.userId) })
+      .findOne({
+        _id: id,
+        $or: [
+          { authorId: new Types.ObjectId(user.userId) },
+          { visibility: Visibility.PUBLIC, isHidden: false },
+        ],
+      })
       .lean<ItineraryLean>()
       .exec();
     if (!itinerary) throw new NotFoundException('Itinerary not found');
+
+    const isOwner = itinerary.authorId.toString() === user.userId;
+    if (
+      !isOwner &&
+      !(await this.users.isActive(itinerary.authorId.toString()))
+    ) {
+      throw new NotFoundException('Itinerary not found');
+    }
     return toItineraryResponse(itinerary);
   }
 
   /**
-   * ITN-01: the owner edits title, countries and/or start date.
+   * ITN-01: the owner edits title, countries and/or start date. ITN-20: the owner sets visibility.
    * Ownership is part of the filter of ONE atomic update (`_id` AND `authorId`), so there is no
    * read-then-write gap. Someone else's itinerary matches nothing and answers 404 (the same as a missing
-   * one), so a private itinerary's existence is not revealed.
+   * one), so a private itinerary's existence is not revealed. A public one stays read-only to others.
    */
   async update(
     user: AuthenticatedUser,
@@ -94,18 +115,20 @@ export class ItinerariesService {
     dto: UpdateItineraryDto,
   ): Promise<ItineraryResponseDto> {
     const changes: Partial<
-      Pick<Itinerary, 'title' | 'countryCodes' | 'startDate'>
+      Pick<Itinerary, 'title' | 'countryCodes' | 'startDate' | 'visibility'>
     > = {};
     if (dto.title !== undefined) changes.title = dto.title;
     if (dto.countryCodes !== undefined) changes.countryCodes = dto.countryCodes;
     if (dto.startDate !== undefined) changes.startDate = dto.startDate;
+    if (dto.visibility !== undefined) changes.visibility = dto.visibility;
     if (Object.keys(changes).length === 0) {
       throw new BadRequestException({
         message: 'Nothing to update',
         details: [
           {
             field: 'body',
-            message: 'send at least one of title, countryCodes, startDate',
+            message:
+              'send at least one of title, countryCodes, startDate, visibility',
           },
         ],
       });
