@@ -16,6 +16,7 @@ import { AuthenticatedUser, CurrentUser, ErrorResponseDto, Public, REFRESH_TOKEN
 import { clearAuthCookies, setAuthCookies } from './auth-cookies';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
+import { LogoutResponseDto } from './dto/logout-response.dto';
 import { RegisterDto } from './dto/register.dto';
 import { UserResponseDto } from './dto/user-response.dto';
 
@@ -64,7 +65,8 @@ export class AuthController {
   @ApiOkResponse({ type: UserResponseDto, description: 'The current user. The new tokens are only in the Set-Cookie headers.' })
   @ApiUnauthorizedResponse({
     type: ErrorResponseDto,
-    description: 'Missing, invalid or expired refresh cookie, or the account is no longer active. Both cookies are cleared.',
+    description:
+      'Missing, invalid, expired or logged-out (revoked) refresh cookie, or the account is no longer active. Same generic message for all; both cookies are cleared.',
   })
   async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response): Promise<UserResponseDto> {
     const secure = this.config.get<boolean>('cookieSecure') ?? false;
@@ -77,6 +79,22 @@ export class AuthController {
       if (error instanceof UnauthorizedException) clearAuthCookies(res, secure);
       throw error;
     }
+  }
+
+  // @Public: logout must work even when the access cookie has already expired or there is no session at all.
+  // The refresh cookie is sent because it is scoped to /api/auth.
+  @Public()
+  @Post('logout')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Log out. Clears both auth cookies and revokes the refresh token on the server. Always 200, even without a session.',
+  })
+  @ApiOkResponse({ type: LogoutResponseDto, description: 'Cookies cleared. The refresh token (if any) can no longer be used.' })
+  async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response): Promise<LogoutResponseDto> {
+    // Cookies first (same path and flags as when set), so the browser is logged out even if revocation fails.
+    clearAuthCookies(res, this.config.get<boolean>('cookieSecure') ?? false);
+    await this.authService.logout(req.cookies?.[REFRESH_TOKEN_COOKIE]);
+    return { message: 'Logged out' };
   }
 
   @Get('me')
