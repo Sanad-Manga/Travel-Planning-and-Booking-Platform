@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Post, Req, Res, UnauthorizedException } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Patch, Post, Req, Res, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   ApiBadRequestResponse,
@@ -6,6 +6,7 @@ import {
   ApiCookieAuth,
   ApiCreatedResponse,
   ApiForbiddenResponse,
+  ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
@@ -15,6 +16,7 @@ import { Request, Response } from 'express';
 import { AuthenticatedUser, CurrentUser, ErrorResponseDto, Public, REFRESH_TOKEN_COOKIE } from '../common';
 import { clearAuthCookies, setAuthCookies } from './auth-cookies';
 import { AuthService } from './auth.service';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { UserResponseDto } from './dto/user-response.dto';
@@ -77,6 +79,22 @@ export class AuthController {
       if (error instanceof UnauthorizedException) clearAuthCookies(res, secure);
       throw error;
     }
+  }
+
+  // Authenticated by the global JwtAuthGuard (no @Public); the user comes from the token, never from the body.
+  @Patch('change-password')
+  @HttpCode(204)
+  @ApiCookieAuth()
+  @ApiOperation({ summary: 'Change the logged-in user\'s password (current password + new password). The new password is stored only as a salted bcrypt hash.' })
+  @ApiNoContentResponse({ description: 'Password changed. The current session stays valid.' })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: 'Field-level errors: new password breaks the rules, or currentPassword is incorrect',
+  })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto, description: 'Not logged in, token invalid or expired, or account no longer active' })
+  @ApiConflictResponse({ type: ErrorResponseDto, description: 'The password was changed by another request at the same moment' })
+  changePassword(@CurrentUser() current: AuthenticatedUser, @Body() dto: ChangePasswordDto): Promise<void> {
+    return this.authService.changePassword(current.userId, dto);
   }
 
   @Get('me')

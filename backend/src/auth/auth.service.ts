@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { compare, hash, hashSync } from 'bcryptjs';
@@ -7,6 +7,7 @@ import { AccessTokenPayload, AccountStatus } from '../common';
 import { UserDocument } from '../users/schemas/user.schema';
 import { UsersService } from '../users/users.service';
 import { REFRESH_TOKEN_TTL_SECONDS } from './auth-cookies';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { UserResponseDto } from './dto/user-response.dto';
@@ -113,6 +114,29 @@ export class AuthService {
     return { user: UserResponseDto.from(user), accessToken, refreshToken };
   }
 
+  /**
+   * ACC-08. The password rules were already enforced by ChangePasswordDto (shared @IsValidPassword); the business
+   * rule that lives here: the current password must be right.
+   * A wrong current password is a field-level 400, not a 401: the user IS logged in (401 would look like a dead session).
+   */
+  async changePassword(userId: string, dto: ChangePasswordDto): Promise<void> {
+    const user = await this.usersService.findByIdWithPassword(userId);
+    if (!user || user.status !== AccountStatus.ACTIVE) {
+      throw new UnauthorizedException('Authentication required');
+    }
+
+    if (!(await compare(dto.currentPassword, user.passwordHash))) {
+      throw this.fieldError('currentPassword', 'current password is incorrect');
+    }
+
+    // bcrypt adds a fresh random salt, stored inside the hash string. Plaintext is never stored or logged.
+    const newHash = await hash(dto.newPassword, BCRYPT_SALT_ROUNDS);
+    // Compare-and-set on the old hash: if another request changed the password meanwhile, nothing is overwritten.
+    if (!(await this.usersService.replacePasswordHash(user.id, user.passwordHash, newHash))) {
+      throw new ConflictException('Password was changed by another request. Please try again.');
+    }
+  }
+
   /** The user behind a valid token, for GET /auth/me. The token alone is not enough: the account must still be ACTIVE. */
   async getCurrentUser(userId: string): Promise<UserResponseDto> {
     const user = await this.usersService.findById(userId);
@@ -151,6 +175,11 @@ export class AuthService {
   // Identical for "no such email" and "wrong password".
   private invalidCredentials(): UnauthorizedException {
     return new UnauthorizedException('Invalid email or password');
+  }
+
+  // 400 in the same shape as DTO validation errors, so the frontend shows it next to the right input.
+  private fieldError(field: string, message: string): BadRequestException {
+    return new BadRequestException({ message: 'Validation failed', details: [{ field, message }] });
   }
 
   // Same shape as the validation errors so the frontend can show it next to the email field.
