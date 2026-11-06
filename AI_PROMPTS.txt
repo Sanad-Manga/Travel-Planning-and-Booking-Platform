@@ -478,6 +478,227 @@ Start on SCRUM-24. Implement ONLY FLT-03: POST /api/flights for an airline moder
 How the output was used:
 The assistant added the flights module (schema with a unique index on airline + flight number + local departure date, create DTO, response DTO, service, controller), a small Intl-based local-time-to-UTC helper (no new dependency; a daylight-saving gap is rejected, a repeated hour takes the earlier instant), and the tests (helper, service integration, HTTP e2e). Decisions I accepted: the airline comes from the login, not the body; input fields are departureLocalTime and arrivalLocalTime; the response returns departureAt and arrivalAt in UTC plus both IANA zones; every broken rule is reported at once as a field-level 400; "same departure date" means the date at the departure airport. I ran build, lint, unit and e2e tests and read every file before committing.
 ================================================
+AI PROMPT LOG - Software Project I (Travel Planning and Booking Platform)
+Student: Abdulrahman Mohamad Hosny
+Module / ticket: Flights (traveler side), FLT-11 one-way flight search
+AI tool: Claude (Anthropic), Claude Sonnet 5.5
+================================================
+
+================================================
+Date: 2026-11-05
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: All (project planning)
+Prompt:
+Provided the project description PDF, the official requirements workbook and the
+mock reference data. Asked Claude to act as a senior full-stack developer and plan
+the whole project: read the requirements, propose the architecture and database
+design, and split the work into phases.
+How the output was used:
+Used the generated planning documents as background material for team discussions:
+a requirements analysis (104 mandatory and 11 optional requirements, planned
+endpoints, traceability table, list of unclear points), an architecture document
+(authentication, concurrency for seats and rooms, payments, itineraries, rendering
+strategy) and a database design. They were not committed as project code.
+================================================
+
+================================================
+Date: 2026-11-05
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: Process
+Prompt:
+Asked Claude not to build the whole project at once, since the work is done step
+by step with the team, and said the prompt log would be kept manually for the time
+being.
+How the output was used:
+Used the summary of open decisions (platform currency, Stripe test payments in
+Swagger, hotel search interpretation) as a discussion list for the team. From this
+point, code was pasted in manually and Claude was used one ticket at a time.
+================================================
+
+================================================
+Date: 2026-11-05
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: FLT-11, FLT-22
+Prompt:
+Pasted the FLT-11 ticket and asked whether FLT-11 is blocked by FLT-22.
+How the output was used:
+Used the answer to confirm that FLT-11 can start first. Both requirements list each
+other as dependencies, so the only shared piece is the seat availability calculation
+(total - booked - held), which the ticket assigns to this module. The real
+dependencies are the airports data and the flight and cabin schemas from teammates.
+Also used the suggestion to keep seat counters in a separate cabin record so the
+FLT-22 hold can be a single atomic update.
+================================================
+
+================================================
+Date: 2026-11-05
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: FLT-11, FLT-22
+Prompt:
+Asked whether FLT-22 should be implemented first, followed by FLT-11.
+How the output was used:
+Used the recommendation to implement FLT-11 first: shared availability function,
+then the search on top of it, then holds in FLT-22 reusing the same function.
+Reasons given were that the workbook makes FLT-22 depend on FLT-11, that FLT-11
+unblocks FLT-12, FLT-15, FLT-17 and ITN-26, and that FLT-22 is the hardest part of
+the module.
+================================================
+
+================================================
+Date: 2026-11-05
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: FLT-11
+Prompt:
+Shared the team's contracts.md and asked Claude to follow it for the ticket.
+How the output was used:
+Used the list of contract rules (shared enums, error and pagination formats, money
+in cents, module ownership), the assumptions and the missing inputs (flight and
+cabin field names, airline active flag, reference data service) to prepare
+questions for the team lead about file ownership and the definition of held seats.
+================================================
+
+================================================
+Date: 2026-11-05
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: FLT-11
+Prompt:
+Shared screenshots of the project and flights folder structure. Asked which files
+are needed to start FLT-11.
+How the output was used:
+Used the checklist (flight schema, local time utility, module, controller, service,
+DTOs, reference data and airline services, common exports, test setup) to collect
+the right code before requesting the implementation.
+================================================
+
+================================================
+Date: 2026-11-05
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: FLT-11, FLT-03, FLT-04
+Prompt:
+Pasted the existing flights code (schema, service, controller, module, local time
+utility) for planning the search.
+How the output was used:
+Used the observation that the flight schema already stores the local departure
+date, so the search can match the date directly instead of converting to a UTC
+range, which also avoids daylight-saving problems. Confirmed that airports are
+referenced by IATA code and that cabins do not exist yet, so a temporary cabin
+reader is needed. Followed the plan of adding new files only inside the flights
+folder, with the module file as the only existing file to change.
+================================================
+
+================================================
+Date: 2026-11-05
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: FLT-11
+Prompt:
+Pasted the reference data service, airlines service, common exports and the flight
+DTOs. Asked for the FLT-11 code.
+How the output was used:
+Used the generated implementation after review: a shared seat availability helper
+(to be reused by FLT-22), a temporary cabin reader, the search query and response
+DTOs, the search service and the public controller for GET /api/flights/search.
+Used the Swagger test cases as a test list. Assumptions still to confirm with
+teammates: cabin field names, the platform currency constant and the pagination DTO.
+================================================
+
+================================================
+Date: 2026-11-05
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: FLT-11
+Prompt:
+Asked for terminal commands to create the new files, and for the full content of
+flights.module.ts (screenshot shared). Mentioned that work was already on the Jira
+branch.
+How the output was used:
+Used the PowerShell commands to create the six new files and the commit commands.
+Used the updated module file, which registers the search controller before the
+existing controller so the search route is not captured by a future ID route. The
+existing branch was kept instead of creating a new one.
+================================================
+
+================================================
+Date: 2026-11-05
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: FLT-11 (environment setup)
+Prompt:
+Asked how to install NestJS and Swagger because the editor showed errors.
+How the output was used:
+Used the explanation that the packages are already listed in the project, so running
+npm install inside the backend folder is enough. Used the commands for checking
+installed packages and for reloading the editor to fix the missing package errors.
+================================================
+
+================================================
+Date: 2026-11-05
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: FLT-11 (testing)
+Prompt:
+Asked whether there is a way to test the code written so far.
+How the output was used:
+Used the suggested unit test for the availability formula and the manual Swagger
+test plan (matching flight, not enough seats, wrong date, invalid input, cancelled
+flight, inactive airline) as the basis for testing.
+================================================
+
+================================================
+Date: 2026-11-05
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: FLT-11 (environment setup)
+Prompt:
+Shared error messages from starting the backend: a missing MONGODB_URI, then missing
+JWT secrets, with a screenshot of the .env template.
+How the output was used:
+Used the explanation that the .env file must be in the backend folder with the exact
+variable names, and the Node command for generating two random secrets. Followed the
+advice not to share the connection string and to inform the team leader because it
+had appeared in a screenshot. A local .env was created and is not committed.
+================================================
+
+================================================
+Date: 2026-11-05
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: FLT-11 (environment setup)
+Prompt:
+Pasted an ECONNREFUSED querySrv error when connecting to MongoDB Atlas, together
+with the output of nslookup tests.
+How the output was used:
+Used the diagnosis that the mongodb+srv lookup was failing in Node even though
+nslookup worked, and the suggested checks (resolving the SRV record directly in
+Node, switching to public DNS servers, asking the team leader for a standard
+connection string). Since Atlas could not be reached, testing continued with an
+in-memory database.
+================================================
+
+================================================
+Date: 2026-11-06
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: FLT-11 (testing)
+Prompt:
+Pasted the existing FLT-03 end-to-end test file and asked what to do while the
+connection to Atlas is not working.
+How the output was used:
+Used the observation that the existing tests run on an in-memory MongoDB. Added the
+generated file test/flights-search.e2e-spec.ts, which creates flights through the
+real FLT-03 endpoint, inserts cabins directly and checks search results, availability
+counting, local date matching, exclusions, pagination and validation errors. Used the
+given commands to create the file in the test folder and to run only that test.
+================================================
+
+================================================
 Date: 2026-11-05
 Student: Yassin Yahya
 Tool: Claude (Claude Code)
@@ -511,6 +732,36 @@ Added 13 query/shortcut integration tests covering filters, multiple and empty g
 
 ================================================
 Date: 2026-11-06
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: FLT-11 (testing)
+Prompt:
+Reported editor errors ("Cannot find name describe/expect") in the new test file and
+shared the output of npm ls for the Jest packages.
+How the output was used:
+Used the confirmation that Jest and its type packages were installed and that the
+underlines were an editor issue. Followed the suggestions to run the test first,
+restart the TypeScript server and check the tsconfig. The test then ran correctly in
+the terminal.
+================================================
+
+================================================
+Date: 2026-11-06
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: FLT-11 (testing)
+Prompt:
+Pasted the result of the end-to-end run (19 tests passed) and asked whether it
+passed correctly.
+How the output was used:
+Used the confirmation that all 19 tests passed, and the explanation of what this
+does not cover yet (cabins are inserted by hand until the cabin schema is merged, and
+the tests ran on an in-memory database rather than Atlas). Used the pre-PR checklist:
+build, lint, run the other tests, check git status, open the PR with FLT-11 in the
+title, and message the cabin owner and the team lead.
+================================================
+
+================================================
 Student: Mohamed Walid
 Tool: OpenAI Codex
 Related Requirement: GEN-12 (SCRUM-126), PR #29 review correction
@@ -519,4 +770,3 @@ Address Ahmed Sanad's missing acceptance criterion on the existing reference-que
 How the output was used:
 Read the live SCRUM-126 acceptance criteria/checklist without changing Jira. Added only listCountries() to the production service, following the existing one-query find/sort/project/lean pattern and returning official code/name/currency fields without _id, __v or timestamps. Added five country integration cases to the existing consumer-module suite: actual official GEN-12 seeded records with metadata stored in MongoDB, repeated deterministic sorting, an empty country collection and datasets of one, three and 80 countries with varied currencies. Initial test-fixture TypeScript cleanup errors were corrected before final verification.
 Verification ran in a temporary backend copy without real environment files, using existing dependencies and disposable MongoDB only: relevant query integration PASS (16 tests); full Jest PASS (331 tests across 25 suites); E2E PASS (162 tests across 10 suites); build PASS; ESLint PASS. README documents the fifth signature, the PR #29 review correction and criterion-by-criterion evidence. All prior prompt entries are preserved. Final diff/hash checks verify that existing methods and all restricted files remain unchanged. No production seeding, shared Atlas access, dependency installation, commit, push, merge or PR/Jira update was performed.
-================================================
