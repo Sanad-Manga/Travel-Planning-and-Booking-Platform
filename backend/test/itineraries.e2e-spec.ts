@@ -4,7 +4,7 @@ import { getConnectionToken, MongooseModule } from '@nestjs/mongoose';
 import { Test } from '@nestjs/testing';
 import { hashSync } from 'bcryptjs';
 import { MongoMemoryServer } from 'mongodb-memory-server';
-import { Connection } from 'mongoose';
+import { Connection, Types } from 'mongoose';
 import request from 'supertest';
 import { AuthModule } from '../src/auth/auth.module';
 import { Role } from '../src/common';
@@ -94,6 +94,10 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
       { code: 'EG', name: 'Egypt', currency: 'EGP' },
       { code: 'AE', name: 'United Arab Emirates', currency: 'AED' },
       { code: 'GB', name: 'United Kingdom', currency: 'GBP' },
+    ]);
+    await connection.collection('cities').insertMany([
+      { city_id: 'cairo', name: 'Cairo', country_code: 'EG' },
+      { city_id: 'dubai', name: 'Dubai', country_code: 'AE' },
     ]);
 
     alice = await loginAs('alice@example.com');
@@ -484,8 +488,172 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
     });
   });
 
+  describe('days (ITN-05)', () => {
+    const addDay = (cookie: string, id: string, body: object) =>
+      http()
+        .post(`/api/itineraries/${id}/days`)
+        .set('Cookie', cookie)
+        .send(body);
+    const editDay = (cookie: string, id: string, dayId: string, body: object) =>
+      http()
+        .patch(`/api/itineraries/${id}/days/${dayId}`)
+        .set('Cookie', cookie)
+        .send(body);
+
+    it('adds days (201): numbered 1, 2 and dated from the start date; shown on the itinerary and in the list', async () => {
+      const { id } = await createAs(alice);
+
+      const first = await addDay(alice, id, { cityId: 'cairo' }).expect(201);
+      const second = await addDay(alice, id, {
+        cityId: ' dubai ',
+        notes: '  Desert safari  ',
+      }).expect(201);
+
+      expect(first.body).toEqual({
+        id: expect.stringMatching(/^[0-9a-f]{24}$/),
+        dayNumber: 1,
+        date: '2026-12-20',
+        cityId: 'cairo',
+        notes: '',
+      });
+      expect(second.body).toMatchObject({
+        dayNumber: 2,
+        date: '2026-12-21',
+        cityId: 'dubai',
+        notes: 'Desert safari',
+      });
+
+      const itinerary = await http()
+        .get(`/api/itineraries/${id}`)
+        .set('Cookie', alice)
+        .expect(200);
+      expect(itinerary.body.days).toEqual([first.body, second.body]);
+
+      const list = await http()
+        .get('/api/itineraries')
+        .set('Cookie', alice)
+        .expect(200);
+      expect(
+        list.body.items.find((row: { id: string }) => row.id === id),
+      ).toMatchObject({ dayCount: 2 });
+    });
+
+    it('edits a day (200): city and notes change, number and date stay', async () => {
+      const { id } = await createAs(alice);
+      const day = await addDay(alice, id, { cityId: 'cairo' }).expect(201);
+
+      const res = await editDay(alice, id, day.body.id, {
+        cityId: 'dubai',
+        notes: 'Burj Khalifa',
+      }).expect(200);
+
+      expect(res.body).toEqual({
+        ...day.body,
+        cityId: 'dubai',
+        notes: 'Burj Khalifa',
+      });
+    });
+
+    it('400 for a missing or unknown city, notes too long, or an unknown field', async () => {
+      const { id } = await createAs(alice);
+      for (const [body, field] of [
+        [{}, 'cityId'],
+        [{ cityId: '   ' }, 'cityId'],
+        [{ cityId: 'atlantis' }, 'cityId'],
+        [{ cityId: 'cairo', notes: 'a'.repeat(2001) }, 'notes'],
+        [{ cityId: 'cairo', dayNumber: 3 }, 'dayNumber'],
+        [{ cityId: 'cairo', date: '2026-12-25' }, 'date'],
+      ] as const) {
+        const res = await addDay(alice, id, body).expect(400);
+        expect(res.body.details).toEqual(
+          expect.arrayContaining([expect.objectContaining({ field })]),
+        );
+      }
+    });
+
+    it('400 for a null city or null notes, on add and on edit', async () => {
+      const { id } = await createAs(alice);
+      const day = await addDay(alice, id, { cityId: 'cairo' }).expect(201);
+      for (const [body, field] of [
+        [{ cityId: 'cairo', notes: null }, 'notes'],
+        [{ cityId: null }, 'cityId'],
+      ] as const) {
+        const res = await addDay(alice, id, body).expect(400);
+        expect(res.body.details).toEqual(
+          expect.arrayContaining([expect.objectContaining({ field })]),
+        );
+      }
+      for (const [body, field] of [
+        [{ notes: null }, 'notes'],
+        [{ cityId: null }, 'cityId'],
+      ] as const) {
+        const res = await editDay(alice, id, day.body.id, body).expect(400);
+        expect(res.body.details).toEqual(
+          expect.arrayContaining([expect.objectContaining({ field })]),
+        );
+      }
+    });
+
+    it('400 for an empty edit, an unknown city or a malformed day id', async () => {
+      const { id } = await createAs(alice);
+      const day = await addDay(alice, id, { cityId: 'cairo' }).expect(201);
+      await editDay(alice, id, day.body.id, {}).expect(400);
+      await editDay(alice, id, day.body.id, { cityId: 'atlantis' }).expect(400);
+      await editDay(alice, id, 'not-an-id', { notes: 'x' }).expect(400);
+    });
+
+    it('rejects the 61st day with 400', async () => {
+      const { id } = await createAs(alice);
+      await connection.collection('itineraries').updateOne(
+        { _id: new Types.ObjectId(id) },
+        {
+          $set: {
+            days: Array.from({ length: 60 }, () => ({
+              _id: new Types.ObjectId(),
+              cityId: 'cairo',
+              notes: '',
+            })),
+          },
+        },
+      );
+      const res = await addDay(alice, id, { cityId: 'cairo' }).expect(400);
+      expect(res.body.details).toEqual([
+        { field: 'days', message: 'an itinerary has at most 60 days' },
+      ]);
+    });
+
+    it("404 for someone else's itinerary or day; it stays unchanged", async () => {
+      const { id } = await createAs(alice);
+      const day = await addDay(alice, id, { cityId: 'cairo' }).expect(201);
+
+      await addDay(bob, id, { cityId: 'cairo' }).expect(404);
+      await editDay(bob, id, day.body.id, { notes: 'Hijacked' }).expect(404);
+      await editDay(alice, id, '674a1b2c3d4e5f6a7b8c9d0e', {
+        notes: 'x',
+      }).expect(404);
+
+      const res = await http()
+        .get(`/api/itineraries/${id}`)
+        .set('Cookie', alice)
+        .expect(200);
+      expect(res.body.days).toEqual([day.body]);
+    });
+
+    it('401 without a cookie, 403 for an admin or moderator', async () => {
+      const { id } = await createAs(alice);
+      const day = await addDay(alice, id, { cityId: 'cairo' }).expect(201);
+      await http()
+        .post(`/api/itineraries/${id}/days`)
+        .send({ cityId: 'cairo' })
+        .expect(401);
+      await addDay(admin, id, { cityId: 'cairo' }).expect(403);
+      await addDay(airlineMod, id, { cityId: 'cairo' }).expect(403);
+      await editDay(admin, id, day.body.id, { notes: 'x' }).expect(403);
+    });
+  });
+
   describe('Swagger', () => {
-    it('documents the ITN-01 and ITN-03 endpoints under the itineraries tag', async () => {
+    it('documents the ITN-01, ITN-03 and ITN-05 endpoints under the itineraries tag', async () => {
       const res = await http().get('/api/docs-json').expect(200);
       expect(res.body.paths['/api/itineraries'].post.tags).toContain(
         'itineraries',
@@ -496,6 +664,12 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
       expect(res.body.paths['/api/itineraries/{id}'].get).toBeDefined();
       expect(res.body.paths['/api/itineraries/{id}'].patch).toBeDefined();
       expect(res.body.paths['/api/itineraries/{id}'].delete).toBeDefined();
+      expect(res.body.paths['/api/itineraries/{id}/days'].post.tags).toContain(
+        'itineraries',
+      );
+      expect(
+        res.body.paths['/api/itineraries/{id}/days/{dayId}'].patch,
+      ).toBeDefined();
     });
   });
 });

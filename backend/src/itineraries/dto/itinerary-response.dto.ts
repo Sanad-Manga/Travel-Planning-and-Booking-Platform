@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Visibility } from '../../common';
 import { ItineraryLean } from '../schemas/itinerary.schema';
+import { ItineraryDayDto, toItineraryDay } from './itinerary-day.dto';
 
 export class ItineraryResponseDto {
   @ApiProperty({ example: '674a1b2c3d4e5f6a7b8c9d0e' })
@@ -30,6 +31,12 @@ export class ItineraryResponseDto {
   })
   isHidden: boolean;
 
+  @ApiProperty({
+    type: [ItineraryDayDto],
+    description: 'The days in order (ITN-05), numbered from 1',
+  })
+  days: ItineraryDayDto[];
+
   @ApiProperty({ example: '2026-11-04T10:00:00.000Z' })
   createdAt: string;
 
@@ -47,6 +54,9 @@ export function toItineraryResponse(doc: ItineraryLean): ItineraryResponseDto {
     startDate: doc.startDate,
     visibility: doc.visibility,
     isHidden: doc.isHidden,
+    days: (doc.days ?? []).map((day, index) =>
+      toItineraryDay(day, index, doc.startDate),
+    ),
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
   };
