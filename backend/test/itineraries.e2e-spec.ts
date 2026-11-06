@@ -232,6 +232,121 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
     });
   });
 
+  describe('GET /api/itineraries (ITN-03)', () => {
+    let carol: string;
+    let dave: string;
+
+    beforeAll(async () => {
+      // Fresh users, so other tests' itineraries do not change the counts here.
+      carol = await loginAs('carol@example.com');
+      dave = await loginAs('dave@example.com');
+    });
+
+    it('lists only my itineraries, newest edit first, as a paginated envelope', async () => {
+      const first = await createAs(carol, { ...valid, title: 'First' });
+      await createAs(carol, { ...valid, title: 'Second' });
+      await createAs(dave, { ...valid, title: 'Not Carol' });
+      // Editing the first one moves it to the top.
+      await http()
+        .patch(`/api/itineraries/${first.id}`)
+        .set('Cookie', carol)
+        .send({ title: 'First, edited' })
+        .expect(200);
+
+      const res = await http()
+        .get('/api/itineraries')
+        .set('Cookie', carol)
+        .expect(200);
+
+      expect(res.body).toMatchObject({
+        page: 1,
+        limit: 10,
+        total: 2,
+        totalPages: 1,
+      });
+      expect(res.body.items.map((row: { title: string }) => row.title)).toEqual(
+        ['First, edited', 'Second'],
+      );
+      expect(res.body.items[0]).toEqual({
+        id: first.id,
+        title: 'First, edited',
+        countryCodes: ['EG', 'AE'],
+        startDate: '2026-12-20',
+        dayCount: 0,
+        visibility: 'PRIVATE',
+        isHidden: false,
+        updatedAt: expect.any(String),
+      });
+    });
+
+    it('paginates with page and limit', async () => {
+      const res = await http()
+        .get('/api/itineraries?page=2&limit=1')
+        .set('Cookie', carol)
+        .expect(200);
+      expect(res.body).toMatchObject({
+        page: 2,
+        limit: 1,
+        total: 2,
+        totalPages: 2,
+      });
+      expect(res.body.items).toHaveLength(1);
+      expect(res.body.items[0].title).toBe('Second');
+    });
+
+    it('400 for an invalid page or limit', async () => {
+      for (const query of ['page=0', 'limit=0', 'limit=abc', 'limit=1000']) {
+        const res = await http()
+          .get(`/api/itineraries?${query}`)
+          .set('Cookie', carol)
+          .expect(400);
+        expect(res.body).toMatchObject({ statusCode: 400 });
+      }
+    });
+
+    it('401 without a cookie, 403 for an admin or moderator', async () => {
+      await http().get('/api/itineraries').expect(401);
+      await http().get('/api/itineraries').set('Cookie', admin).expect(403);
+      await http()
+        .get('/api/itineraries')
+        .set('Cookie', airlineMod)
+        .expect(403);
+    });
+  });
+
+  describe('GET /api/itineraries/:id (ITN-03)', () => {
+    it('the owner opens it: 200 with the full details', async () => {
+      const created = await createAs(alice);
+      const res = await http()
+        .get(`/api/itineraries/${created.id}`)
+        .set('Cookie', alice)
+        .expect(200);
+      expect(res.body).toEqual(created);
+    });
+
+    it("404 for someone else's itinerary or an unknown id", async () => {
+      const { id } = await createAs(alice);
+      await http().get(`/api/itineraries/${id}`).set('Cookie', bob).expect(404);
+      await http()
+        .get('/api/itineraries/674a1b2c3d4e5f6a7b8c9d0e')
+        .set('Cookie', alice)
+        .expect(404);
+    });
+
+    it('400 for a malformed id, 401 without a cookie, 403 for an admin', async () => {
+      const { id } = await createAs(alice);
+      await http()
+        .get('/api/itineraries/not-an-id')
+        .set('Cookie', alice)
+        .expect(400);
+      await http().get(`/api/itineraries/${id}`).expect(401);
+      await http()
+        .get(`/api/itineraries/${id}`)
+        .set('Cookie', admin)
+        .expect(403);
+    });
+  });
+
   describe('PATCH /api/itineraries/:id', () => {
     it('the owner edits title, countries and start date: 200', async () => {
       const { id } = await createAs(alice);
@@ -370,11 +485,15 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
   });
 
   describe('Swagger', () => {
-    it('documents the three ITN-01 endpoints under the itineraries tag', async () => {
+    it('documents the ITN-01 and ITN-03 endpoints under the itineraries tag', async () => {
       const res = await http().get('/api/docs-json').expect(200);
       expect(res.body.paths['/api/itineraries'].post.tags).toContain(
         'itineraries',
       );
+      expect(res.body.paths['/api/itineraries'].get.tags).toContain(
+        'itineraries',
+      );
+      expect(res.body.paths['/api/itineraries/{id}'].get).toBeDefined();
       expect(res.body.paths['/api/itineraries/{id}'].patch).toBeDefined();
       expect(res.body.paths['/api/itineraries/{id}'].delete).toBeDefined();
     });

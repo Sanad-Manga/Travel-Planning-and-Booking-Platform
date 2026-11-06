@@ -2,11 +2,13 @@ import {
   Body,
   Controller,
   Delete,
+  Get,
   HttpCode,
   HttpStatus,
   Param,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
@@ -21,15 +23,18 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import {
+  ApiPaginatedResponse,
   AuthenticatedUser,
   CurrentUser,
   ErrorResponseDto,
+  PaginationDto,
   Role,
   Roles,
 } from '../common';
 import { CreateItineraryDto } from './dto/create-itinerary.dto';
 import { ItineraryIdParamDto } from './dto/itinerary-id-param.dto';
 import { ItineraryResponseDto } from './dto/itinerary-response.dto';
+import { ItineraryRowDto } from './dto/itinerary-row.dto';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto';
 import { ItinerariesService } from './itineraries.service';
 
@@ -65,6 +70,41 @@ export class ItinerariesController {
     @Body() dto: CreateItineraryDto,
   ) {
     return this.itineraries.create(user, dto);
+  }
+
+  @Get()
+  @ApiOperation({
+    summary:
+      'List my itineraries, most recently updated first (page size 10 by default) - ITN-03',
+  })
+  @ApiPaginatedResponse(ItineraryRowDto)
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: 'Invalid page or limit',
+  })
+  listMine(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: PaginationDto,
+  ) {
+    return this.itineraries.listMine(user, query);
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Open one of my itineraries - ITN-03' })
+  @ApiOkResponse({ type: ItineraryResponseDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: 'id is not a valid id',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'No such itinerary (or it belongs to someone else)',
+  })
+  findMine(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: ItineraryIdParamDto,
+  ) {
+    return this.itineraries.findMine(user, params.id);
   }
 
   @Patch(':id')
