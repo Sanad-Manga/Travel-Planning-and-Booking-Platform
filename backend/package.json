@@ -8,6 +8,8 @@
   },
   "scripts": {
     "build": "nest build",
+    "preseed": "npm run build",
+    "seed": "node --env-file=.env dist/reference-data/seed/seed.js",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",

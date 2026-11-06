@@ -5,13 +5,19 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { AuthenticatedUser } from '../common';
+import {
+  AuthenticatedUser,
+  paginate,
+  PaginatedResponse,
+  PaginationDto,
+} from '../common';
 import { ReferenceDataService } from '../reference-data/reference-data.service';
 import { CreateItineraryDto } from './dto/create-itinerary.dto';
 import {
   ItineraryResponseDto,
   toItineraryResponse,
 } from './dto/itinerary-response.dto';
+import { ItineraryRowDto, toItineraryRow } from './dto/itinerary-row.dto';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto';
 import { Itinerary, ItineraryLean } from './schemas/itinerary.schema';
 
@@ -40,6 +46,40 @@ export class ItinerariesService {
       startDate: dto.startDate,
     });
     return toItineraryResponse(created.toObject<ItineraryLean>());
+  }
+
+  /**
+   * ITN-03: the caller's own itineraries, most recently updated first, paginated (GEN-05).
+   * The filter is always the caller's id, never a value from the request. Hidden ones are included:
+   * their author still sees them. `_id` breaks ties so a row never shows on two pages.
+   * The index { authorId: 1, updatedAt: -1 } on the schema serves this query.
+   */
+  listMine(
+    user: AuthenticatedUser,
+    query: PaginationDto,
+  ): Promise<PaginatedResponse<ItineraryRowDto>> {
+    return paginate(
+      this.model,
+      { authorId: new Types.ObjectId(user.userId) },
+      query,
+      { map: toItineraryRow, sort: { updatedAt: -1, _id: -1 } },
+    );
+  }
+
+  /**
+   * ITN-03: the owner opens one itinerary. Someone else's (even a public one) answers 404 here,
+   * like a missing one (ACC-11); public viewing is a separate read-only route (ITN-21).
+   */
+  async findMine(
+    user: AuthenticatedUser,
+    id: string,
+  ): Promise<ItineraryResponseDto> {
+    const itinerary = await this.model
+      .findOne({ _id: id, authorId: new Types.ObjectId(user.userId) })
+      .lean<ItineraryLean>()
+      .exec();
+    if (!itinerary) throw new NotFoundException('Itinerary not found');
+    return toItineraryResponse(itinerary);
   }
 
   /**

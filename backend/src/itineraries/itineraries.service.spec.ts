@@ -103,6 +103,113 @@ describe('ItinerariesService (ITN-01) with an isolated MongoDB', () => {
     });
   });
 
+  describe('listMine (ITN-03)', () => {
+    /** Sets updatedAt directly in MongoDB, so the order does not depend on how fast the test runs. */
+    const setUpdatedAt = (id: string, iso: string) =>
+      model.collection.updateOne(
+        { _id: new Types.ObjectId(id) },
+        { $set: { updatedAt: new Date(iso) } },
+      );
+
+    it("lists only the caller's itineraries, most recently updated first", async () => {
+      const older = await service.create(owner, { ...validDto, title: 'A' });
+      const newer = await service.create(owner, { ...validDto, title: 'B' });
+      await service.create(stranger, { ...validDto, title: 'Not mine' });
+      await setUpdatedAt(older.id, '2026-11-01T10:00:00.000Z');
+      await setUpdatedAt(newer.id, '2026-11-02T10:00:00.000Z');
+
+      const result = await service.listMine(owner, { page: 1, limit: 10 });
+
+      expect(result).toMatchObject({ page: 1, limit: 10, total: 2 });
+      expect(result.items.map((row) => row.title)).toEqual(['B', 'A']);
+      expect(result.items[0]).toEqual({
+        id: newer.id,
+        title: 'B',
+        countryCodes: ['EG', 'AE'],
+        startDate: '2026-12-20',
+        dayCount: 0,
+        visibility: Visibility.PRIVATE,
+        isHidden: false,
+        updatedAt: '2026-11-02T10:00:00.000Z',
+      });
+    });
+
+    it('moves an itinerary to the top when it is edited', async () => {
+      const first = await service.create(owner, { ...validDto, title: 'A' });
+      const second = await service.create(owner, { ...validDto, title: 'B' });
+      await setUpdatedAt(first.id, '2026-11-01T10:00:00.000Z');
+      await setUpdatedAt(second.id, '2026-11-02T10:00:00.000Z');
+
+      await service.update(owner, first.id, { title: 'A edited' });
+
+      const result = await service.listMine(owner, { page: 1, limit: 10 });
+      expect(result.items.map((row) => row.title)).toEqual(['A edited', 'B']);
+    });
+
+    it('paginates: each row on exactly one page', async () => {
+      for (let i = 1; i <= 3; i++) {
+        const { id } = await service.create(owner, {
+          ...validDto,
+          title: `Trip ${i}`,
+        });
+        await setUpdatedAt(id, `2026-11-0${i}T10:00:00.000Z`);
+      }
+
+      const page1 = await service.listMine(owner, { page: 1, limit: 2 });
+      const page2 = await service.listMine(owner, { page: 2, limit: 2 });
+
+      expect(page1).toMatchObject({ total: 3, totalPages: 2 });
+      expect(page1.items.map((row) => row.title)).toEqual(['Trip 3', 'Trip 2']);
+      expect(page2.items.map((row) => row.title)).toEqual(['Trip 1']);
+    });
+
+    it('still lists a hidden itinerary to its author', async () => {
+      const { id } = await service.create(owner, validDto);
+      await model.updateOne({ _id: id }, { isHidden: true });
+
+      const result = await service.listMine(owner, { page: 1, limit: 10 });
+      expect(result.items).toEqual([
+        expect.objectContaining({ id, isHidden: true }),
+      ]);
+    });
+
+    it('returns an empty page when the caller has none', async () => {
+      await service.create(stranger, validDto);
+      await expect(
+        service.listMine(owner, { page: 1, limit: 10 }),
+      ).resolves.toEqual({
+        items: [],
+        page: 1,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
+    });
+  });
+
+  describe('findMine (ITN-03)', () => {
+    it('returns the full itinerary to its owner', async () => {
+      const created = await service.create(owner, validDto);
+      await expect(service.findMine(owner, created.id)).resolves.toEqual(
+        created,
+      );
+    });
+
+    it("answers 404 for someone else's itinerary, even a public one", async () => {
+      const { id } = await service.create(owner, validDto);
+      await model.updateOne({ _id: id }, { visibility: Visibility.PUBLIC });
+      await expect(service.findMine(stranger, id)).rejects.toMatchObject({
+        status: 404,
+      });
+    });
+
+    it('answers 404 for an id that does not exist', async () => {
+      await expect(
+        service.findMine(owner, new Types.ObjectId().toString()),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+  });
+
   describe('update', () => {
     it('lets the owner change title, countries and start date', async () => {
       const { id } = await service.create(owner, validDto);
