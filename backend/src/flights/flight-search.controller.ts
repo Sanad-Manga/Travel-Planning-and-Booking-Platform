@@ -20,13 +20,13 @@ export class FlightSearchController {
   @ApiOperation({
     summary: 'One-way flight search - FLT-11',
     description:
-      'Scheduled flights of active airlines on the local departure date with enough seats (total - booked - held). Each result lists the cabins that can seat all passengers. No match returns an empty list.',
+      'Scheduled flights of active airlines on the local departure date with enough seats (total - booked - held). Each result lists the cabins that can seat all passengers. Optional: minPrice and maxPrice (inclusive, in cents, applied per cabin fare) and sort by price (cheapest matching cabin), duration or departureTime with order asc or desc. No match returns an empty list.',
   })
   @ApiOkResponse({ type: FlightSearchPageDto })
   @ApiBadRequestResponse({
     type: ErrorResponseDto,
     description:
-      'Invalid query, impossible date, unknown airport, or identical airports (field-level details)',
+      'Invalid query, impossible date, unknown airport, or identical airports (field-level details), or identical airports, or minPrice greater than maxPrice (field-level details)',
   })
   find(@Query() query: FlightSearchQueryDto) {
     return this.search.search(query);
