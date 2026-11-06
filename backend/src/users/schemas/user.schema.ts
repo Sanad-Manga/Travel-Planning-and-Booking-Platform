@@ -39,6 +39,10 @@ export class User {
   @Prop({ default: PLATFORM_CURRENCY })
   preferredCurrency: string;
 
+  // Optional contact number (ACC-09), stored normalized: optional "+" and 7 to 15 digits. Absent when never set or removed.
+  @Prop({ type: String })
+  phone?: string;
+
   // Added by `timestamps: true`; declared so TypeScript knows about them.
   createdAt?: Date;
   updatedAt?: Date;

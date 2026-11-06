@@ -28,6 +28,9 @@ export class UserResponseDto {
   @ApiProperty({ example: 'USD' })
   preferredCurrency: string;
 
+  @ApiPropertyOptional({ example: '+201001234567', description: 'Only present once the user has set a phone number.' })
+  phone?: string;
+
   @ApiProperty({ example: '2026-11-03T10:00:00.000Z' })
   consentAcceptedAt: string;
 
@@ -44,6 +47,7 @@ export class UserResponseDto {
       ...(user.airlineId ? { airlineId: user.airlineId.toString() } : {}),
       ...(user.hotelId ? { hotelId: user.hotelId.toString() } : {}),
       preferredCurrency: user.preferredCurrency,
+      ...(user.phone ? { phone: user.phone } : {}),
       consentAcceptedAt: user.consentAcceptedAt.toISOString(),
       createdAt: (user.createdAt ?? new Date()).toISOString(),
     };
