@@ -20,7 +20,11 @@ import {
   ItineraryResponseDto,
   toItineraryResponse,
 } from './dto/itinerary-response.dto';
-import { ItineraryRowDto, toItineraryRow } from './dto/itinerary-row.dto';
+import {
+  ITINERARY_ROW_PROJECTION,
+  ItineraryRowDto,
+  toItineraryRow,
+} from './dto/itinerary-row.dto';
 import { UpdateItineraryDayDto } from './dto/update-itinerary-day.dto';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto';
 import { Itinerary, ItineraryLean } from './schemas/itinerary.schema';
@@ -66,7 +70,11 @@ export class ItinerariesService {
       this.model,
       { authorId: new Types.ObjectId(user.userId) },
       query,
-      { map: toItineraryRow, sort: { updatedAt: -1, _id: -1 } },
+      {
+        map: toItineraryRow,
+        sort: { updatedAt: -1, _id: -1 },
+        projection: ITINERARY_ROW_PROJECTION,
+      },
     );
   }
 

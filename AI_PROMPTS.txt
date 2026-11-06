@@ -812,3 +812,17 @@ requests at 59 days), the day edit that filters on itinerary, owner and day id, 
 ReferenceDataService.findCityById, the real dayCount in the ITN-03 list, the Swagger docs and the tests.
 Build, lint, all 478 unit tests and all 236 e2e tests pass locally. Open points are listed in the PR.
 ================================================
+
+================================================
+Date: 2026-11-06
+Student: Yassin Yahya
+Tool: Claude (Claude Code), code-review skill
+Related Requirement: ITN-05 (SCRUM-68), review fixes
+Prompt:
+Run a code review on PR #44 with the installed code-review skill, then fix the confirmed findings test-first.
+How the output was used:
+Used two findings: (1) @IsOptional() let notes: null and, on edit, cityId: null skip validation, so null could be
+stored; replaced it with a "validate when sent" rule (ValidateIf on undefined) and wrote the edit DTO out instead
+of PartialType. The new HTTP test failed first (201) and passes now. (2) The ITN-03 list loaded every day's notes
+only to count days; it now projects only the day ids. Lint, build, all 478 unit tests and all 237 e2e tests pass.
+================================================

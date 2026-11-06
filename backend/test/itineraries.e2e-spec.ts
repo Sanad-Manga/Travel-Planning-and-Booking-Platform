@@ -571,6 +571,29 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
       }
     });
 
+    it('400 for a null city or null notes, on add and on edit', async () => {
+      const { id } = await createAs(alice);
+      const day = await addDay(alice, id, { cityId: 'cairo' }).expect(201);
+      for (const [body, field] of [
+        [{ cityId: 'cairo', notes: null }, 'notes'],
+        [{ cityId: null }, 'cityId'],
+      ] as const) {
+        const res = await addDay(alice, id, body).expect(400);
+        expect(res.body.details).toEqual(
+          expect.arrayContaining([expect.objectContaining({ field })]),
+        );
+      }
+      for (const [body, field] of [
+        [{ notes: null }, 'notes'],
+        [{ cityId: null }, 'cityId'],
+      ] as const) {
+        const res = await editDay(alice, id, day.body.id, body).expect(400);
+        expect(res.body.details).toEqual(
+          expect.arrayContaining([expect.objectContaining({ field })]),
+        );
+      }
+    });
+
     it('400 for an empty edit, an unknown city or a malformed day id', async () => {
       const { id } = await createAs(alice);
       const day = await addDay(alice, id, { cityId: 'cairo' }).expect(201);

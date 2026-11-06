@@ -38,6 +38,13 @@ export class ItineraryRowDto {
   updatedAt: string;
 }
 
+/**
+ * The fields a list row needs. Only the day ids are read, to count the days: the days' cities and notes
+ * (up to 60 x 2000 characters per itinerary) are never loaded for the list.
+ */
+export const ITINERARY_ROW_PROJECTION =
+  'title countryCodes startDate visibility isHidden updatedAt days._id';
+
 /** Maps a lean document from paginate() to a list row. */
 export function toItineraryRow(doc: ItineraryLean): ItineraryRowDto {
   return {
