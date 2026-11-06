@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AirlinesModule } from './airlines';
+import { AuditModule } from './audit';
 import { AuthModule } from './auth/auth.module';
 import { BlogModule } from './blog/blog.module';
 import configuration from './config/configuration';
@@ -35,6 +36,7 @@ import { ReferenceDataModule } from './reference-data/reference-data.module';
     AirlinesModule,
     FlightsModule,
     ItinerariesModule,
+    AuditModule,
   ],
 })
 export class AppModule {}
