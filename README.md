@@ -36,6 +36,7 @@ The app refuses to start if `MONGODB_URI` is missing or still the placeholder.
 |---|---|
 | `npm run start:dev` | Run with auto-reload |
 | `npm run build` | Compile to `dist/` |
+| `npm run seed:admin` | Build, then explicitly provision the administrator ([setup](backend/src/admin/README.md)) |
 | `npm test` | Unit tests |
 | `npm run test:e2e` | End-to-end tests (global validation, error shape, `/api` prefix) |
 | `npm run lint` | ESLint check only, fails on problems (no `console.log` allowed) |
