@@ -17,9 +17,8 @@ export class ItineraryRowDto {
   startDate: string;
 
   @ApiProperty({
-    example: 0,
-    description:
-      'Number of days in the itinerary. Always 0 until days can be added (ITN-05).',
+    example: 5,
+    description: 'Number of days in the itinerary (ITN-05), at most 60',
   })
   dayCount: number;
 
@@ -46,8 +45,7 @@ export function toItineraryRow(doc: ItineraryLean): ItineraryRowDto {
     title: doc.title,
     countryCodes: doc.countryCodes,
     startDate: doc.startDate,
-    // Days do not exist yet. ITN-05 adds them and replaces this with the real count.
-    dayCount: 0,
+    dayCount: doc.days?.length ?? 0,
     visibility: doc.visibility,
     isHidden: doc.isHidden,
     updatedAt: doc.updatedAt.toISOString(),
