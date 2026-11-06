@@ -12,7 +12,7 @@ export class UpdateItineraryDto extends PartialType(CreateItineraryDto) {
     enum: Visibility,
     example: Visibility.PUBLIC,
     description:
-      'PUBLIC: other users can read it (read-only). PRIVATE: only the owner sees it, from the next request on.',
+      'PUBLIC: listed in GET /api/itineraries/public/search for everyone, still editable only by the owner. PRIVATE: only the owner sees it, from the next request on.',
   })
   @IsOptional()
   @IsEnum(Visibility, {
