@@ -811,3 +811,22 @@ author is ACTIVE (read through UsersService.isActive); everything else stays 404
 read-only to others, private again on the next request, hidden and deactivated-author cases, 400/401/403.
 Build, lint, all 473 unit tests and all 236 e2e tests pass locally. Open points are listed in the PR.
 ================================================
+
+================================================
+Date: 2026-11-06
+Student: Yassin Yahya
+Tool: Claude (Claude Code)
+Related Requirement: ITN-20 (SCRUM-95), rework after the updated project description
+Prompt:
+Read the updated project description (changes highlighted in yellow) and keep them in mind. Section 8.8 maps
+public viewing to GET /api/itineraries/public/search (ITN-20, ITN-21) and GET /api/itineraries/public/:id
+(ITN-21) and says private itinerary endpoints must enforce ownership. Change PR #43 so GET /api/itineraries/:id
+is owner-only again and ITN-20 adds the public search (paginated, open to guests, without admin-hidden
+itineraries or suspended/deactivated authors). Use test-driven development and verify before claiming done.
+How the output was used:
+Wrote the failing tests first (owner-only GET /:id, public search rows, order, pagination, private again,
+hidden and deactivated-author cases, guests allowed), watched them fail, then added ItinerariesPublicController
+(registered before the owner controller so /public/... is never read as an id), searchPublic in the service
+(PUBLIC + not hidden + author active through UsersService.isActive), a public row DTO and an index. Lint, build,
+all 474 unit tests and all 239 e2e tests pass locally.
+================================================

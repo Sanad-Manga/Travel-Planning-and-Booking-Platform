@@ -60,3 +60,5 @@ export const ItinerarySchema = SchemaFactory.createForClass(Itinerary);
 
 // "My itineraries, most recently updated first" (ITN-03) filters by author and sorts by updatedAt.
 ItinerarySchema.index({ authorId: 1, updatedAt: -1 });
+// The shared search (ITN-20) filters on visibility and the hidden flag and sorts by updatedAt.
+ItinerarySchema.index({ visibility: 1, isHidden: 1, updatedAt: -1 });

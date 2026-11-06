@@ -20,6 +20,10 @@ import {
   toItineraryResponse,
 } from './dto/itinerary-response.dto';
 import { ItineraryRowDto, toItineraryRow } from './dto/itinerary-row.dto';
+import {
+  PublicItineraryRowDto,
+  toPublicItineraryRow,
+} from './dto/public-itinerary-row.dto';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto';
 import { Itinerary, ItineraryLean } from './schemas/itinerary.schema';
 
@@ -70,37 +74,49 @@ export class ItinerariesService {
   }
 
   /**
-   * ITN-03: the owner opens one of their itineraries.
-   * ITN-20: another user may also open it when it is PUBLIC, not hidden by an admin, and its author's account
-   * is still ACTIVE (a suspended or deactivated author's public itineraries are hidden, ACC-12). Reading is
-   * all they get: edit and delete still filter on the owner. Anything else answers 404, like a missing one,
-   * so a private itinerary's existence is not revealed. Visibility is read on every request, so setting
-   * PRIVATE hides it from the next request on.
+   * ITN-03: the owner opens one itinerary. Someone else's (even a public one) answers 404 here,
+   * like a missing one (ACC-11): this is a private itinerary endpoint. Others find public itineraries
+   * through searchPublic (ITN-20) and open them through the public view (ITN-21).
    */
-  async findOne(
+  async findMine(
     user: AuthenticatedUser,
     id: string,
   ): Promise<ItineraryResponseDto> {
     const itinerary = await this.model
-      .findOne({
-        _id: id,
-        $or: [
-          { authorId: new Types.ObjectId(user.userId) },
-          { visibility: Visibility.PUBLIC, isHidden: false },
-        ],
-      })
+      .findOne({ _id: id, authorId: new Types.ObjectId(user.userId) })
       .lean<ItineraryLean>()
       .exec();
     if (!itinerary) throw new NotFoundException('Itinerary not found');
-
-    const isOwner = itinerary.authorId.toString() === user.userId;
-    if (
-      !isOwner &&
-      !(await this.users.isActive(itinerary.authorId.toString()))
-    ) {
-      throw new NotFoundException('Itinerary not found');
-    }
     return toItineraryResponse(itinerary);
+  }
+
+  /**
+   * ITN-20: the shared search: PUBLIC itineraries that an admin has not hidden and whose author's account is
+   * still ACTIVE (ACC-12 hides a suspended or deactivated author's public itineraries), most recently
+   * updated first, paginated. Visibility is read on every request, so setting PRIVATE removes an itinerary
+   * from the next search on. ITN-21 adds the keyword and duration filters.
+   *
+   * The author check goes through UsersService.isActive (the Users module's exported method), once per
+   * distinct author with public itineraries, so the page and the total count only what is shown.
+   */
+  async searchPublic(
+    query: PaginationDto,
+  ): Promise<PaginatedResponse<PublicItineraryRowDto>> {
+    const shared = { visibility: Visibility.PUBLIC, isHidden: false };
+    const authorIds = (await this.model
+      .distinct('authorId', shared)
+      .exec()) as Types.ObjectId[];
+    const active = await Promise.all(
+      authorIds.map((authorId) => this.users.isActive(authorId.toString())),
+    );
+    const activeAuthorIds = authorIds.filter((_, index) => active[index]);
+
+    return paginate(
+      this.model,
+      { ...shared, authorId: { $in: activeAuthorIds } },
+      query,
+      { map: toPublicItineraryRow, sort: { updatedAt: -1, _id: -1 } },
+    );
   }
 
   /**

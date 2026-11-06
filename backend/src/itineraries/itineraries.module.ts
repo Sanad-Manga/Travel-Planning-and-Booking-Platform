@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ReferenceDataModule } from '../reference-data/reference-data.module';
 import { UsersModule } from '../users/users.module';
+import { ItinerariesPublicController } from './itineraries-public.controller';
 import { ItinerariesController } from './itineraries.controller';
 import { ItinerariesService } from './itineraries.service';
 import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema';
@@ -13,10 +14,11 @@ import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema';
     ]),
     // Countries are validated through ReferenceDataService, never by reading the collection directly.
     ReferenceDataModule,
-    // ITN-20: a public itinerary is shown to others only while its author's account is ACTIVE (ACC-12).
+    // ITN-20: public search shows an itinerary only while its author's account is ACTIVE (ACC-12).
     UsersModule,
   ],
-  controllers: [ItinerariesController],
+  // The public controller comes first so its static paths win over ItinerariesController's /:id.
+  controllers: [ItinerariesPublicController, ItinerariesController],
   providers: [ItinerariesService],
   // Blog (author page) and Reports (hide/delete) look itineraries up through the service, never the model.
   exports: [ItinerariesService],

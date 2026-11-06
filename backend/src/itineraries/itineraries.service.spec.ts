@@ -187,78 +187,123 @@ describe('ItinerariesService (ITN-01) with an isolated MongoDB', () => {
     });
   });
 
-  describe('findOne (ITN-03, ITN-20)', () => {
-    /** The author's account as UsersService.isActive reads it. */
-    const setAuthorStatus = (status: string) =>
-      users.updateOne(
-        { _id: new Types.ObjectId(owner.userId) },
-        { $set: { status } },
-        { upsert: true },
-      );
-
-    beforeEach(() => setAuthorStatus('ACTIVE'));
-
+  describe('findMine (ITN-03)', () => {
     it('returns the full itinerary to its owner', async () => {
       const created = await service.create(owner, validDto);
-      await expect(service.findOne(owner, created.id)).resolves.toEqual(
+      await expect(service.findMine(owner, created.id)).resolves.toEqual(
         created,
       );
     });
 
-    it('lets another user read a public itinerary', async () => {
-      const { id } = await service.create(owner, validDto);
-      const shared = await service.update(owner, id, {
-        visibility: Visibility.PUBLIC,
-      });
-      await expect(service.findOne(stranger, id)).resolves.toEqual(shared);
-    });
-
-    it("answers 404 for someone else's private itinerary", async () => {
-      const { id } = await service.create(owner, validDto);
-      await expect(service.findOne(stranger, id)).rejects.toMatchObject({
-        status: 404,
-      });
-    });
-
-    it('hides a public itinerary again as soon as it is set private', async () => {
+    it("answers 404 for someone else's itinerary, even a public one (public viewing is a separate route)", async () => {
       const { id } = await service.create(owner, validDto);
       await service.update(owner, id, { visibility: Visibility.PUBLIC });
-      await service.update(owner, id, { visibility: Visibility.PRIVATE });
-      await expect(service.findOne(stranger, id)).rejects.toMatchObject({
+      await expect(service.findMine(stranger, id)).rejects.toMatchObject({
         status: 404,
       });
     });
 
-    it('answers 404 to others for a public itinerary hidden by an admin, but not to its owner', async () => {
-      const { id } = await service.create(owner, validDto);
-      await model.updateOne(
-        { _id: id },
-        { visibility: Visibility.PUBLIC, isHidden: true },
+    it('answers 404 for an id that does not exist', async () => {
+      await expect(
+        service.findMine(owner, new Types.ObjectId().toString()),
+      ).rejects.toMatchObject({ status: 404 });
+    });
+  });
+
+  describe('searchPublic (ITN-20)', () => {
+    /** An account as UsersService.isActive reads it (email is unique in the users collection). */
+    const setStatus = (user: AuthenticatedUser, status: string) =>
+      users.updateOne(
+        { _id: new Types.ObjectId(user.userId) },
+        {
+          $set: { status },
+          $setOnInsert: { email: `${user.userId}@example.com` },
+        },
+        { upsert: true },
       );
-      await expect(service.findOne(stranger, id)).rejects.toMatchObject({
-        status: 404,
+    const setUpdatedAt = (id: string, iso: string) =>
+      model.collection.updateOne(
+        { _id: new Types.ObjectId(id) },
+        { $set: { updatedAt: new Date(iso) } },
+      );
+    /** Creates an itinerary and makes it public. */
+    const createPublic = async (author: AuthenticatedUser, title: string) => {
+      const { id } = await service.create(author, { ...validDto, title });
+      await service.update(author, id, { visibility: Visibility.PUBLIC });
+      return id;
+    };
+    const firstPage = { page: 1, limit: 10 };
+
+    beforeEach(async () => {
+      await setStatus(owner, 'ACTIVE');
+      await setStatus(stranger, 'ACTIVE');
+    });
+
+    it('lists only public itineraries, newest edit first, without visibility or hidden flag', async () => {
+      const older = await createPublic(owner, 'Older');
+      const newer = await createPublic(stranger, 'Newer');
+      await service.create(owner, { ...validDto, title: 'Private' });
+      await setUpdatedAt(older, '2026-11-01T10:00:00.000Z');
+      await setUpdatedAt(newer, '2026-11-02T10:00:00.000Z');
+
+      const result = await service.searchPublic(firstPage);
+
+      expect(result).toMatchObject({ page: 1, limit: 10, total: 2 });
+      expect(result.items).toEqual([
+        {
+          id: newer,
+          authorId: stranger.userId,
+          title: 'Newer',
+          countryCodes: ['EG', 'AE'],
+          startDate: '2026-12-20',
+          updatedAt: '2026-11-02T10:00:00.000Z',
+        },
+        expect.objectContaining({ id: older, title: 'Older' }),
+      ]);
+    });
+
+    it('drops an itinerary as soon as it is set private again', async () => {
+      const id = await createPublic(owner, 'Shared');
+      await service.update(owner, id, { visibility: Visibility.PRIVATE });
+      await expect(service.searchPublic(firstPage)).resolves.toMatchObject({
+        items: [],
+        total: 0,
       });
-      await expect(service.findOne(owner, id)).resolves.toMatchObject({
-        isHidden: true,
+    });
+
+    it('leaves out a public itinerary hidden by an admin', async () => {
+      const id = await createPublic(owner, 'Hidden');
+      await model.updateOne({ _id: id }, { isHidden: true });
+      await expect(service.searchPublic(firstPage)).resolves.toMatchObject({
+        items: [],
+        total: 0,
       });
     });
 
     it.each(['SUSPENDED', 'DEACTIVATED'])(
-      'answers 404 to others for a public itinerary whose author is %s',
+      'leaves out the public itineraries of a %s author, and counts only what is shown',
       async (status) => {
-        const { id } = await service.create(owner, validDto);
-        await service.update(owner, id, { visibility: Visibility.PUBLIC });
-        await setAuthorStatus(status);
-        await expect(service.findOne(stranger, id)).rejects.toMatchObject({
-          status: 404,
-        });
+        await createPublic(owner, 'Gone');
+        const kept = await createPublic(stranger, 'Kept');
+        await setStatus(owner, status);
+
+        const result = await service.searchPublic(firstPage);
+
+        expect(result).toMatchObject({ total: 1, totalPages: 1 });
+        expect(result.items.map((row) => row.id)).toEqual([kept]);
       },
     );
 
-    it('answers 404 for an id that does not exist', async () => {
-      await expect(
-        service.findOne(owner, new Types.ObjectId().toString()),
-      ).rejects.toMatchObject({ status: 404 });
+    it('paginates: each row on exactly one page', async () => {
+      for (let i = 1; i <= 3; i++) {
+        const id = await createPublic(owner, `Trip ${i}`);
+        await setUpdatedAt(id, `2026-11-0${i}T10:00:00.000Z`);
+      }
+      const page1 = await service.searchPublic({ page: 1, limit: 2 });
+      const page2 = await service.searchPublic({ page: 2, limit: 2 });
+      expect(page1).toMatchObject({ total: 3, totalPages: 2 });
+      expect(page1.items.map((row) => row.title)).toEqual(['Trip 3', 'Trip 2']);
+      expect(page2.items.map((row) => row.title)).toEqual(['Trip 1']);
     });
   });
 
@@ -289,7 +334,7 @@ describe('ItinerariesService (ITN-01) with an isolated MongoDB', () => {
       ).resolves.toMatchObject({ visibility: Visibility.PRIVATE });
     });
 
-    it('keeps a public itinerary read-only to others: 404 and no change (ITN-20)', async () => {
+    it('keeps a public itinerary owner-only for changes: 404 and no change (ITN-20)', async () => {
       const { id } = await service.create(owner, validDto);
       await service.update(owner, id, { visibility: Visibility.PUBLIC });
       await expect(

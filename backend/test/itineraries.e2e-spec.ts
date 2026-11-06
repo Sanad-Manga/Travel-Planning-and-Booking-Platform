@@ -448,25 +448,64 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
         .set('Cookie', cookie)
         .send({ visibility });
 
-    it('a new itinerary is private: others get 404', async () => {
+    /** Ids on the first public search page (the max page size, so every public itinerary in this file fits). */
+    const publicIds = async (cookie?: string) => {
+      const req = http().get('/api/itineraries/public/search?limit=50');
+      if (cookie) req.set('Cookie', cookie);
+      const res = await req.expect(200);
+      return (res.body.items as { id: string }[]).map((row) => row.id);
+    };
+
+    it('a new itinerary is private: not in public search', async () => {
       const created = await createAs(alice);
       expect(created).toMatchObject({ visibility: 'PRIVATE' });
-      await http()
-        .get(`/api/itineraries/${created.id}`)
-        .set('Cookie', bob)
-        .expect(404);
+      expect(await publicIds(bob)).not.toContain(created.id);
     });
 
-    it('the owner sets it PUBLIC: another user reads it (200, same body)', async () => {
+    it('the owner sets it PUBLIC: it appears in public search, for users and guests', async () => {
       const { id } = await createAs(alice);
       const shared = await setVisibility(alice, id, 'PUBLIC').expect(200);
       expect(shared.body).toMatchObject({ id, visibility: 'PUBLIC' });
 
+      expect(await publicIds(bob)).toContain(id);
+      expect(await publicIds()).toContain(id);
+    });
+
+    it('public search rows are a paginated envelope without visibility or hidden flag, newest edit first', async () => {
+      const first = await createAs(alice, { ...valid, title: 'Shared one' });
+      const second = await createAs(alice, { ...valid, title: 'Shared two' });
+      await setVisibility(alice, first.id, 'PUBLIC').expect(200);
+      await setVisibility(alice, second.id, 'PUBLIC').expect(200);
+
       const res = await http()
-        .get(`/api/itineraries/${id}`)
-        .set('Cookie', bob)
+        .get('/api/itineraries/public/search?page=1&limit=2')
         .expect(200);
-      expect(res.body).toEqual(shared.body);
+
+      expect(res.body).toMatchObject({ page: 1, limit: 2 });
+      expect(res.body.total).toBeGreaterThanOrEqual(2);
+      expect(res.body.items).toEqual([
+        {
+          id: second.id,
+          authorId: expect.stringMatching(/^[0-9a-f]{24}$/),
+          title: 'Shared two',
+          countryCodes: ['EG', 'AE'],
+          startDate: '2026-12-20',
+          updatedAt: expect.any(String),
+        },
+        expect.objectContaining({ id: first.id }),
+      ]);
+    });
+
+    it('400 for an invalid page or limit on public search', async () => {
+      for (const query of ['page=0', 'limit=0', 'limit=1000']) {
+        await http().get(`/api/itineraries/public/search?${query}`).expect(400);
+      }
+    });
+
+    it('GET /api/itineraries/:id stays owner-only: another user gets 404 even for a public one', async () => {
+      const { id } = await createAs(alice);
+      await setVisibility(alice, id, 'PUBLIC').expect(200);
+      await http().get(`/api/itineraries/${id}`).set('Cookie', bob).expect(404);
     });
 
     it('a public itinerary stays read-only to others: edit, visibility and delete give 404', async () => {
@@ -494,20 +533,20 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
       });
     });
 
-    it('setting it PRIVATE hides it from others on the next request', async () => {
+    it('setting it PRIVATE removes it from public search on the next request', async () => {
       const { id } = await createAs(alice);
       await setVisibility(alice, id, 'PUBLIC').expect(200);
-      await http().get(`/api/itineraries/${id}`).set('Cookie', bob).expect(200);
+      expect(await publicIds()).toContain(id);
 
       await setVisibility(alice, id, 'PRIVATE').expect(200);
-      await http().get(`/api/itineraries/${id}`).set('Cookie', bob).expect(404);
+      expect(await publicIds()).not.toContain(id);
       await http()
         .get(`/api/itineraries/${id}`)
         .set('Cookie', alice)
         .expect(200);
     });
 
-    it('a public itinerary of a deactivated author is hidden from others', async () => {
+    it('a public itinerary of a deactivated author is not in public search', async () => {
       const erin = await loginAs('erin@example.com');
       const { id } = await createAs(erin);
       await setVisibility(erin, id, 'PUBLIC').expect(200);
@@ -517,10 +556,10 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
           { email: 'erin@example.com' },
           { $set: { status: 'DEACTIVATED' } },
         );
-      await http().get(`/api/itineraries/${id}`).set('Cookie', bob).expect(404);
+      expect(await publicIds()).not.toContain(id);
     });
 
-    it('a public itinerary hidden by an admin is hidden from others', async () => {
+    it('a public itinerary hidden by an admin is not in public search', async () => {
       const { id } = await createAs(alice);
       await setVisibility(alice, id, 'PUBLIC').expect(200);
       await connection
@@ -529,7 +568,7 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
           { _id: new Types.ObjectId(id) },
           { $set: { isHidden: true } },
         );
-      await http().get(`/api/itineraries/${id}`).set('Cookie', bob).expect(404);
+      expect(await publicIds()).not.toContain(id);
     });
 
     it('400 for an unknown visibility value, 401 without a cookie, 403 for an admin', async () => {
@@ -600,6 +639,9 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
       expect(res.body.paths['/api/itineraries/{id}'].get).toBeDefined();
       expect(res.body.paths['/api/itineraries/{id}'].patch).toBeDefined();
       expect(res.body.paths['/api/itineraries/{id}'].delete).toBeDefined();
+      expect(
+        res.body.paths['/api/itineraries/public/search'].get.tags,
+      ).toContain('itineraries');
     });
   });
 });

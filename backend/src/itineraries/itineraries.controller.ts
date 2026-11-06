@@ -39,7 +39,7 @@ import { UpdateItineraryDto } from './dto/update-itinerary.dto';
 import { ItinerariesService } from './itineraries.service';
 
 // Itineraries belong to registered users (ITN-01), so every route needs the USER role.
-// Ownership of a given itinerary, and who may read a public one (ITN-20), is checked in the service.
+// Ownership of a given itinerary is checked in the service. Public routes are in ItinerariesPublicController.
 @ApiTags('itineraries')
 @ApiCookieAuth()
 @ApiUnauthorizedResponse({
@@ -90,10 +90,7 @@ export class ItinerariesController {
   }
 
   @Get(':id')
-  @ApiOperation({
-    summary:
-      "Open one of my itineraries (ITN-03), or another user's public one, read-only (ITN-20)",
-  })
+  @ApiOperation({ summary: 'Open one of my itineraries - ITN-03' })
   @ApiOkResponse({ type: ItineraryResponseDto })
   @ApiBadRequestResponse({
     type: ErrorResponseDto,
@@ -101,14 +98,13 @@ export class ItinerariesController {
   })
   @ApiNotFoundResponse({
     type: ErrorResponseDto,
-    description:
-      "No such itinerary, or someone else's that is private, hidden by an admin, or whose author is not active",
+    description: 'No such itinerary (or it belongs to someone else)',
   })
-  findOne(
+  findMine(
     @CurrentUser() user: AuthenticatedUser,
     @Param() params: ItineraryIdParamDto,
   ) {
-    return this.itineraries.findOne(user, params.id);
+    return this.itineraries.findMine(user, params.id);
   }
 
   @Patch(':id')
