@@ -61,6 +61,52 @@ export class ReferenceDataService {
       .exec();
   }
 
+  /** Internal lists return every match, using official fields without MongoDB metadata. */
+  listAirportsByCity(cityId: string): Promise<Airport[]> {
+    return this.airports
+      .find({ city_id: cityId })
+      .sort({ iata_code: 1 })
+      .select('iata_code name city_id country_code time_zone -_id')
+      .lean<Airport[]>()
+      .exec();
+  }
+
+  listAirportsByCountry(countryCode: string): Promise<Airport[]> {
+    return this.airports
+      .find({ country_code: countryCode })
+      .sort({ iata_code: 1 })
+      .select('iata_code name city_id country_code time_zone -_id')
+      .lean<Airport[]>()
+      .exec();
+  }
+
+  listCitiesByCountry(countryCode: string): Promise<City[]> {
+    return this.cities
+      .find({ country_code: countryCode })
+      .sort({ city_id: 1 })
+      .select('city_id name country_code -_id')
+      .lean<City[]>()
+      .exec();
+  }
+
+  listCountries(): Promise<Country[]> {
+    return this.countries
+      .find()
+      .sort({ code: 1 })
+      .select('code name currency -_id')
+      .lean<Country[]>()
+      .exec();
+  }
+
+  listAttractionsByCity(cityId: string): Promise<Attraction[]> {
+    return this.attractions
+      .find({ city_id: cityId })
+      .sort({ attraction_id: 1 })
+      .select('attraction_id name city_id -_id')
+      .lean<Attraction[]>()
+      .exec();
+  }
+
   async listAirports(
     pagination: PaginationDto,
   ): Promise<PaginatedResponse<AirportResponseDto>> {
