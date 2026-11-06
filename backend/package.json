@@ -8,6 +8,8 @@
   },
   "scripts": {
     "build": "nest build",
+    "preseed": "npm run build",
+    "seed": "node --env-file=.env dist/reference-data/seed/seed.js",
     "preseed:admin": "npm run build",
     "seed:admin": "node --env-file=.env dist/admin/seed/seed-admin.js",
     "start": "nest start",
