@@ -7,11 +7,15 @@ import { FlightSearchController } from './flight-search.controller';
 import { FlightSearchService } from './flight-search.service';
 import { FlightsController } from './flights.controller';
 import { FlightsService } from './flights.service';
+import { Cabin, CabinSchema } from './schemas/cabin.schema';
 import { Flight, FlightSchema } from './schemas/flight.schema';
 
 @Module({
   imports: [
-    MongooseModule.forFeature([{ name: Flight.name, schema: FlightSchema }]),
+    MongooseModule.forFeature([
+      { name: Flight.name, schema: FlightSchema },
+      { name: Cabin.name, schema: CabinSchema },
+    ]),
     AirlinesModule,
     ReferenceDataModule,
   ],

@@ -1,12 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { InjectConnection } from '@nestjs/mongoose';
-import { Connection, Types } from 'mongoose';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model, Types } from 'mongoose';
 import { CabinClass } from '../common';
-import {
-  availableSeats,
-  hasAtLeastSeats,
-  SeatCounts,
-} from './utils/seat-availability';
+import { Cabin, CabinLean } from './schemas/cabin.schema';
+import { availableSeats, hasAtLeastSeats } from './utils/seat-availability';
 
 export interface CabinOption {
   cabinClass: CabinClass;
@@ -14,19 +11,10 @@ export interface CabinOption {
   availableSeats: number;
 }
 
-type CabinRow = SeatCounts & {
-  flightId: Types.ObjectId;
-  cabinClass: CabinClass;
-  priceCents: number;
-};
-
-/**
- * TEMPORARY (until FLT-04 merges): reads the `cabins` collection directly using the field names agreed
- * with the flights owner. Replace the body with the cabin model; keep the signature.
- */
+/** Reads cabins for flight search (FLT-11, FLT-15). */
 @Injectable()
 export class FlightCabinsReader {
-  constructor(@InjectConnection() private readonly connection: Connection) {}
+  constructor(@InjectModel(Cabin.name) private readonly model: Model<Cabin>) {}
 
   /** Cabins with at least `seats` available, grouped by flight id, cheapest first. */
   async findWithSeats(
@@ -36,11 +24,11 @@ export class FlightCabinsReader {
     const byFlight = new Map<string, CabinOption[]>();
     if (flightIds.length === 0) return byFlight;
 
-    const rows = await this.connection
-      .collection<CabinRow>('cabins')
+    const rows = await this.model
       .find({ flightId: { $in: flightIds }, ...hasAtLeastSeats(seats) })
       .sort({ priceCents: 1 })
-      .toArray();
+      .lean<CabinLean[]>()
+      .exec();
 
     for (const row of rows) {
       const key = row.flightId.toString();
