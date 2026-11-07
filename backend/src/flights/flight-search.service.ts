@@ -4,8 +4,12 @@ import { Model } from 'mongoose';
 import { AirlinesService } from '../airlines';
 import { FlightStatus } from '../common';
 import { ReferenceDataService } from '../reference-data/reference-data.service';
-import { FlightCabinsReader } from './flight-cabins.reader';
-import { FlightSearchQueryDto } from './dto/flight-search-query.dto';
+import { CabinOption, FlightCabinsReader } from './flight-cabins.reader';
+import {
+  FlightSearchQueryDto,
+  FlightSortBy,
+  FlightSortOrder,
+} from './dto/flight-search-query.dto';
 import {
   FlightSearchPageDto,
   SearchAirlineDto,
@@ -42,6 +46,9 @@ export class FlightSearchService {
    * seats (total - booked - held) in at least one cabin. An empty result is a normal 200, not an error.
    * Date match uses the stored `departureLocalDate` (the local date at the departure airport), so no
    * time-zone conversion is needed here.
+   *
+   * FLT-15: optional inclusive price range (applied per cabin fare, in cents, together with the seat
+   * check) and sorting by price, duration or departure time. All other criteria still apply.
    */
   async search(query: FlightSearchQueryDto): Promise<FlightSearchPageDto> {
     const { departureAirport, arrivalAirport, departureDate, passengers } = query;
@@ -63,12 +70,20 @@ export class FlightSearchService {
     const ofActiveAirlines = flights.filter((f) =>
       airlinesById.has(f.airlineId.toString()),
     );
-    const cabinsByFlight = await this.cabins.findWithSeats(
+    const cabinsWithSeats = await this.cabins.findWithSeats(
       ofActiveAirlines.map((f) => f._id),
       passengers,
     );
-    const matches = ofActiveAirlines.filter((f) =>
-      cabinsByFlight.has(f._id.toString()),
+    const cabinsByFlight = this.inPriceRange(
+      cabinsWithSeats,
+      query.minPrice,
+      query.maxPrice,
+    );
+    const matches = this.sortMatches(
+      ofActiveAirlines.filter((f) => cabinsByFlight.has(f._id.toString())),
+      cabinsByFlight,
+      query.sort,
+      query.order,
     );
 
     const items = matches
@@ -87,6 +102,57 @@ export class FlightSearchService {
       total: matches.length,
       totalPages: Math.ceil(matches.length / limit),
     };
+  }
+
+  /** FLT-15: keeps only cabins whose fare is within the inclusive range; a flight with none left is dropped. */
+  private inPriceRange(
+    cabinsByFlight: Map<string, CabinOption[]>,
+    minPrice?: number,
+    maxPrice?: number,
+  ): Map<string, CabinOption[]> {
+    if (minPrice === undefined && maxPrice === undefined) return cabinsByFlight;
+    const filtered = new Map<string, CabinOption[]>();
+    for (const [flightId, options] of cabinsByFlight) {
+      const kept = options.filter(
+        (c) =>
+          (minPrice === undefined || c.priceCents >= minPrice) &&
+          (maxPrice === undefined || c.priceCents <= maxPrice),
+      );
+      if (kept.length > 0) filtered.set(flightId, kept);
+    }
+    return filtered;
+  }
+
+  /**
+   * FLT-15: price = cheapest cabin that matched; duration = arrival - departure (both UTC, so it is
+   * correct across time zones); departureTime = departure instant. Ties fall back to departure time,
+   * then id, so the order (and pagination) is always stable.
+   */
+  private sortMatches(
+    flights: FlightLean[],
+    cabinsByFlight: Map<string, CabinOption[]>,
+    sort: FlightSortBy,
+    order: FlightSortOrder,
+  ): FlightLean[] {
+    const direction = order === FlightSortOrder.DESC ? -1 : 1;
+    const keyOf = (f: FlightLean): number => {
+      switch (sort) {
+        case FlightSortBy.PRICE:
+          return Math.min(
+            ...cabinsByFlight.get(f._id.toString())!.map((c) => c.priceCents),
+          );
+        case FlightSortBy.DURATION:
+          return f.arrivalAt.getTime() - f.departureAt.getTime();
+        default:
+          return f.departureAt.getTime();
+      }
+    };
+    return [...flights].sort(
+      (a, b) =>
+        (keyOf(a) - keyOf(b)) * direction ||
+        a.departureAt.getTime() - b.departureAt.getTime() ||
+        a._id.toString().localeCompare(b._id.toString()),
+    );
   }
 
   private async activeAirlines(
@@ -116,6 +182,16 @@ export class FlightSearchService {
       errors.push({
         field: 'arrivalAirport',
         message: 'arrivalAirport must be different from departureAirport',
+      });
+    }
+    if (
+      query.minPrice !== undefined &&
+      query.maxPrice !== undefined &&
+      query.minPrice > query.maxPrice
+    ) {
+      errors.push({
+        field: 'minPrice',
+        message: 'minPrice must not be greater than maxPrice',
       });
     }
     const [departure, arrival] = await Promise.all([
