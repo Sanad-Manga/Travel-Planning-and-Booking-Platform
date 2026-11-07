@@ -926,6 +926,39 @@ How the output was used:
 Confirmed CI uses npm run test:e2e and Jest scans backend/test. The original placement was an intentional module-ownership choice made despite knowing the discovery restriction; accepting the custom-command gap was a mistake, not a technical advantage. Moved the test into the standard test directory with only five import-path replacements; verified the rest of the file, including every assertion, was unchanged. Updated the audit README to remove the custom command requirement and preserved earlier prompt entries. In an environment-free temporary copy using disposable MongoDB, exact npm run test:e2e passed 203/203 tests (12 suites), full Jest passed 407/407 (27 suites), build and ESLint passed. No production code, shared test configuration, npm scripts, dependency files, real .env, shared database or existing Git index entries were modified; no commit, push, merge or PR was performed.
 
 Date: 2026-11-06
+Student: Yassin Yahya
+Tool: Claude (Claude Code)
+Related Requirement: ITN-20 (SCRUM-95)
+Prompt:
+Implement everything in my itinerary tickets that is not blocked, one ticket per branch and PR. For ITN-20,
+following docs/contracts.md and the Jira checklist: the owner sets an itinerary PUBLIC or PRIVATE through
+PATCH /api/itineraries/:id, other users can read a public itinerary but not edit it, setting PRIVATE hides
+it immediately, new itineraries stay private, and public itineraries of suspended or deactivated authors and
+ones hidden by an admin are not shown to others. Add service and HTTP tests, then open the PR and update Jira.
+How the output was used:
+Used the optional visibility field on the update DTO (enum check), the update that keeps id AND owner in one
+atomic filter, and GET /api/itineraries/:id extended so another user gets a PUBLIC, not hidden itinerary whose
+author is ACTIVE (read through UsersService.isActive); everything else stays 404. Used the tests: public read,
+read-only to others, private again on the next request, hidden and deactivated-author cases, 400/401/403.
+Build, lint, all 473 unit tests and all 236 e2e tests pass locally. Open points are listed in the PR.
+
+Date: 2026-11-06
+Student: Yassin Yahya
+Tool: Claude (Claude Code)
+Related Requirement: ITN-20 (SCRUM-95), rework after the updated project description
+Prompt:
+Read the updated project description (changes highlighted in yellow) and keep them in mind. Section 8.8 maps
+public viewing to GET /api/itineraries/public/search (ITN-20, ITN-21) and GET /api/itineraries/public/:id
+(ITN-21) and says private itinerary endpoints must enforce ownership. Change PR #43 so GET /api/itineraries/:id
+is owner-only again and ITN-20 adds the public search (paginated, open to guests, without admin-hidden
+itineraries or suspended/deactivated authors). Use test-driven development and verify before claiming done.
+How the output was used:
+Wrote the failing tests first (owner-only GET /:id, public search rows, order, pagination, private again,
+hidden and deactivated-author cases, guests allowed), watched them fail, then added ItinerariesPublicController
+(registered before the owner controller so /public/... is never read as an id), searchPublic in the service
+(PUBLIC + not hidden + author active through UsersService.isActive), a public row DTO and an index. Lint, build,
+all 474 unit tests and all 239 e2e tests pass locally.
+Date: 2026-11-06
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
 Related Requirement: ACC-11 (SCRUM-42)
