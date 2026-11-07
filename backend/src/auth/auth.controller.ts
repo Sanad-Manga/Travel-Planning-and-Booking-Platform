@@ -8,6 +8,7 @@ import {
   ApiForbiddenResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiResponse,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
@@ -48,6 +49,11 @@ export class AuthController {
   @ApiBadRequestResponse({ type: ErrorResponseDto, description: 'Malformed email or missing password' })
   @ApiUnauthorizedResponse({ type: ErrorResponseDto, description: 'Invalid email or password' })
   @ApiForbiddenResponse({ type: ErrorResponseDto, description: 'Account suspended' })
+  @ApiResponse({
+    status: 423,
+    type: ErrorResponseDto,
+    description: 'Account locked for 15 minutes after 5 consecutive failed logins (the 5th failure already returns 423). The correct password is also rejected while locked.',
+  })
   async login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response): Promise<UserResponseDto> {
     const { user, accessToken, refreshToken } = await this.authService.login(dto);
     setAuthCookies(res, { accessToken, refreshToken }, this.config.get<boolean>('cookieSecure') ?? false);

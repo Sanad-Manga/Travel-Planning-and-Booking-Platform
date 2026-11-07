@@ -1,10 +1,10 @@
-import { ConflictException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, HttpException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { compare, hash, hashSync } from 'bcryptjs';
 import { Types } from 'mongoose';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { AccessTokenPayload, AccountStatus } from '../common';
+import { AccessTokenPayload, AccountStatus, LOGIN_LOCK_MINUTES, LOGIN_MAX_FAILED_ATTEMPTS } from '../common';
 import { UserDocument } from '../users/schemas/user.schema';
 import { UsersService } from '../users/users.service';
 import { REFRESH_TOKEN_TTL_SECONDS } from './auth-cookies';
@@ -16,6 +16,9 @@ import { TokenRevocationService } from './token-revocation.service';
 
 // bcrypt work factor: each +1 doubles the hashing time. 10 is the common default (~50-100 ms).
 export const BCRYPT_SALT_ROUNDS = 10;
+
+// HTTP 423 Locked: Nest's HttpStatus enum has no member for it.
+const ACCOUNT_LOCKED_STATUS = 423;
 
 export interface LoginResult {
   user: UserResponseDto;
@@ -64,8 +67,21 @@ export class AuthService {
    */
   async login(dto: LoginDto): Promise<LoginResult> {
     const user = await this.usersService.findByEmail(dto.email, true);
+
+    // ACC-05: while locked, even the correct password is rejected (checked before bcrypt, so no guessing during the lock).
+    if (user?.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
+      throw this.accountLocked(user.lockedUntil);
+    }
+
     const passwordOk = await compare(dto.password, user?.passwordHash ?? this.dummyHash);
     if (!user || !passwordOk) {
+      if (user) {
+        // Atomic increment; the 5th consecutive failure sets lockedUntil and is answered with 423 right away.
+        const updated = await this.usersService.registerFailedLogin(user.id, LOGIN_MAX_FAILED_ATTEMPTS, LOGIN_LOCK_MINUTES);
+        if (updated?.lockedUntil && updated.lockedUntil.getTime() > Date.now()) {
+          throw this.accountLocked(updated.lockedUntil);
+        }
+      }
       throw this.invalidCredentials();
     }
 
@@ -77,6 +93,10 @@ export class AuthService {
       throw this.invalidCredentials();
     }
 
+    // Successful login: reset the counter (skip the write when there is nothing to reset).
+    if (user.failedAttempts > 0 || user.lockedUntil) {
+      await this.usersService.resetFailedLogins(user.id);
+    }
     return this.startSession(user);
   }
 
@@ -166,6 +186,17 @@ export class AuthService {
 
   private invalidSession(): UnauthorizedException {
     return new UnauthorizedException('Invalid or expired session');
+  }
+
+  // 423 Locked (contracts section 3). The message says how long is left so the user knows when to retry.
+  private accountLocked(lockedUntil: Date): HttpException {
+    const minutes = Math.max(1, Math.ceil((lockedUntil.getTime() - Date.now()) / 60_000));
+    return new HttpException(
+      {
+        message: `Account locked after too many failed login attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`,
+      },
+      ACCOUNT_LOCKED_STATUS,
+    );
   }
 
   // Identical for "no such email" and "wrong password".

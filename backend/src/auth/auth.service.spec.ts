@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, HttpException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
@@ -12,7 +12,13 @@ const ID = '6730a1f2c3d4e5f607182930';
 
 describe('AuthService', () => {
   let service: AuthService;
-  const usersService = { findByEmail: jest.fn(), findById: jest.fn(), create: jest.fn() };
+  const usersService = {
+    findByEmail: jest.fn(),
+    findById: jest.fn(),
+    create: jest.fn(),
+    registerFailedLogin: jest.fn(),
+    resetFailedLogins: jest.fn(),
+  };
   const jwtService = { signAsync: jest.fn(), verifyAsync: jest.fn() };
   const revocations = { revoke: jest.fn(), isRevoked: jest.fn() };
   const claims = (extra: Record<string, unknown> = {}) => ({ sub: ID, jti: 'jti-1', exp: 1_900_000_000, ...extra });
@@ -147,6 +153,59 @@ describe('AuthService', () => {
     it('DEACTIVATED -> generic 401', async () => {
       usersService.findByEmail.mockResolvedValue(userDoc({ status: AccountStatus.DEACTIVATED }));
       await expect(service.login(credentials)).rejects.toThrow('Invalid email or password');
+    });
+
+    describe('account lockout (ACC-05)', () => {
+      const wrong = { ...credentials, password: 'WrongPass1' };
+      const inFuture = (minutes: number) => new Date(Date.now() + minutes * 60_000);
+
+      it('a failure below the limit records the attempt and stays a generic 401', async () => {
+        usersService.findByEmail.mockResolvedValue(userDoc());
+        usersService.registerFailedLogin.mockResolvedValue(userDoc({ failedAttempts: 4 }));
+        await expect(service.login(wrong)).rejects.toBeInstanceOf(UnauthorizedException);
+        expect(usersService.registerFailedLogin).toHaveBeenCalledWith(ID, 5, 15);
+      });
+
+      it('the 5th consecutive failure answers 423 with a clear message', async () => {
+        usersService.findByEmail.mockResolvedValue(userDoc({ failedAttempts: 4 }));
+        usersService.registerFailedLogin.mockResolvedValue(userDoc({ failedAttempts: 5, lockedUntil: inFuture(15) }));
+        const error = await service.login(wrong).catch((e: HttpException) => e);
+        expect(error).toBeInstanceOf(HttpException);
+        expect((error as HttpException).getStatus()).toBe(423);
+        expect((error as HttpException).message).toMatch(/locked.*15 minutes/i);
+      });
+
+      it('the CORRECT password during the lock is still rejected (423) and checks nothing else', async () => {
+        usersService.findByEmail.mockResolvedValue(userDoc({ failedAttempts: 5, lockedUntil: inFuture(10) }));
+        const error = await service.login(credentials).catch((e: HttpException) => e);
+        expect((error as HttpException).getStatus()).toBe(423);
+        expect(usersService.registerFailedLogin).not.toHaveBeenCalled();
+        expect(jwtService.signAsync).not.toHaveBeenCalled();
+      });
+
+      it('after 15 minutes the lock is over: the right password logs in and the counter is reset', async () => {
+        usersService.findByEmail.mockResolvedValue(userDoc({ failedAttempts: 5, lockedUntil: new Date(Date.now() - 1000) }));
+        await expect(service.login(credentials)).resolves.toMatchObject({ accessToken: 'signed.jwt.token' });
+        expect(usersService.resetFailedLogins).toHaveBeenCalledWith(ID);
+      });
+
+      it('a successful login resets a non-zero counter', async () => {
+        usersService.findByEmail.mockResolvedValue(userDoc({ failedAttempts: 3 }));
+        await service.login(credentials);
+        expect(usersService.resetFailedLogins).toHaveBeenCalledWith(ID);
+      });
+
+      it('a clean successful login does no extra write', async () => {
+        usersService.findByEmail.mockResolvedValue(userDoc({ failedAttempts: 0 }));
+        await service.login(credentials);
+        expect(usersService.resetFailedLogins).not.toHaveBeenCalled();
+      });
+
+      it('an unknown email counts nothing and stays a generic 401', async () => {
+        usersService.findByEmail.mockResolvedValue(null);
+        await expect(service.login(wrong)).rejects.toBeInstanceOf(UnauthorizedException);
+        expect(usersService.registerFailedLogin).not.toHaveBeenCalled();
+      });
     });
   });
 
