@@ -928,6 +928,14 @@ Confirmed CI uses npm run test:e2e and Jest scans backend/test. The original pla
 Date: 2026-11-06
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-10 (SCRUM-41)
+Prompt:
+Implement only SCRUM-41 (guests get a consistent 401 on restricted actions) following docs/contracts.md. First verify what the global JwtAuthGuard, @Public() and AllExceptionsFilter already do on develop. Main deliverable: an e2e test that boots the whole AppModule on mongodb-memory-server, enumerates every registered route with its @Public() metadata, and checks that every non-public route answers a cookie-less request with 401 in the standard error shape, without hard-coding the public routes. Also test garbage/tampered/expired cookies, suspended and deactivated users, and that known public routes stay open. Add a short docs/api note for the frontend. Do not edit common/ or other modules, do not touch Atlas or .env.
+How the output was used:
+Verified that the 401 behaviour already comes from the global guard and filter, so this ticket adds proof and documentation, not new behaviour. Added test/guest-401.e2e-spec.ts (route sweep via DiscoveryService, bad-credential cases, public-route cases; the in-memory MongoDB URI is set before AppModule is imported and asserted to be local) and docs/api/guest-401.md. No source files changed. I reviewed the test and the findings listed in the PR notes before opening the PR.
+Date: 2026-11-06
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
 Related Requirement: ACC-06 (SCRUM-38)
 Prompt:
 Implement only ACC-06 per docs/contracts.md: POST /api/auth/logout that clears both auth cookies with the same path and flags they were set with, revokes the refresh token server-side by its jti, makes POST /api/auth/refresh reject a revoked token with 401, lets revocation entries be dropped once the token would have expired, and still returns 200 without a session. Add Swagger and tests; no .env or secrets.
