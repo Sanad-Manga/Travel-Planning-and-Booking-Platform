@@ -770,3 +770,92 @@ Address Ahmed Sanad's missing acceptance criterion on the existing reference-que
 How the output was used:
 Read the live SCRUM-126 acceptance criteria/checklist without changing Jira. Added only listCountries() to the production service, following the existing one-query find/sort/project/lean pattern and returning official code/name/currency fields without _id, __v or timestamps. Added five country integration cases to the existing consumer-module suite: actual official GEN-12 seeded records with metadata stored in MongoDB, repeated deterministic sorting, an empty country collection and datasets of one, three and 80 countries with varied currencies. Initial test-fixture TypeScript cleanup errors were corrected before final verification.
 Verification ran in a temporary backend copy without real environment files, using existing dependencies and disposable MongoDB only: relevant query integration PASS (16 tests); full Jest PASS (331 tests across 25 suites); E2E PASS (162 tests across 10 suites); build PASS; ESLint PASS. README documents the fifth signature, the PR #29 review correction and criterion-by-criterion evidence. All prior prompt entries are preserved. Final diff/hash checks verify that existing methods and all restricted files remain unchanged. No production seeding, shared Atlas access, dependency installation, commit, push, merge or PR/Jira update was performed.
+================================================
+Date: 2026-11-06
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: FLT-15 (SCRUM-30)
+Prompt:
+Pasted the FLT-15 ticket (price filter and sorting for the flight search) and asked what
+is needed to start, after FLT-11 was finished.
+How the output was used:
+Used the breakdown of the ticket: the four files to change (query DTO, search service,
+controller Swagger text, e2e tests), the decision to branch from the FLT-11 branch because
+FLT-15 extends its search files, and the proposed rules to confirm with the team lead
+(prices in cents per the contract, filter applied per cabin fare, sort by price using the
+cheapest matching cabin, default sort stays departure time).
+================================================
+
+================================================
+Date: 2026-11-06
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: FLT-15 (SCRUM-30)
+Prompt:
+Pasted the current flight-search.service.ts, flight-search-query.dto.ts and PaginationDto,
+and asked for the FLT-15 changes.
+How the output was used:
+Claude generated a first version of the FLT-15 changes: the new optional query parameters,
+the per-cabin inclusive price filter, the minPrice greater than maxPrice error, the sorting
+logic with stable tie-breakers, the Swagger text and a set of e2e test cases. The code was
+reviewed, adapted to the existing FLT-11 files and committed on the FLT-15 branch. Checked
+that PaginationDto has no sort field, so there is no clash with the new parameters.
+================================================
+
+================================================
+Date: 2026-11-06
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: FLT-15 (SCRUM-30)
+Prompt:
+Asked for the complete sequence of steps for FLT-15 again, including the git commands, after
+the cabin skeleton was added to the FLT-11 branch.
+How the output was used:
+Used the step list for creating the branch, applying the changes, running build, lint and the
+e2e tests, and committing in small commits. Used the note that the FLT-15 code did not need
+changes after the cabin reader was rewritten, since its interface stayed the same.
+================================================
+
+================================================
+Date: 2026-11-07
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: FLT-15 (SCRUM-30)
+Prompt:
+Pasted the ticket again and asked Claude to double-check that the FLT-15 code does what the
+ticket says.
+How the output was used:
+Used the comparison between each acceptance criterion and the code (inclusive min and max,
+other criteria kept, error for min greater than max, sorting by price, duration and
+departure time). Noted two points to raise with the lead: the extra order parameter goes
+slightly beyond the ticket, and prices are in cents per passenger. Also noted a possible type
+issue in one test table to watch for when running the tests.
+================================================
+
+================================================
+Date: 2026-11-07
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: FLT-15 (SCRUM-30)
+Prompt:
+Shared the GitHub repository link and asked Claude to check the FLT-15 branch.
+How the output was used:
+Claude compared the branch with develop: the code matched the intended changes, the build,
+typecheck and lint passed, and the branch merged cleanly with develop. It found that the
+Swagger description for the 400 response contained duplicated text, and that the AI log had
+no new FLT-15 entries. These two points were used as the fixes to make before the pull
+request. The e2e tests could not run in Claude's environment, so they were run locally.
+================================================
+
+================================================
+Date: 2026-11-07
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: FLT-15 (SCRUM-30)
+Prompt:
+Asked whether new commits can be added to the existing pull request instead of creating a
+new one.
+How the output was used:
+Used the explanation that any commit pushed to the branch is added to the open PR, and the
+commands for committing the Swagger text fix and the AI log update on the FLT-15 branch.
+================================================
