@@ -11,8 +11,10 @@ import {
   PaginatedResponse,
   ITINERARY_MAX_DAYS,
   PaginationDto,
+  Visibility,
 } from '../common';
 import { ReferenceDataService } from '../reference-data/reference-data.service';
+import { UsersService } from '../users/users.service';
 import { CreateItineraryDayDto } from './dto/create-itinerary-day.dto';
 import { CreateItineraryDto } from './dto/create-itinerary.dto';
 import { ItineraryDayDto, toItineraryDay } from './dto/itinerary-day.dto';
@@ -25,6 +27,10 @@ import {
   ItineraryRowDto,
   toItineraryRow,
 } from './dto/itinerary-row.dto';
+import {
+  PublicItineraryRowDto,
+  toPublicItineraryRow,
+} from './dto/public-itinerary-row.dto';
 import { UpdateItineraryDayDto } from './dto/update-itinerary-day.dto';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto';
 import { Itinerary, ItineraryLean } from './schemas/itinerary.schema';
@@ -34,6 +40,7 @@ export class ItinerariesService {
   constructor(
     @InjectModel(Itinerary.name) private readonly model: Model<Itinerary>,
     private readonly referenceData: ReferenceDataService,
+    private readonly users: UsersService,
   ) {}
 
   /**
@@ -80,7 +87,8 @@ export class ItinerariesService {
 
   /**
    * ITN-03: the owner opens one itinerary. Someone else's (even a public one) answers 404 here,
-   * like a missing one (ACC-11); public viewing is a separate read-only route (ITN-21).
+   * like a missing one (ACC-11): this is a private itinerary endpoint. Others find public itineraries
+   * through searchPublic (ITN-20) and open them through the public view (ITN-21).
    */
   async findMine(
     user: AuthenticatedUser,
@@ -95,10 +103,39 @@ export class ItinerariesService {
   }
 
   /**
-   * ITN-01: the owner edits title, countries and/or start date.
+   * ITN-20: the shared search: PUBLIC itineraries that an admin has not hidden and whose author's account is
+   * still ACTIVE (ACC-12 hides a suspended or deactivated author's public itineraries), most recently
+   * updated first, paginated. Visibility is read on every request, so setting PRIVATE removes an itinerary
+   * from the next search on. ITN-21 adds the keyword and duration filters.
+   *
+   * The author check goes through UsersService.isActive (the Users module's exported method), once per
+   * distinct author with public itineraries, so the page and the total count only what is shown.
+   */
+  async searchPublic(
+    query: PaginationDto,
+  ): Promise<PaginatedResponse<PublicItineraryRowDto>> {
+    const shared = { visibility: Visibility.PUBLIC, isHidden: false };
+    const authorIds = (await this.model
+      .distinct('authorId', shared)
+      .exec()) as Types.ObjectId[];
+    const active = await Promise.all(
+      authorIds.map((authorId) => this.users.isActive(authorId.toString())),
+    );
+    const activeAuthorIds = authorIds.filter((_, index) => active[index]);
+
+    return paginate(
+      this.model,
+      { ...shared, authorId: { $in: activeAuthorIds } },
+      query,
+      { map: toPublicItineraryRow, sort: { updatedAt: -1, _id: -1 } },
+    );
+  }
+
+  /**
+   * ITN-01: the owner edits title, countries and/or start date. ITN-20: the owner sets visibility.
    * Ownership is part of the filter of ONE atomic update (`_id` AND `authorId`), so there is no
    * read-then-write gap. Someone else's itinerary matches nothing and answers 404 (the same as a missing
-   * one), so a private itinerary's existence is not revealed.
+   * one), so a private itinerary's existence is not revealed. A public one stays read-only to others.
    */
   async update(
     user: AuthenticatedUser,
@@ -106,18 +143,20 @@ export class ItinerariesService {
     dto: UpdateItineraryDto,
   ): Promise<ItineraryResponseDto> {
     const changes: Partial<
-      Pick<Itinerary, 'title' | 'countryCodes' | 'startDate'>
+      Pick<Itinerary, 'title' | 'countryCodes' | 'startDate' | 'visibility'>
     > = {};
     if (dto.title !== undefined) changes.title = dto.title;
     if (dto.countryCodes !== undefined) changes.countryCodes = dto.countryCodes;
     if (dto.startDate !== undefined) changes.startDate = dto.startDate;
+    if (dto.visibility !== undefined) changes.visibility = dto.visibility;
     if (Object.keys(changes).length === 0) {
       throw new BadRequestException({
         message: 'Nothing to update',
         details: [
           {
             field: 'body',
-            message: 'send at least one of title, countryCodes, startDate',
+            message:
+              'send at least one of title, countryCodes, startDate, visibility',
           },
         ],
       });

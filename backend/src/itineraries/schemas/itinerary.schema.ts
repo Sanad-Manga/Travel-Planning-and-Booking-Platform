@@ -51,7 +51,7 @@ export class Itinerary {
   @Prop({ type: String, required: true })
   startDate: string;
 
-  /** Private by default (ITN-01). ITN-20 adds the endpoint that changes it. */
+  /** Private by default (ITN-01). The owner changes it with PATCH /api/itineraries/:id (ITN-20). */
   @Prop({
     type: String,
     enum: Object.values(Visibility),
@@ -88,3 +88,5 @@ export const ItinerarySchema = SchemaFactory.createForClass(Itinerary);
 
 // "My itineraries, most recently updated first" (ITN-03) filters by author and sorts by updatedAt.
 ItinerarySchema.index({ authorId: 1, updatedAt: -1 });
+// The shared search (ITN-20) filters on visibility and the hidden flag and sorts by updatedAt.
+ItinerarySchema.index({ visibility: 1, isHidden: 1, updatedAt: -1 });

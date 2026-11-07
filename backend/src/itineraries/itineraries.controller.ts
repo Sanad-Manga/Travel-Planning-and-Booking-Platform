@@ -43,7 +43,7 @@ import { UpdateItineraryDto } from './dto/update-itinerary.dto';
 import { ItinerariesService } from './itineraries.service';
 
 // Itineraries belong to registered users (ITN-01), so every route needs the USER role.
-// Ownership of a given itinerary is checked in the service.
+// Ownership of a given itinerary is checked in the service. Public routes are in ItinerariesPublicController.
 @ApiTags('itineraries')
 @ApiCookieAuth()
 @ApiUnauthorizedResponse({
@@ -113,13 +113,14 @@ export class ItinerariesController {
 
   @Patch(':id')
   @ApiOperation({
-    summary: 'Edit my itinerary: title, countries and/or start date - ITN-01',
+    summary:
+      'Edit my itinerary: title, countries and/or start date (ITN-01), visibility PUBLIC or PRIVATE (ITN-20)',
   })
   @ApiOkResponse({ type: ItineraryResponseDto })
   @ApiBadRequestResponse({
     type: ErrorResponseDto,
     description:
-      'Invalid id, title, countries or start date, an unknown field, or an empty body',
+      'Invalid id, title, countries, start date or visibility, an unknown field, or an empty body',
   })
   @ApiNotFoundResponse({
     type: ErrorResponseDto,
