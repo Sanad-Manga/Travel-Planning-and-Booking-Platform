@@ -26,7 +26,8 @@ export class FlightSearchController {
   @ApiBadRequestResponse({
     type: ErrorResponseDto,
     description:
-      'Invalid query, impossible date, unknown airport, identical airports, or minPrice greater than maxPrice (field-level details)',  })
+      'Invalid query, impossible date, unknown airport, identical airports, or minPrice greater than maxPrice (field-level details)',
+  })
   find(@Query() query: FlightSearchQueryDto) {
     return this.search.search(query);
   }
