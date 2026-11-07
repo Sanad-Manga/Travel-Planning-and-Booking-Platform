@@ -269,6 +269,146 @@ describe('flight search (FLT-11) over HTTP (e2e)', () => {
       const second = await http().get(SEARCH).query(query({ limit: 1, page: 2 })).expect(200);
       expect(second.body.items[0].id).toBe(late);
     });
+    
+ describe('price filter and sorting (FLT-15)', () => {
+      const ids = (body: { items: { id: string }[] }) => body.items.map((i) => i.id);
+
+      /** Flight with an ECONOMY (45000) and a BUSINESS (120000) cabin, both with seats left. */
+      async function twoCabinFlight() {
+        const id = await createFlight();
+        await addCabin(id, 'ECONOMY', 100, 0, 0, 45000);
+        await addCabin(id, 'BUSINESS', 8, 4, 0, 120000);
+        return id;
+      }
+
+      it('min and max are inclusive and only matching cabins are listed', async () => {
+        await twoCabinFlight();
+        const exact = await http()
+          .get(SEARCH)
+          .query(query({ passengers: 1, minPrice: 45000, maxPrice: 45000 }))
+          .expect(200);
+        expect(exact.body.items[0].cabins.map((c: { cabinClass: string }) => c.cabinClass)).toEqual(['ECONOMY']);
+
+        const top = await http()
+          .get(SEARCH)
+          .query(query({ passengers: 1, minPrice: 120000 }))
+          .expect(200);
+        expect(top.body.items[0].cabins.map((c: { cabinClass: string }) => c.cabinClass)).toEqual(['BUSINESS']);
+      });
+
+      it('only minPrice or only maxPrice works', async () => {
+        await twoCabinFlight();
+        await http().get(SEARCH).query(query({ passengers: 1, maxPrice: 50000 })).expect(200)
+          .expect((r) => expect(r.body.items[0].cabins).toHaveLength(1));
+        await http().get(SEARCH).query(query({ passengers: 1, minPrice: 0 })).expect(200)
+          .expect((r) => expect(r.body.items[0].cabins).toHaveLength(2));
+      });
+
+      it('a flight with no cabin in the range is excluded', async () => {
+        await twoCabinFlight();
+        const res = await http()
+          .get(SEARCH)
+          .query(query({ passengers: 1, minPrice: 50000, maxPrice: 100000 }))
+          .expect(200);
+        expect(res.body.items).toEqual([]);
+      });
+
+      it('the filter keeps the other criteria (seats, date, route)', async () => {
+        await twoCabinFlight(); // BUSINESS has only 4 seats left
+        await http().get(SEARCH).query(query({ passengers: 5, minPrice: 100000 })).expect(200)
+          .expect((r) => expect(r.body.items).toEqual([]));
+        await http().get(SEARCH).query(query({ passengers: 1, minPrice: 0, departureDate: '2090-12-02' })).expect(200)
+          .expect((r) => expect(r.body.items).toEqual([]));
+        await http().get(SEARCH).query(query({ passengers: 1, minPrice: 0, arrivalAirport: 'CAI', departureAirport: 'JFK' })).expect(200)
+          .expect((r) => expect(r.body.items).toEqual([]));
+      });
+
+      it('minPrice greater than maxPrice: 400 with a field-level detail', async () => {
+        const res = await http()
+          .get(SEARCH)
+          .query(query({ minPrice: 90000, maxPrice: 45000 }))
+          .expect(400);
+        expect(res.body.details).toEqual(
+          expect.arrayContaining([expect.objectContaining({ field: 'minPrice' })]),
+        );
+      });
+
+      it.each([
+        [{ minPrice: -1 }, 'minPrice'],
+        [{ maxPrice: 'abc' }, 'maxPrice'],
+        [{ minPrice: 10.5 }, 'minPrice'],
+        [{ sort: 'cheapest' }, 'sort'],
+        [{ order: 'up' }, 'order'],
+      ])('invalid %j: 400 on %s', async (params, field) => {
+        const res = await http().get(SEARCH).query(query(params as Record<string, string | number>)).expect(400);
+        expect(res.body.details).toEqual(
+          expect.arrayContaining([expect.objectContaining({ field })]),
+        );
+      });
+
+      // Two flights: A leaves 08:00 (cheapest 90000, long: 19 h), B leaves 14:30 (cheapest 45000, 11.5 h).
+      async function flightsAB() {
+        const a = await createFlight({
+          flightNumber: 'MS100',
+          departureLocalTime: '2090-12-01T08:00',
+          arrivalLocalTime: '2090-12-01T20:00',
+        });
+        const b = await createFlight({
+          flightNumber: 'MS200',
+          arrivalLocalTime: '2090-12-01T19:00',
+        });
+        await addCabin(a, 'ECONOMY', 100, 0, 0, 90000);
+        await addCabin(b, 'ECONOMY', 100, 0, 0, 45000);
+        return { a, b };
+      }
+
+      it('default sort is departure time ascending', async () => {
+        const { a, b } = await flightsAB();
+        const res = await http().get(SEARCH).query(query()).expect(200);
+        expect(ids(res.body)).toEqual([a, b]);
+      });
+
+      it('sort=departureTime with order=desc reverses it', async () => {
+        const { a, b } = await flightsAB();
+        const res = await http().get(SEARCH).query(query({ sort: 'departureTime', order: 'desc' })).expect(200);
+        expect(ids(res.body)).toEqual([b, a]);
+      });
+
+      it('sort=price orders by the cheapest matching cabin', async () => {
+        const { a, b } = await flightsAB();
+        const asc = await http().get(SEARCH).query(query({ sort: 'price' })).expect(200);
+        expect(ids(asc.body)).toEqual([b, a]);
+        const desc = await http().get(SEARCH).query(query({ sort: 'price', order: 'desc' })).expect(200);
+        expect(ids(desc.body)).toEqual([a, b]);
+      });
+
+      it('sort=price uses only cabins inside the price filter', async () => {
+        const { a, b } = await flightsAB();
+        await addCabin(a, 'BUSINESS', 8, 0, 0, 20000); // would make A the cheapest if not filtered
+        const res = await http()
+          .get(SEARCH)
+          .query(query({ sort: 'price', minPrice: 40000 }))
+          .expect(200);
+        expect(ids(res.body)).toEqual([b, a]);
+      });
+
+      it('sort=duration orders by arrival minus departure in UTC', async () => {
+        const { a, b } = await flightsAB();
+        const asc = await http().get(SEARCH).query(query({ sort: 'duration' })).expect(200);
+        expect(ids(asc.body)).toEqual([b, a]);
+        const desc = await http().get(SEARCH).query(query({ sort: 'duration', order: 'desc' })).expect(200);
+        expect(ids(desc.body)).toEqual([a, b]);
+      });
+
+      it('sorting keeps pagination consistent', async () => {
+        const { a, b } = await flightsAB();
+        const first = await http().get(SEARCH).query(query({ sort: 'price', limit: 1, page: 1 })).expect(200);
+        const second = await http().get(SEARCH).query(query({ sort: 'price', limit: 1, page: 2 })).expect(200);
+        expect(ids(first.body)).toEqual([b]);
+        expect(ids(second.body)).toEqual([a]);
+        expect(first.body.total).toBe(2);
+      });
+    });
 
     describe('validation (400 with field-level details)', () => {
       const failsOn = async (params: Record<string, string | number>, field: string) => {
