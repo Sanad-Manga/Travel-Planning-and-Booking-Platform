@@ -1,11 +1,12 @@
 import { NotFoundException } from '@nestjs/common';
-import { AuthenticatedUser, Role } from '../common';
+import { Role } from './enums';
+import { AuthenticatedUser } from './interfaces/authenticated-user';
 
 /**
  * Shared ownership rules (ACC-11, docs/contracts.md section 4). Pure functions: no database, no Nest DI,
  * so any service can import them:
  *
- *   import { assertCanViewBooking, assertOwner, bookingVisibilityFilter } from '../auth/ownership';
+ *   import { assertCanViewBooking, assertOwner, bookingVisibilityFilter } from '../common/ownership';
  *
  * Each module maps its own schema fields onto {@link OwnedResource}; the helper depends on no schema.
  * A private resource that is not yours is a 404 (never 403), so its existence is not revealed.

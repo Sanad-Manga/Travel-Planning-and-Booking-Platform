@@ -1,6 +1,6 @@
 import { NotFoundException } from '@nestjs/common';
 import { Types } from 'mongoose';
-import { AuthenticatedUser, Role } from '../common';
+import { AuthenticatedUser, Role } from '.';
 import {
   assertCanViewBooking,
   assertOwner,

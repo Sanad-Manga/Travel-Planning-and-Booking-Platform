@@ -23,7 +23,7 @@ import {
   assertCanViewBooking,
   assertOwner,
   bookingVisibilityFilter,
-} from '../src/auth/ownership';
+} from '../src/common/ownership';
 import { AuthenticatedUser, CurrentUser, Role } from '../src/common';
 import configuration from '../src/config/configuration';
 import { setupApp } from '../src/setup-app';
