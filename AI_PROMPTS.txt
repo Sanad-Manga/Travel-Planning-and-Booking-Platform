@@ -928,6 +928,14 @@ Confirmed CI uses npm run test:e2e and Jest scans backend/test. The original pla
 Date: 2026-11-06
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-11 (SCRUM-42)
+Prompt:
+Implement only SCRUM-42 (ownership helper) following docs/contracts.md. Lead decision: no changes to common/ or contracts.md, so the helper lives in auth/. One new file backend/src/auth/ownership.ts of pure functions (isOwner/assertOwner owner-only; canViewBooking/assertCanViewBooking for owner, admin and the matching airline/hotel moderator; bookingVisibilityFilter for list endpoints), a 404 rule for resources that are not yours, unit tests for every rule, one e2e on mongodb-memory-server with a test-only module, and docs/api/ownership.md. Do not refactor other modules, do not touch Atlas or .env.
+How the output was used:
+Added src/auth/ownership.ts, its unit spec (20 tests), test/ownership.e2e-spec.ts (12 tests with a test-only model, service and controller defined inside the spec and never registered in AppModule) and docs/api/ownership.md. A fixture bug (login lowercases emails) was found and fixed while running the e2e. Other modules adopt the helper in their own PRs. I reviewed the rules and the 404 behaviour before opening the PR.
+Date: 2026-11-06
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
 Related Requirement: ACC-10 (SCRUM-41)
 Prompt:
 Implement only SCRUM-41 (guests get a consistent 401 on restricted actions) following docs/contracts.md. First verify what the global JwtAuthGuard, @Public() and AllExceptionsFilter already do on develop. Main deliverable: an e2e test that boots the whole AppModule on mongodb-memory-server, enumerates every registered route with its @Public() metadata, and checks that every non-public route answers a cookie-less request with 401 in the standard error shape, without hard-coding the public routes. Also test garbage/tampered/expired cookies, suspended and deactivated users, and that known public routes stay open. Add a short docs/api note for the frontend. Do not edit common/ or other modules, do not touch Atlas or .env.
