@@ -715,9 +715,7 @@ for list rows, the two GET routes with Swagger docs and the tests (order by last
 itineraries still listed to their author, 404 for someone else's even when public, 400/401/403 cases). Days do
 not exist until ITN-05, so dayCount is 0 for now; this is flagged in the PR. Build, lint, all 321 unit tests and
 all 191 e2e tests pass locally.
-================================================
 
-================================================
 Date: 2026-11-04
 Student: Mohamed Walid
 Tool: OpenAI Codex
@@ -728,7 +726,6 @@ How the output was used:
 Added four internal list methods returning complete Airport[], City[] or Attraction[] arrays through one MongoDB-side filtered/projected/sorted query each. They reuse existing relationship indexes, preserve exact official IDs and IANA time zones, exclude MongoDB metadata, return [] for no matches, and keep all existing signatures and the paginated airport endpoint unchanged. Documented the new names as proposed for Ahmed's review and explained complete-result arrays versus HTTP pagination. Verified that ReferenceDataModule is already registered in AppModule and exports the service; added a consumer-module DI test without modifying either module.
 Added package.json preseed (npm run build) and seed (node --env-file=.env dist/reference-data/seed/seed.js) scripts. A real shortcut test exposed Windows custom-path escaping with an initial combined build-and-seed command; splitting the build into preseed fixed it. The final shortcut tests build from missing output, seed default data from a synthetic env file and forward a custom directory containing spaces while preserving explicit environment precedence. All shortcut execution targets only the test's own generated MongoMemoryServer URI, and no developer .env is copied or read.
 Added 13 query/shortcut integration tests covering filters, multiple and empty groups, unrelated-record exclusion, exact IDs, fields/time zones, deterministic sorting, larger groups, normal Nest DI and real npm execution. Verification in an environment-free temporary backend copy using existing dependencies: npm run build PASS; npm run lint PASS; npm test -- --runInBand PASS (326 tests across 25 suites); npm run test:e2e -- --runInBand PASS (162 tests across 10 suites). Documented usage, interface tradeoffs, observed results and the unchanged obsolete-record reconciliation limitation in the module README. Final Git/whitespace/hash checks verify scope. No dependencies were installed or upgraded; no production seed, shared database connection, AppModule/schema/CSV/common changes, commit, push or PR update was performed.
-================================================
 
 ================================================
 Date: 2026-11-06
@@ -764,13 +761,19 @@ title, and message the cabin owner and the team lead.
 ================================================
 Student: Mohamed Walid
 Tool: OpenAI Codex
+Related Requirement: ACC-18 (SCRUM-20)
+Prompt:
+Implement secure, idempotent administrator account seeding using the existing User schema and authentication infrastructure, with environment-based credentials, registration protection, login integration, and automated tests. Verify live Jira and available official requirements before coding; construct and review the acceptance matrix; preserve auth/users/common, schemas, reference-data seeding and unrelated modules; document blank env variable names and provisioned consent timestamp semantics; do not inspect real .env, use shared Atlas, commit, push, merge or create a PR.
+How the output was used:
+Verified live SCRUM-20, contracts v1.3, PR template and a clean branch matching the local develop/origin-develop baseline fbedaeb. No official workbook/project-description file was present. Added a standalone administrator CLI/config validator and atomic insert-only users seeder under src/admin/seed, reusing RegisterDto credential normalization/constraints, the shared User schema/enums and AuthService's bcrypt cost constant. New accounts are ACTIVE ADMINs; required consentAcceptedAt is documented as a provisioning/schema-compatibility timestamp, not interactive terms acceptance. Unique-email indexed upserts and role checks preserve existing administrators and unrelated users, refuse normal-user/moderator collisions and handle concurrent/racing insert winners without promotion or password resets.
+Added independent preseed:admin and seed:admin scripts, blank ADMIN_SEED_EMAIL/ADMIN_SEED_PASSWORD/ADMIN_SEED_NAME declarations in .env.example, administrator setup/security/acceptance documentation and a root README link. No dependency/lockfile, AppModule, auth/User schema, common or reference-data modifications were needed. Existing registration already rejects role fields; existing login, account-status checks, secure cookies and Swagger were verified without changing their implementation.
+Added 33 tests: 16 config-policy/sanitization unit cases, 14 real User/auth/registration/Swagger integration cases, and 3 actual CLI cases. CLI tests run npm run seed:admin twice in a fresh temporary source copy with only synthetic env values and an explicitly generated disposable MongoDB URI. A test-only Mongoose overload mismatch in the extra normal-user race fixture was corrected before final verification. Observed final results in an environment-free backend copy: full Jest PASS (386 tests, 28 suites), E2E PASS (201 tests, 11 suites), build PASS, ESLint PASS; administrator creation, reruns, hashing, existing-user collisions, concurrent seeds, registration rejection, ADMIN login/status/cookies, validation-before-connect and secret-free failure output verified. Final diff/whitespace/hash checks verify authorized scope and unchanged restricted files. No real credentials or shared database access, production seed, dependency installation, commit, push, merge, PR creation or Jira update occurred.
 Related Requirement: GEN-12 (SCRUM-126), PR #29 review correction
 Prompt:
 Address Ahmed Sanad's missing acceptance criterion on the existing reference-query follow-up PR #29 by adding listCountries(): Promise<Country[]> to ReferenceDataService. Retrieve all countries dynamically, preserve code/name/currency, sort by official code, exclude MongoDB metadata, return [] when empty, and preserve all existing methods and behavior. Extend the existing integration tests, document the correction, check every SCRUM-126 criterion, and run relevant/full tests, E2E, build and ESLint. Do not modify the airports API, the four list methods, AppModule, schemas, CSVs, seed shortcut, dependencies, lockfile or other modules; do not commit, push, merge or create another PR.
 How the output was used:
 Read the live SCRUM-126 acceptance criteria/checklist without changing Jira. Added only listCountries() to the production service, following the existing one-query find/sort/project/lean pattern and returning official code/name/currency fields without _id, __v or timestamps. Added five country integration cases to the existing consumer-module suite: actual official GEN-12 seeded records with metadata stored in MongoDB, repeated deterministic sorting, an empty country collection and datasets of one, three and 80 countries with varied currencies. Initial test-fixture TypeScript cleanup errors were corrected before final verification.
 Verification ran in a temporary backend copy without real environment files, using existing dependencies and disposable MongoDB only: relevant query integration PASS (16 tests); full Jest PASS (331 tests across 25 suites); E2E PASS (162 tests across 10 suites); build PASS; ESLint PASS. README documents the fifth signature, the PR #29 review correction and criterion-by-criterion evidence. All prior prompt entries are preserved. Final diff/hash checks verify that existing methods and all restricted files remain unchanged. No production seeding, shared Atlas access, dependency installation, commit, push, merge or PR/Jira update was performed.
-================================================
 Date: 2026-11-06
 Student: Abdulrahman Mohamad Hosny
 Tool: Claude
@@ -784,9 +787,7 @@ controller Swagger text, e2e tests), the decision to branch from the FLT-11 bran
 FLT-15 extends its search files, and the proposed rules to confirm with the team lead
 (prices in cents per the contract, filter applied per cabin fare, sort by price using the
 cheapest matching cabin, default sort stays departure time).
-================================================
 
-================================================
 Date: 2026-11-06
 Student: Abdulrahman Mohamad Hosny
 Tool: Claude
@@ -800,9 +801,7 @@ the per-cabin inclusive price filter, the minPrice greater than maxPrice error, 
 logic with stable tie-breakers, the Swagger text and a set of e2e test cases. The code was
 reviewed, adapted to the existing FLT-11 files and committed on the FLT-15 branch. Checked
 that PaginationDto has no sort field, so there is no clash with the new parameters.
-================================================
 
-================================================
 Date: 2026-11-06
 Student: Abdulrahman Mohamad Hosny
 Tool: Claude
@@ -814,9 +813,7 @@ How the output was used:
 Used the step list for creating the branch, applying the changes, running build, lint and the
 e2e tests, and committing in small commits. Used the note that the FLT-15 code did not need
 changes after the cabin reader was rewritten, since its interface stayed the same.
-================================================
 
-================================================
 Date: 2026-11-07
 Student: Abdulrahman Mohamad Hosny
 Tool: Claude
@@ -830,9 +827,7 @@ other criteria kept, error for min greater than max, sorting by price, duration 
 departure time). Noted two points to raise with the lead: the extra order parameter goes
 slightly beyond the ticket, and prices are in cents per passenger. Also noted a possible type
 issue in one test table to watch for when running the tests.
-================================================
 
-================================================
 Date: 2026-11-07
 Student: Abdulrahman Mohamad Hosny
 Tool: Claude
@@ -845,9 +840,7 @@ typecheck and lint passed, and the branch merged cleanly with develop. It found 
 Swagger description for the 400 response contained duplicated text, and that the AI log had
 no new FLT-15 entries. These two points were used as the fixes to make before the pull
 request. The e2e tests could not run in Claude's environment, so they were run locally.
-================================================
 
-================================================
 Date: 2026-11-07
 Student: Abdulrahman Mohamad Hosny
 Tool: Claude
@@ -858,4 +851,21 @@ new one.
 How the output was used:
 Used the explanation that any commit pushed to the branch is added to the open PR, and the
 commands for committing the Swagger text fix and the AI log update on the FLT-15 branch.
-================================================
+
+Date: 2026-11-06
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: GEN-07 (SCRUM-21)
+Prompt:
+Implement SCRUM-21 audit infrastructure after checking live Jira SCRUM-21, docs/contracts.md and existing backend conventions: persistent auditLogs, exact AuditService.log({ actorId, action, targetType, targetId, details? }): Promise<void> contract, exported AuditModule, ADMIN-only GET /api/admin/audit-logs with shared pagination and Swagger, safe details and transparent write failures. Test only with disposable MongoDB, document future ACC-15/ACC-16/GEN-10 integration, and do not modify other modules, real .env, Atlas, dependencies, Git history or Jira. Separately authorized the minimal two-line AuditModule registration in AppModule.
+How the output was used:
+Added the audit schema/index, service, validation, controller, response DTO, module exports, README and automated tests; registered AuditModule using the explicitly authorized AppModule change. Verified real MongoDB persistence, exported consumer DI, actual HTTP role checks, pagination boundaries and stable ordering, sanitized failures, Swagger and real AppModule reachability. In an environment-free temporary backend copy, 54 focused audit tests, all 407 Jest tests (27 suites), all 201 existing E2E tests and all 203 combined E2E tests (12 suites including audit AppModule tests) passed; build and ESLint passed. Existing prompt entries were preserved. No real credentials, real administrator accounts, shared database access, dependency changes, commits, pushes, PR creation or Jira changes. University workbook/project description were unavailable and were not claimed as independently verified. Suspension, deletion and moderation workflows remain future consumers; audit writes and workflow mutations are not atomic through this contract.
+
+Date: 2026-11-06
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: GEN-07 (SCRUM-21) - final E2E discovery correction
+Prompt:
+Explain the original audit E2E test location honestly, verify repository and GitHub CI conventions, move the test from backend/src/audit/audit.e2e-spec.ts to backend/test/audit.e2e-spec.ts with all assertions preserved, update imports and documentation, and rerun standard E2E, full Jest, build and lint. Do not change production code, global Jest configuration, npm scripts, dependencies or Git history.
+How the output was used:
+Confirmed CI uses npm run test:e2e and Jest scans backend/test. The original placement was an intentional module-ownership choice made despite knowing the discovery restriction; accepting the custom-command gap was a mistake, not a technical advantage. Moved the test into the standard test directory with only five import-path replacements; verified the rest of the file, including every assertion, was unchanged. Updated the audit README to remove the custom command requirement and preserved earlier prompt entries. In an environment-free temporary copy using disposable MongoDB, exact npm run test:e2e passed 203/203 tests (12 suites), full Jest passed 407/407 (27 suites), build and ESLint passed. No production code, shared test configuration, npm scripts, dependency files, real .env, shared database or existing Git index entries were modified; no commit, push, merge or PR was performed.
