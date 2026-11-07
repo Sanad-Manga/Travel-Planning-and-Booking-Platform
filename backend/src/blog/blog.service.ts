@@ -1,9 +1,13 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, FilterQuery, Model, Types } from 'mongoose';
-import { AuthenticatedUser, MAX_IMAGES_PER_ENTITY, paginate, PaginatedResponse, PaginationDto, POST_MAX_TAGS, PostStatus } from '../common';
+import { AuthenticatedUser, MAX_IMAGES_PER_ENTITY, paginate, PaginatedResponse, PaginationDto, POST_MAX_TAGS, PostStatus, Role } from '../common';
+import { UsersService } from '../users/users.service';
+import { BrowsePostsQueryDto } from './dto/browse-posts-query.dto';
 import { CreatePostDto } from './dto/create-post.dto';
 import { MyPostRowDto } from './dto/my-post-row.dto';
+import { PostDetailDto } from './dto/post-detail.dto';
+import { PostListRowDto } from './dto/post-list-row.dto';
 import { PostResponseDto } from './dto/post-response.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 import { Post } from './schemas/post.schema';
@@ -11,11 +15,17 @@ import { Post } from './schemas/post.schema';
 // See deletePostAndDependents for the assumption behind these names.
 const DEPENDENT_COLLECTIONS = ['comments', 'likes'];
 
+// Shown when an author's account can no longer be found.
+const UNKNOWN_AUTHOR = 'Unknown user';
+
+type LeanPost = Post & { _id: Types.ObjectId };
+
 @Injectable()
 export class BlogService {
   constructor(
     @InjectModel(Post.name) private readonly posts: Model<Post>,
     @InjectConnection() private readonly connection: Connection,
+    private readonly users: UsersService,
   ) {}
 
   /**
@@ -51,6 +61,46 @@ export class BlogService {
       sort: { createdAt: -1, _id: -1 },
       projection: { body: 0, images: 0, tags: 0 },
     });
+  }
+
+  /**
+   * BLG-02: the public list. Only PUBLISHED, not hidden posts, newest published first, optionally
+   * filtered by one tag. Drafts and hidden posts can never appear here. Author names are looked up once
+   * per page (one lookup per distinct author), not once per row.
+   */
+  async listPublished(query: BrowsePostsQueryDto): Promise<PaginatedResponse<PostListRowDto>> {
+    const filter: FilterQuery<Post> = { status: PostStatus.PUBLISHED, isHidden: false };
+    if (query.tag) filter.tags = query.tag;
+
+    const page = await paginate(this.posts, filter, query, {
+      map: PostListRowDto.fromLean,
+      sort: { publishedAt: -1, _id: -1 },
+      projection: { body: 0, images: 0 },
+    });
+
+    const names = await this.authorNames(page.items.map((row) => row.author.id));
+    return {
+      ...page,
+      items: page.items.map((row) => ({
+        ...row,
+        author: { id: row.author.id, name: names.get(row.author.id) ?? UNKNOWN_AUTHOR },
+      })),
+    };
+  }
+
+  /**
+   * BLG-02: open one post. `viewer` is the logged-in caller, or undefined for a guest.
+   * Only PUBLISHED posts open here; a draft never does. A hidden post is visible only to its author
+   * and admins (contracts section 7). Everyone else gets 404, never 403 (section 4).
+   */
+  async findOne(id: string, viewer?: AuthenticatedUser): Promise<PostDetailDto> {
+    if (!/^[0-9a-f]{24}$/i.test(id)) throw new NotFoundException('Post not found');
+    const post = await this.posts.findById(id).lean<LeanPost>().exec();
+    if (!post || !this.canView(post, viewer)) throw new NotFoundException('Post not found');
+
+    const authorId = post.authorId.toString();
+    const names = await this.authorNames([authorId]);
+    return PostDetailDto.fromLean(post, names.get(authorId) ?? UNKNOWN_AUTHOR);
   }
 
   /**
@@ -107,6 +157,24 @@ export class BlogService {
     for (const name of DEPENDENT_COLLECTIONS) {
       await this.connection.collection(name).deleteMany({ postId: post._id });
     }
+  }
+
+  /** Only published posts open here. A hidden one opens only for its author and admins. Drafts never open (the author uses /mine). */
+  private canView(post: LeanPost, viewer?: AuthenticatedUser): boolean {
+    if (post.status !== PostStatus.PUBLISHED) return false;
+    if (!post.isHidden) return true;
+    return viewer !== undefined && (viewer.role === Role.ADMIN || post.authorId.toString() === viewer.userId);
+  }
+
+  /** author id -> display name, one lookup per distinct author. Unknown authors are simply missing from the map. */
+  private async authorNames(authorIds: string[]): Promise<Map<string, string>> {
+    const unique = [...new Set(authorIds)];
+    const found = await Promise.all(unique.map((id) => this.users.findById(id)));
+    const names = new Map<string, string>();
+    found.forEach((user, index) => {
+      if (user) names.set(unique[index], user.name);
+    });
+    return names;
   }
 
   // A malformed id can never match, so it gets the same 404 as an unknown one (no CastError reaches the client).

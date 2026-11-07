@@ -43,6 +43,14 @@ export class User {
   @Prop({ type: String })
   phone?: string;
 
+  // Login lockout (ACC-05). Consecutive wrong passwords; reset to 0 by a successful login.
+  @Prop({ type: Number, default: 0 })
+  failedAttempts: number;
+
+  // While this is in the future, login is rejected with 423 even for the right password.
+  @Prop({ type: Date })
+  lockedUntil?: Date;
+
   // Added by `timestamps: true`; declared so TypeScript knows about them.
   createdAt?: Date;
   updatedAt?: Date;
