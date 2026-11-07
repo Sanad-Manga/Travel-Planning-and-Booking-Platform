@@ -13,6 +13,7 @@ import { NotificationsModule } from './notifications';
 import { HotelsModule } from './hotels/hotels.module';
 import { PaymentsModule } from './payments';
 import { ReferenceDataModule } from './reference-data/reference-data.module';
+import { UploadsModule } from './uploads';
 
 // Feature modules (auth, flights, hotels, ...) are added here by their owners in their own PRs.
 @Module({
@@ -37,6 +38,7 @@ import { ReferenceDataModule } from './reference-data/reference-data.module';
     FlightsModule,
     ItinerariesModule,
     AuditModule,
+    UploadsModule,
   ],
 })
 export class AppModule {}
