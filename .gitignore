@@ -8,3 +8,5 @@ dist/
 .DS_Store
 coverage/
 uploads/
+!backend/src/uploads/
+!backend/src/uploads/**
