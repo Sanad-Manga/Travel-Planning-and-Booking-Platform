@@ -43,6 +43,7 @@
     "pdfkit": "0.20.2",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
+    "sharp": "0.35.5",
     "stripe": "23.1.0"
   },
   "devDependencies": {

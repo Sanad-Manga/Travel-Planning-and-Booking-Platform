@@ -74,7 +74,9 @@ Used the generated BookingLifecycle service, transition table, provider registry
 Kept the contract's four allowed transitions exactly. The provider interface methods getStatus, applyStatus and
 findExpiredHolds are proposals (the contract does not have them) and are waiting for the lead's answer before merge.
 The only other file touched is app.module.ts (one import for PaymentsModule).
+================================================
 
+================================================
 Date: 2026-11-03
 Student: Abdelrahman ElGabarty
 Tool: Claude (Claude Code, Sonnet 5)
@@ -112,7 +114,9 @@ Prompt:
 Asked Claude to read contracts.md, the project description PDF, the Jira Sprint 1 tickets and the repo skeleton, then plan the Auth & Accounts implementation and write this Claude Code prompt.
 How the output was used:
 Used the plan (user/auth module split, guard design, cookie and login decisions) as the basis for the implementation prompt below.
+================================================
 
+================================================
 Date: 2026-11-03
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
@@ -121,7 +125,9 @@ Prompt:
 Implement SCRUM-14 (ACC-01, register with email, password and consent) after reading docs/contracts.md and the skeleton: users module (User schema, UsersService with findByEmail/findById/create), auth module, RegisterDto, UserResponseDto, POST /api/auth/register with Swagger decorators, unit tests and an e2e test with mongodb-memory-server. Design decisions given: role always USER, 409 with a field-level detail for a duplicate email, bcryptjs salted hash, never return the hash, no cookies on register.
 How the output was used:
 Generated the users and auth modules, the DTOs, the unit tests and the e2e test; lint, build, unit and e2e tests were run locally. I must review: the field name acceptTerms for consent (the contract does not name it), the 72-character password maximum (bcrypt ignores bytes beyond 72), the bcrypt cost of 10, and that the only edit outside my modules is the AuthModule import in app.module.ts. I will run the Swagger tests manually before the PR is merged.
+================================================
 
+================================================
 Date: 2026-11-03
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
@@ -130,7 +136,9 @@ Prompt:
 Implement SCRUM-15 (ACC-04, login plus the shared guards) on top of the registration branch: POST /api/auth/login (password checked before status, generic 401, 403 for suspended, dummy-hash comparison for unknown emails), GET /api/auth/me, global JwtAuthGuard with @Public(), RolesGuard with @Roles(), @CurrentUser(), JWT via @nestjs/jwt (no passport) with the access token in an httpOnly cookie set through one shared helper, JWT secrets validated at start-up. Tests: me without cookie 401, login sets an httpOnly cookie, wrong password 401, suspended 403, role guard 403 and 200, public route without a cookie.
 How the output was used:
 Generated the guards, decorators and interfaces in common/ (additions only), the login and me endpoints, the cookie helper, the secret validation and the unit and e2e tests; lint, build, unit and e2e tests were run locally. I must review: the 15-minute access token, that GET /me also returns 401 when the account is no longer ACTIVE, that the only edits to existing common/ lines are the exports in index.ts and the cookie-name comment in constants.ts, and the lead must approve the common/ additions. Branch is based on the ACC-01 branch, so its PR must be retargeted to develop after ACC-01 merges.
+================================================
 
+================================================
 Date: 2026-11-03
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
@@ -139,7 +147,9 @@ Prompt:
 Implement SCRUM-16 (ACC-19, tokens in httpOnly cookies only) on top of the login branch: issue a refresh token cookie (httpOnly, SameSite Lax, path /api/auth, max age 30 minutes, secure from config) next to the access cookie through the one shared cookie helper, and add tests that assert the Set-Cookie flags, that no token appears in any response body, and that Swagger cookie auth is wired. No refresh endpoint and no logout yet.
 How the output was used:
 Generated the refresh token signing (separate secret), the cookie helper changes and the cookie e2e tests; lint, build, unit and e2e tests were run locally. I must review: the refresh token only carries the user id, and nothing can use it yet (the refresh endpoint, revocation and logout are SCRUM-38 in Sprint 2). The Swagger "Try it out" check is automated against the generated OpenAPI document and a cookie-jar login flow; I will confirm it manually in the browser at /api/docs.
+================================================
 
+================================================
 Date: 2026-11-03
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
@@ -148,7 +158,9 @@ Prompt:
 Implement SCRUM-17 (GEN-13, backend-enforced validation and salted hashing): write a short docs/api/validation-pattern.md (how to write a DTO, how errors look, where business rules live) using the register DTO as the example, plus tests proving field-level errors, rejection of extra fields, and that two identical passwords produce different hashes that are not the plaintext. Keep it small and do not duplicate what the register PR already covers.
 How the output was used:
 Generated the pattern document and one extra e2e test file (wrong types, unknown field on login, empty body, 72-character limit, identical passwords giving different hashes); lint, build, unit and e2e tests were run locally. I must review the document against how the team actually writes DTOs, and the lead should confirm it is the pattern everyone copies. The register tests already covered field-level errors and extra fields, so they are linked from the document instead of duplicated.
+================================================
 
+================================================
 Date: 2026-11-03
 Student: Ziad Mohamed
 Tool: Claude (claude.ai chat)
@@ -157,7 +169,9 @@ Prompt:
 Asked Claude to review the Sprint 1 Claude Code report and the register DTO/auth code.
 How the output was used:
 It found that @MaxLength(72) counts characters while bcrypt's limit is 72 bytes, and I used that finding to write the fix prompt.
+================================================
 
+================================================
 Date: 2026-11-03
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
@@ -166,7 +180,9 @@ Prompt:
 The fix prompt for the 72-byte password limit: replace the character-based @MaxLength(72) on the register password with a UTF-8 byte-based validator, fix the Swagger metadata, replace the old test with byte-based tests (ASCII, Arabic), and update the validation pattern document.
 How the output was used:
 Added a reusable @MaxByteLength decorator (auth/validators) with a unit test, a PASSWORD_MAX_BYTES constant in auth/auth.constants.ts, used it in RegisterDto (other password rules untouched, the letter rule still accepts Latin letters only), removed maxLength from the Swagger field, replaced the old 72-character e2e test with four byte-based cases and updated docs/api/validation-pattern.md. Lint, build, unit and e2e tests were run locally. I should review the error message wording and confirm the letter-rule question with the lead.
+================================================
 
+================================================
 Date: 2026-11-03
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
@@ -175,7 +191,9 @@ Prompt:
 Implement the lead's additional request on PR #7: add POST /api/auth/refresh (ACC-06, session expiry) as a stateless sliding 30-minute session. Read the refresh cookie, verify it with the refresh secret, re-read the user and their role from the database (401 if missing or not ACTIVE), issue a new access and a new refresh token, clear both cookies on any failure, add a random jti to refresh tokens, and make startup fail when the access and refresh secrets are equal. No logout, no revocation, no Sprint 2 work.
 How the output was used:
 Generated AuthService.refresh, the controller route, a clearAuthCookies helper built from the same option builders as setAuthCookies, the jti claim, the equal-secrets check and the unit and e2e tests. A clean npm ci, build, lint, unit tests and e2e tests were run locally. I must review: the refresh route is @Public and the controller clears the cookies when the service throws 401, the jti is not stored anywhere yet (SCRUM-38 will use it), and that everyone's local .env must now have two DIFFERENT JWT secrets or the app will not start.
+================================================
 
+================================================
 Date: 2026-11-03
 Student: Ziad Mohamed
 Tool: Claude (claude.ai chat)
@@ -184,7 +202,9 @@ Prompt:
 I asked why Arabic passwords were rejected on register.
 How the output was used:
 Claude explained that the letter rule /[A-Za-z]/ only accepts Latin letters. I confirmed it with a node one-liner and used that to write the fix prompt.
+================================================
 
+================================================
 Date: 2026-11-03
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
@@ -193,7 +213,9 @@ Prompt:
 Change the register password letter rule from /[A-Za-z]/ to the Unicode-aware /\p{L}/u so Arabic letters count, keep every other rule (minimum length, digit rule, 72-byte maximum), add e2e tests for Arabic and Latin passwords, digits only, letters only and the 72-byte limit on Arabic input, and update the validation pattern document.
 How the output was used:
 Changed the one @Matches rule in RegisterDto (it was the only place with that rule in backend/src/auth/), updated the code sample in docs/api/validation-pattern.md and added a Unicode describe block to test/validation.e2e-spec.ts. Build, lint, unit and e2e tests were run locally. I must review that \p{L} also accepts letters from any other script, and the digit rule is unchanged (\d matches only 0-9).
+================================================
 
+================================================
 Date: 2026-11-03
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
@@ -202,7 +224,9 @@ Prompt:
 Asked why VS Code shows an error in backend/tsconfig.json and to solve it.
 How the output was used:
 The error came from VS Code's newer bundled TypeScript warning that the baseUrl option is deprecated. Nothing in the project uses baseUrl (all imports are relative), so it was removed. The ignoreDeprecations workaround was not used because the project's pinned TypeScript 5.9.3 rejects that value. Build, lint and unit tests pass. tsconfig.json belongs to the skeleton, so the lead should be told about this one-line change.
+================================================
 
+================================================
 Date: 2026-11-03
 Student: Ahmed Sanad
 Tool: Claude (Claude Code, Sonnet 5.5), used as a code reviewer
@@ -215,7 +239,9 @@ the resulting rules to docs/contracts.md.
 How the output was used:
 The reviewer drafted contracts v1.1 (section 6 constant, section 7 provider/registry/PaymentActivity rows, section 8
 pause rules). I reviewed the wording against GEN-11 and the requirements sheet before committing it.
+================================================
 
+================================================
 Date: 2026-11-04
 Student: Mohamed Walid
 Tool: OpenAI Codex
@@ -224,7 +250,9 @@ Prompt:
 Implement official reference-data seeding after inspecting docs/contracts.md and the existing NestJS backend. Preserve the four official CSV datasets and their identifiers; derive currencies; validate complete input; provide idempotent, recoverable MongoDB upserts and ReferenceDataService lookups. Add actual Jest and isolated MongoDB tests, verify build/test/lint, respect module ownership, avoid the shared Atlas database and .env contents, and document integration requirements and observed results.
 How the output was used:
 Created the reference-data schemas, CSV loader/validator, explicit seed CLI, Nest module and service, tests, and module setup/interface documentation. Verified with disposable MongoDB instances only. Proposed csv-parse as the required parsing dependency and documented shared-file integration for lead review. No application startup seeding or adjacent-ticket endpoints were added.
+================================================
 
+================================================
 Date: 2026-11-04
 Student: Mohamed Walid
 Tool: OpenAI Codex
@@ -233,7 +261,9 @@ Prompt:
 Independently review the completed reference-data implementation against docs/contracts.md. Inspect source, official datasets, schemas, upserts, service integration, dependency metadata and actual Jest tests. Report evidence-backed defects and optional improvements without modifying files, installing dependencies, running the seed, or accessing the shared Atlas database or .env contents.
 How the output was used:
 Received an APPROVE verdict with no blocking implementation defects. The read-only review identified stale dependency/setup documentation and suggested optional concurrent-seeding and existing-duplicate index-failure tests. It confirmed manifest/lockfile consistency statically; it did not rerun installation, build, tests or seeding, and made no file changes.
+================================================
 
+================================================
 Date: 2026-11-04
 Student: Mohamed Walid
 Tool: OpenAI Codex
@@ -250,7 +280,9 @@ Asked who should move flight bookings from CONFIRMED to COMPLETED, following the
 How the output was used:
 The reviewer suggested completing a flight's confirmed bookings when the flight is marked DEPARTED, done by Flights A.
 I accepted it and added it to docs/contracts.md (v1.2) and to my own ticket. The review also found that markExpired was still listed in the contract after PR #8 removed it, so that was fixed too.
+================================================
 
+================================================
 Date: 2026-11-03
 Student: Abdelrahman ElGabarty
 Tool: Claude (Claude Code, Sonnet 5.5)
@@ -267,7 +299,9 @@ and its Jest tests in backend/src/notifications. notify() keeps the signature fr
 GET /api/notifications/unread-count is an addition to the two endpoints in the ticket (proposal to the lead).
 current-user.stub.ts is a temporary stand-in for @CurrentUser() and must be replaced once SCRUM-15 is merged.
 The only other file touched is app.module.ts (one import for NotificationsModule).
+================================================
 
+================================================
 Date: 2026-11-04
 Student: Abdelrahman ElGabarty
 Tool: Claude (Claude Code, Sonnet 5)
@@ -295,7 +329,9 @@ UnauthorizedException('Authentication required') the real guard throws when ther
 test now simulates the guard instead of depending on the decorator to self-enforce. Production is unaffected
 (AuthModule's APP_GUARD is global across the real app); this was a test-isolation gap, not a runtime bug.
 All 43 notifications tests pass after the fix; full build and lint clean.
+================================================
 
+================================================
 Date: 2026-11-04
 Student: Mohamed Walid
 Tool: OpenAI Codex
@@ -344,6 +380,8 @@ How the output was used:
 The assistant checked each finding in the code and fixed four: PAYMENT_PAUSE_MAX_MINUTES moved from payments/payment-activity.ts into common/constants.ts (where docs/contracts.md section 6 says constants live); the test helpers fake-booking-provider.ts and booking-provider.conformance.ts are excluded from tsconfig.build.json so they are not compiled into dist; two unused values (holdMinutes, platformCurrency) removed from config/configuration.ts (the constants read the env directly); the reference-data README no longer says the CSVs are untracked or that dependency approval is unverified.
 I ran npm ci, build, lint, unit tests and e2e tests on develop with the change, and checked that dist no longer contains the two test helpers. Behaviour is unchanged.
 ================================================
+
+================================================
 Date: 2026-11-04
 Student: Yusuf Eser
 Tool: Claude (Claude Code, Sonnet 5.5)
@@ -352,6 +390,8 @@ Prompt:
 Implement only HTL-01 (admin creates a hotel via POST /api/hotels, hotel moderator edits only their own hotel via PATCH /api/hotels/:id: name, address, city/country from the seeded list, description, photos, star class, amenities) following contracts.md; list assumptions first.
 How the output was used:
 Generated the backend/src/hotels module (schema, DTOs, service, controller, module), registered HotelsModule in app.module.ts and added test/hotels.e2e-spec.ts. I reviewed every line, ran tsc, eslint and the e2e spec against an in-memory MongoDB.
+
+================================================
 
 ================================================
 Date: 2026-11-04
@@ -370,6 +410,8 @@ A cloud agent's audit flagged that SCRUM-33 is marked Done but BookingLifecycle 
 How the output was used:
 BookingProvider gets markConfirmed(id, paymentRef) (atomic, idempotent). PaymentActivity.prepareExpiry now reports a paid booking as { outcome: 'PAID', paymentRef } so the reference is not lost. BookingLifecycle gets confirmPaid(type, id, paymentRef) (404 unknown, 409 not waiting for payment); the late-paid path in settleDueBooking uses it, and transition(..., CONFIRMED) is rejected with a clear message. The fake provider and the shared conformance tests cover markConfirmed. No real provider or Stripe code exists yet, so nothing else changes.
 I ran lint and the 248 unit tests (the e2e suite does not touch this code).
+================================================
+
 ================================================
 
 Date: 2026-11-04
@@ -395,6 +437,8 @@ Check the reviewer's comment on PR #20: a hotel moderator editing a different ho
 How the output was used:
 Read the rule in docs/contracts.md on origin/docs/contracts-provider-ownership-403. HotelsService.update now throws 403 when the id is not the moderator's own hotelId (including unknown or malformed ids); 404 remains only if the moderator's own hotel no longer exists. Updated the Swagger error descriptions and the two e2e tests. Re-ran build, lint, unit and e2e tests.
 ================================================
+
+================================================
 Date: 2026-11-04
 Student: Mohamed Walid
 Tool: OpenAI Codex
@@ -419,6 +463,8 @@ it, running build, lint and all tests, and choosing the open points (who may rea
 logoUrl as a temporary http(s) URL) that are listed in the PR description for review.
 ================================================
 
+================================================
+
 Date: 2026-11-04
 Student: Yusuf Eser
 Tool: Claude (Claude Code, Sonnet 5.5)
@@ -427,6 +473,8 @@ Prompt:
 Implement ONLY ticket BLG-03 following contracts.md: GET /api/posts/mine returns the caller's own posts including drafts, each row with title, status, date, like count and comment count, paginated with page size 10. List assumptions first.
 How the output was used:
 The assistant added GET /api/posts/mine to the blog controller and BlogService.listMine (filter is always the caller's authorId, newest first, via the shared PaginationDto and paginate()), a MyPostRowDto (id, title, status, isHidden, createdAt, publishedAt?, likeCount, commentCount; no body/images/tags) and e2e tests. Assumptions I accepted: BLG-05/06 do not exist yet, so Post gets denormalised likeCount and commentCount fields (default 0) that those tickets will $inc; "date" is createdAt (plus publishedAt when published); hidden posts are still listed to their author; any logged-in role may call it; the route is declared before any future GET /posts/:id. I ran build, lint, 243 unit tests and 107 e2e tests (in-memory MongoDB) and read every file before committing.
+================================================
+
 ================================================
 Date: 2026-11-04
 Student: Yassin Yahya
@@ -459,7 +507,9 @@ validator, a service whose update and delete filter on id AND owner in one atomi
 tests. Build, lint, all 313 unit tests and all 126 e2e tests pass locally. The open points (country codes stored
 as the reference-data id, 404 for someone else's itinerary, a 250-country safety cap) are listed in the PR for
 the lead to review.
+================================================
 
+================================================
 Date: 2026-11-04
 Student: Yusuf Eser
 Tool: Claude (Claude Code, Sonnet 5.5)
@@ -715,7 +765,9 @@ for list rows, the two GET routes with Swagger docs and the tests (order by last
 itineraries still listed to their author, 404 for someone else's even when public, 400/401/403 cases). Days do
 not exist until ITN-05, so dayCount is 0 for now; this is flagged in the PR. Build, lint, all 321 unit tests and
 all 191 e2e tests pass locally.
+================================================
 
+================================================
 Date: 2026-11-04
 Student: Mohamed Walid
 Tool: OpenAI Codex
@@ -774,7 +826,85 @@ Address Ahmed Sanad's missing acceptance criterion on the existing reference-que
 How the output was used:
 Read the live SCRUM-126 acceptance criteria/checklist without changing Jira. Added only listCountries() to the production service, following the existing one-query find/sort/project/lean pattern and returning official code/name/currency fields without _id, __v or timestamps. Added five country integration cases to the existing consumer-module suite: actual official GEN-12 seeded records with metadata stored in MongoDB, repeated deterministic sorting, an empty country collection and datasets of one, three and 80 countries with varied currencies. Initial test-fixture TypeScript cleanup errors were corrected before final verification.
 Verification ran in a temporary backend copy without real environment files, using existing dependencies and disposable MongoDB only: relevant query integration PASS (16 tests); full Jest PASS (331 tests across 25 suites); E2E PASS (162 tests across 10 suites); build PASS; ESLint PASS. README documents the fifth signature, the PR #29 review correction and criterion-by-criterion evidence. All prior prompt entries are preserved. Final diff/hash checks verify that existing methods and all restricted files remain unchanged. No production seeding, shared Atlas access, dependency installation, commit, push, merge or PR/Jira update was performed.
+Date: 2026-11-06
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: FLT-15 (SCRUM-30)
+Prompt:
+Pasted the FLT-15 ticket (price filter and sorting for the flight search) and asked what
+is needed to start, after FLT-11 was finished.
+How the output was used:
+Used the breakdown of the ticket: the four files to change (query DTO, search service,
+controller Swagger text, e2e tests), the decision to branch from the FLT-11 branch because
+FLT-15 extends its search files, and the proposed rules to confirm with the team lead
+(prices in cents per the contract, filter applied per cabin fare, sort by price using the
+cheapest matching cabin, default sort stays departure time).
 
+Date: 2026-11-06
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: FLT-15 (SCRUM-30)
+Prompt:
+Pasted the current flight-search.service.ts, flight-search-query.dto.ts and PaginationDto,
+and asked for the FLT-15 changes.
+How the output was used:
+Claude generated a first version of the FLT-15 changes: the new optional query parameters,
+the per-cabin inclusive price filter, the minPrice greater than maxPrice error, the sorting
+logic with stable tie-breakers, the Swagger text and a set of e2e test cases. The code was
+reviewed, adapted to the existing FLT-11 files and committed on the FLT-15 branch. Checked
+that PaginationDto has no sort field, so there is no clash with the new parameters.
+
+Date: 2026-11-06
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: FLT-15 (SCRUM-30)
+Prompt:
+Asked for the complete sequence of steps for FLT-15 again, including the git commands, after
+the cabin skeleton was added to the FLT-11 branch.
+How the output was used:
+Used the step list for creating the branch, applying the changes, running build, lint and the
+e2e tests, and committing in small commits. Used the note that the FLT-15 code did not need
+changes after the cabin reader was rewritten, since its interface stayed the same.
+
+Date: 2026-11-07
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: FLT-15 (SCRUM-30)
+Prompt:
+Pasted the ticket again and asked Claude to double-check that the FLT-15 code does what the
+ticket says.
+How the output was used:
+Used the comparison between each acceptance criterion and the code (inclusive min and max,
+other criteria kept, error for min greater than max, sorting by price, duration and
+departure time). Noted two points to raise with the lead: the extra order parameter goes
+slightly beyond the ticket, and prices are in cents per passenger. Also noted a possible type
+issue in one test table to watch for when running the tests.
+
+Date: 2026-11-07
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: FLT-15 (SCRUM-30)
+Prompt:
+Shared the GitHub repository link and asked Claude to check the FLT-15 branch.
+How the output was used:
+Claude compared the branch with develop: the code matched the intended changes, the build,
+typecheck and lint passed, and the branch merged cleanly with develop. It found that the
+Swagger description for the 400 response contained duplicated text, and that the AI log had
+no new FLT-15 entries. These two points were used as the fixes to make before the pull
+request. The e2e tests could not run in Claude's environment, so they were run locally.
+
+Date: 2026-11-07
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: FLT-15 (SCRUM-30)
+Prompt:
+Asked whether new commits can be added to the existing pull request instead of creating a
+new one.
+How the output was used:
+Used the explanation that any commit pushed to the branch is added to the open PR, and the
+commands for committing the Swagger text fix and the AI log update on the FLT-15 branch.
+
+================================================
 Date: 2026-11-06
 Student: Mohamed Walid
 Tool: OpenAI Codex
@@ -783,7 +913,9 @@ Prompt:
 Implement SCRUM-21 audit infrastructure after checking live Jira SCRUM-21, docs/contracts.md and existing backend conventions: persistent auditLogs, exact AuditService.log({ actorId, action, targetType, targetId, details? }): Promise<void> contract, exported AuditModule, ADMIN-only GET /api/admin/audit-logs with shared pagination and Swagger, safe details and transparent write failures. Test only with disposable MongoDB, document future ACC-15/ACC-16/GEN-10 integration, and do not modify other modules, real .env, Atlas, dependencies, Git history or Jira. Separately authorized the minimal two-line AuditModule registration in AppModule.
 How the output was used:
 Added the audit schema/index, service, validation, controller, response DTO, module exports, README and automated tests; registered AuditModule using the explicitly authorized AppModule change. Verified real MongoDB persistence, exported consumer DI, actual HTTP role checks, pagination boundaries and stable ordering, sanitized failures, Swagger and real AppModule reachability. In an environment-free temporary backend copy, 54 focused audit tests, all 407 Jest tests (27 suites), all 201 existing E2E tests and all 203 combined E2E tests (12 suites including audit AppModule tests) passed; build and ESLint passed. Existing prompt entries were preserved. No real credentials, real administrator accounts, shared database access, dependency changes, commits, pushes, PR creation or Jira changes. University workbook/project description were unavailable and were not claimed as independently verified. Suspension, deletion and moderation workflows remain future consumers; audit writes and workflow mutations are not atomic through this contract.
+================================================
 
+================================================
 Date: 2026-11-06
 Student: Mohamed Walid
 Tool: OpenAI Codex
@@ -793,7 +925,6 @@ Explain the original audit E2E test location honestly, verify repository and Git
 How the output was used:
 Confirmed CI uses npm run test:e2e and Jest scans backend/test. The original placement was an intentional module-ownership choice made despite knowing the discovery restriction; accepting the custom-command gap was a mistake, not a technical advantage. Moved the test into the standard test directory with only five import-path replacements; verified the rest of the file, including every assertion, was unchanged. Updated the audit README to remove the custom command requirement and preserved earlier prompt entries. In an environment-free temporary copy using disposable MongoDB, exact npm run test:e2e passed 203/203 tests (12 suites), full Jest passed 407/407 (27 suites), build and ESLint passed. No production code, shared test configuration, npm scripts, dependency files, real .env, shared database or existing Git index entries were modified; no commit, push, merge or PR was performed.
 
-================================================
 Date: 2026-11-07
 Student: Hessain Elrefaey
 Tool: Claude
@@ -812,4 +943,101 @@ that the old code is unchanged. Tested in Swagger: list, tag filter, pagination,
 draft, hidden post, invalid ids, and that GET /posts/mine still works.
 Open point: the author/admin access to hidden posts on the public route needs the global guard to
 identify the user on @Public routes (common/, the lead's file). Raised with the lead.
-================================================
+Date: 2026-11-06
+Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code)
+Related Requirement: FLT-09/HTL-10 (SCRUM-123)
+Prompt:
+Implement the shared RefundCalculator.compute({tiers, daysBefore, totalCents}) per docs/contracts.md
+section 7 and the SCRUM-123 acceptance criteria: pick the tier with the highest daysBeforeThreshold
+not exceeding daysBefore, else refund 0; integer cents with a documented rounding rule; service only
+(no endpoint); never reach into the airlines/hotels schemas, only their exported getters (which don't
+exist yet, so this defines the CancellationTier shape they'll return). Only touch the payments module.
+
+How the output was used:
+Added src/payments/refund-calculator.ts (RefundCalculator class, static compute, CancellationTier/
+RefundCalculatorInput types) and src/payments/refund-calculator.spec.ts, following the existing
+money.util.ts style (JSDoc, isValidCents reuse, throwing on invalid integer-cents as a caller bug).
+Exported it through payments/index.ts; left payments.module.ts untouched since this is pure logic
+with no NestJS dependencies, same as money.util. Rounding rule: Math.round(totalCents * percent/100),
+documented in the JSDoc. Checklist from SCRUM-123: exact threshold, below lowest, above highest, no
+tiers, and a rounding case are all covered by the 8 unit tests. Ran CI=true npx jest refund-calculator
+(8/8 passed) and eslint on the new/edited files (clean) before opening the PR.
+Date: 2026-11-06
+Student: Yassin Yahya
+Tool: Claude (Claude Code)
+Related Requirement: ITN-20 (SCRUM-95)
+Prompt:
+Implement everything in my itinerary tickets that is not blocked, one ticket per branch and PR. For ITN-20,
+following docs/contracts.md and the Jira checklist: the owner sets an itinerary PUBLIC or PRIVATE through
+PATCH /api/itineraries/:id, other users can read a public itinerary but not edit it, setting PRIVATE hides
+it immediately, new itineraries stay private, and public itineraries of suspended or deactivated authors and
+ones hidden by an admin are not shown to others. Add service and HTTP tests, then open the PR and update Jira.
+How the output was used:
+Used the optional visibility field on the update DTO (enum check), the update that keeps id AND owner in one
+atomic filter, and GET /api/itineraries/:id extended so another user gets a PUBLIC, not hidden itinerary whose
+author is ACTIVE (read through UsersService.isActive); everything else stays 404. Used the tests: public read,
+read-only to others, private again on the next request, hidden and deactivated-author cases, 400/401/403.
+Build, lint, all 473 unit tests and all 236 e2e tests pass locally. Open points are listed in the PR.
+
+Date: 2026-11-06
+Student: Yassin Yahya
+Tool: Claude (Claude Code)
+Related Requirement: ITN-20 (SCRUM-95), rework after the updated project description
+Prompt:
+Read the updated project description (changes highlighted in yellow) and keep them in mind. Section 8.8 maps
+public viewing to GET /api/itineraries/public/search (ITN-20, ITN-21) and GET /api/itineraries/public/:id
+(ITN-21) and says private itinerary endpoints must enforce ownership. Change PR #43 so GET /api/itineraries/:id
+is owner-only again and ITN-20 adds the public search (paginated, open to guests, without admin-hidden
+itineraries or suspended/deactivated authors). Use test-driven development and verify before claiming done.
+How the output was used:
+Wrote the failing tests first (owner-only GET /:id, public search rows, order, pagination, private again,
+hidden and deactivated-author cases, guests allowed), watched them fail, then added ItinerariesPublicController
+(registered before the owner controller so /public/... is never read as an id), searchPublic in the service
+(PUBLIC + not hidden + author active through UsersService.isActive), a public row DTO and an index. Lint, build,
+all 474 unit tests and all 239 e2e tests pass locally.
+Date: 2026-11-06
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-11 (SCRUM-42)
+Prompt:
+Implement only SCRUM-42 (ownership helper) following docs/contracts.md. Lead decision: no changes to common/ or contracts.md, so the helper lives in auth/. One new file backend/src/auth/ownership.ts of pure functions (isOwner/assertOwner owner-only; canViewBooking/assertCanViewBooking for owner, admin and the matching airline/hotel moderator; bookingVisibilityFilter for list endpoints), a 404 rule for resources that are not yours, unit tests for every rule, one e2e on mongodb-memory-server with a test-only module, and docs/api/ownership.md. Do not refactor other modules, do not touch Atlas or .env.
+How the output was used:
+Added src/auth/ownership.ts, its unit spec (20 tests), test/ownership.e2e-spec.ts (12 tests with a test-only model, service and controller defined inside the spec and never registered in AppModule) and docs/api/ownership.md. A fixture bug (login lowercases emails) was found and fixed while running the e2e. Other modules adopt the helper in their own PRs. I reviewed the rules and the 404 behaviour before opening the PR.
+Date: 2026-11-06
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-10 (SCRUM-41)
+Prompt:
+Implement only SCRUM-41 (guests get a consistent 401 on restricted actions) following docs/contracts.md. First verify what the global JwtAuthGuard, @Public() and AllExceptionsFilter already do on develop. Main deliverable: an e2e test that boots the whole AppModule on mongodb-memory-server, enumerates every registered route with its @Public() metadata, and checks that every non-public route answers a cookie-less request with 401 in the standard error shape, without hard-coding the public routes. Also test garbage/tampered/expired cookies, suspended and deactivated users, and that known public routes stay open. Add a short docs/api note for the frontend. Do not edit common/ or other modules, do not touch Atlas or .env.
+How the output was used:
+Verified that the 401 behaviour already comes from the global guard and filter, so this ticket adds proof and documentation, not new behaviour. Added test/guest-401.e2e-spec.ts (route sweep via DiscoveryService, bad-credential cases, public-route cases; the in-memory MongoDB URI is set before AppModule is imported and asserted to be local) and docs/api/guest-401.md. No source files changed. I reviewed the test and the findings listed in the PR notes before opening the PR.
+Date: 2026-11-06
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-06 (SCRUM-38)
+Prompt:
+Implement only ACC-06 per docs/contracts.md: POST /api/auth/logout that clears both auth cookies with the same path and flags they were set with, revokes the refresh token server-side by its jti, makes POST /api/auth/refresh reject a revoked token with 401, lets revocation entries be dropped once the token would have expired, and still returns 200 without a session. Add Swagger and tests; no .env or secrets.
+How the output was used:
+Added a revokedTokens collection (unique jti, TTL index on expiresAt, no token stored), a TokenRevocationService with an idempotent upsert, AuthService.logout and a revocation check in refresh (a token without a jti is also rejected), a public logout endpoint that clears cookies first, a LogoutResponseDto and Swagger. Updated the existing refresh unit mocks to carry jti/exp. Added unit tests and 12 e2e tests against a disposable in-memory MongoDB (logout then refresh gives 401, logout without a session gives 200, cookie flags, parallel logouts, TTL index). I reviewed the code and checked every line is explainable. Known limits: the access token stays valid up to 15 minutes after logout, and earlier refresh tokens of the same session are not revoked.
+Related Requirement: ACC-05 (SCRUM-37)
+Prompt:
+Implement only ACC-05 per docs/contracts.md: lock an account for 15 minutes after 5 consecutive failed logins on POST /api/auth/login, respond 423 in the shared error shape (also for the correct password during the lock), reset the counter on successful login, add failedAttempts and lockedUntil to the User schema, reuse LOGIN_MAX_FAILED_ATTEMPTS/LOGIN_LOCK_MINUTES, keep the existing login guarantees (password before status, dummy-hash compare, SUSPENDED 403, DEACTIVATED generic 401), make the counter update atomic, add Swagger 423 and tests; use throwaway data only and never read .env.
+How the output was used:
+Added the two schema fields, an atomic aggregation-pipeline update (registerFailedLogin) and resetFailedLogins in UsersService, and the lock check, failure counting and reset in AuthService.login with a 423 message stating the minutes left. Lockout never changes status, so the status-checking guard is unaffected. Added the Swagger 423 response, 7 unit tests and 7 e2e tests against a disposable in-memory MongoDB (including 12 parallel wrong passwords that cannot pass the limit). I reviewed the code and checked every line is explainable. Lint, build, 473 unit and 236 e2e tests passed. No .env, shared database or secrets were used.
+
+Date: 2026-11-06
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: GEN-08 / SCRUM-22
+Prompt: Inspect the repository and live requirements, then propose upload architecture without implementing or modifying files.
+How the output was used: Reviewed contracts, live Jira, domain image fields, dependencies, configuration and CI conventions. Proposed database-enforced capacity slots, filesystem recovery, validation and consumer integration. Identified the uploads source-directory ignore issue, airline URL incompatibility, privacy decisions and required approvals. No files changed or tests executed.
+
+
+Date: 2026-11-06
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: GEN-08 / SCRUM-22
+Prompt: Implement the approved reusable UploadService with validation, server storage, concurrency-safe limits, recovery and tests.
+How the output was used: Added the uploads module, Sharp validation, metadata/indexes, static serving, cleanup and documentation. Verified 502 Jest tests, 236 E2E tests, build and ESLint using disposable databases and temporary storage. Consumer integrations remain owner-managed; changes are uncommitted.
+
