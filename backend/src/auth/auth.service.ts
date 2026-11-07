@@ -2,6 +2,7 @@ import { ConflictException, ForbiddenException, HttpException, Injectable, Unaut
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { compare, hash, hashSync } from 'bcryptjs';
+import { Types } from 'mongoose';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { AccessTokenPayload, AccountStatus, LOGIN_LOCK_MINUTES, LOGIN_MAX_FAILED_ATTEMPTS } from '../common';
 import { UserDocument } from '../users/schemas/user.schema';
@@ -11,6 +12,7 @@ import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { UserResponseDto } from './dto/user-response.dto';
 import { readJwtSecrets } from './jwt-secrets';
+import { TokenRevocationService } from './token-revocation.service';
 
 // bcrypt work factor: each +1 doubles the hashing time. 10 is the common default (~50-100 ms).
 export const BCRYPT_SALT_ROUNDS = 10;
@@ -34,6 +36,7 @@ export class AuthService {
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
+    private readonly revocations: TokenRevocationService,
   ) {}
 
   /** Creates a USER account. Business rule (unique email) is enforced here, not only by the DTO. */
@@ -99,25 +102,12 @@ export class AuthService {
 
   /**
    * Stateless sliding session (ACC-06): a valid refresh token buys a NEW access token and a NEW refresh token,
-   * so every refresh restarts the 30 minutes. Server-side revocation and logout come in SCRUM-38.
+   * so every refresh restarts the 30 minutes. A token whose `jti` was revoked by logout is rejected (ACC-06).
    * Role and ids are re-read from the database, never copied from the old token.
    */
   async refresh(refreshToken: unknown): Promise<LoginResult> {
-    if (typeof refreshToken !== 'string' || refreshToken === '') {
-      throw this.invalidSession();
-    }
-
-    let payload: { sub?: unknown };
-    try {
-      // Only the REFRESH secret verifies here, so an access token is rejected (signature mismatch).
-      payload = await this.jwtService.verifyAsync<{ sub?: unknown }>(refreshToken, {
-        secret: readJwtSecrets(this.config).refresh,
-        algorithms: ['HS256'],
-      });
-    } catch {
-      throw this.invalidSession();
-    }
-    if (typeof payload.sub !== 'string') {
+    const payload = await this.verifyRefreshToken(refreshToken);
+    if (!payload || (await this.revocations.isRevoked(payload.jti))) {
       throw this.invalidSession();
     }
 
@@ -126,6 +116,36 @@ export class AuthService {
       throw this.invalidSession();
     }
     return this.startSession(user);
+  }
+
+  /**
+   * Logout (ACC-06): revokes the refresh token's `jti` on the server. Never throws for a bad or missing token:
+   * logging out without a (valid) session is a no-op, and the controller clears the cookies either way.
+   * Only a token with a valid signature and expiry is stored, so nobody can fill the list with junk.
+   */
+  async logout(refreshToken: unknown): Promise<void> {
+    const payload = await this.verifyRefreshToken(refreshToken);
+    if (payload) {
+      await this.revocations.revoke(payload.jti, payload.sub, new Date(payload.exp * 1000));
+    }
+  }
+
+  /** The claims of a genuine, unexpired refresh token, or null. Only the REFRESH secret verifies, so an access token fails. */
+  private async verifyRefreshToken(token: unknown): Promise<{ sub: string; jti: string; exp: number } | null> {
+    if (typeof token !== 'string' || token === '') return null;
+    try {
+      const payload = await this.jwtService.verifyAsync<{ sub?: unknown; jti?: unknown; exp?: unknown }>(token, {
+        secret: readJwtSecrets(this.config).refresh,
+        algorithms: ['HS256'],
+      });
+      const { sub, jti, exp } = payload;
+      if (typeof sub !== 'string' || typeof jti !== 'string' || typeof exp !== 'number' || !Types.ObjectId.isValid(sub)) {
+        return null;
+      }
+      return { sub, jti, exp };
+    } catch {
+      return null;
+    }
   }
 
   private async startSession(user: UserDocument): Promise<LoginResult> {

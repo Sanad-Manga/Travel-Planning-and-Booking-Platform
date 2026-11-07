@@ -928,6 +928,11 @@ Confirmed CI uses npm run test:e2e and Jest scans backend/test. The original pla
 Date: 2026-11-06
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-06 (SCRUM-38)
+Prompt:
+Implement only ACC-06 per docs/contracts.md: POST /api/auth/logout that clears both auth cookies with the same path and flags they were set with, revokes the refresh token server-side by its jti, makes POST /api/auth/refresh reject a revoked token with 401, lets revocation entries be dropped once the token would have expired, and still returns 200 without a session. Add Swagger and tests; no .env or secrets.
+How the output was used:
+Added a revokedTokens collection (unique jti, TTL index on expiresAt, no token stored), a TokenRevocationService with an idempotent upsert, AuthService.logout and a revocation check in refresh (a token without a jti is also rejected), a public logout endpoint that clears cookies first, a LogoutResponseDto and Swagger. Updated the existing refresh unit mocks to carry jti/exp. Added unit tests and 12 e2e tests against a disposable in-memory MongoDB (logout then refresh gives 401, logout without a session gives 200, cookie flags, parallel logouts, TTL index). I reviewed the code and checked every line is explainable. Known limits: the access token stays valid up to 15 minutes after logout, and earlier refresh tokens of the same session are not revoked.
 Related Requirement: ACC-05 (SCRUM-37)
 Prompt:
 Implement only ACC-05 per docs/contracts.md: lock an account for 15 minutes after 5 consecutive failed logins on POST /api/auth/login, respond 423 in the shared error shape (also for the correct password during the lock), reset the counter on successful login, add failedAttempts and lockedUntil to the User schema, reuse LOGIN_MAX_FAILED_ATTEMPTS/LOGIN_LOCK_MINUTES, keep the existing login guarantees (password before status, dummy-hash compare, SUSPENDED 403, DEACTIVATED generic 401), make the counter update atomic, add Swagger 423 and tests; use throwaway data only and never read .env.

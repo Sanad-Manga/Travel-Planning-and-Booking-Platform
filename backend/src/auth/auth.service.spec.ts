@@ -6,6 +6,7 @@ import { compare, hashSync } from 'bcryptjs';
 import { AccountStatus, Role } from '../common';
 import { UsersService } from '../users/users.service';
 import { AuthService } from './auth.service';
+import { TokenRevocationService } from './token-revocation.service';
 
 const ID = '6730a1f2c3d4e5f607182930';
 
@@ -19,6 +20,8 @@ describe('AuthService', () => {
     resetFailedLogins: jest.fn(),
   };
   const jwtService = { signAsync: jest.fn(), verifyAsync: jest.fn() };
+  const revocations = { revoke: jest.fn(), isRevoked: jest.fn() };
+  const claims = (extra: Record<string, unknown> = {}) => ({ sub: ID, jti: 'jti-1', exp: 1_900_000_000, ...extra });
   const dto = { name: 'Ali', email: 'ali@example.com', password: 'Passw0rdOK', acceptTerms: true };
   const storedHash = hashSync('Passw0rdOK', 4);
 
@@ -44,6 +47,7 @@ describe('AuthService', () => {
         AuthService,
         { provide: UsersService, useValue: usersService },
         { provide: JwtService, useValue: jwtService },
+        { provide: TokenRevocationService, useValue: revocations },
         // Fake secrets, only for this test.
         { provide: ConfigService, useValue: new ConfigService({ JWT_ACCESS_SECRET: 'a'.repeat(32), JWT_REFRESH_SECRET: 'r'.repeat(32) }) },
       ],
@@ -206,7 +210,10 @@ describe('AuthService', () => {
   });
 
   describe('refresh', () => {
-    beforeEach(() => jwtService.verifyAsync.mockResolvedValue({ sub: ID }));
+    beforeEach(() => {
+      jwtService.verifyAsync.mockResolvedValue(claims());
+      revocations.isRevoked.mockResolvedValue(false);
+    });
 
     it('verifies with the refresh secret and HS256, then issues a new access AND refresh token', async () => {
       usersService.findById.mockResolvedValue(userDoc());
@@ -218,7 +225,7 @@ describe('AuthService', () => {
     });
 
     it('re-reads role and ids from the database instead of trusting the old token', async () => {
-      jwtService.verifyAsync.mockResolvedValue({ sub: ID, role: Role.ADMIN });
+      jwtService.verifyAsync.mockResolvedValue(claims({ role: Role.ADMIN }));
       usersService.findById.mockResolvedValue(userDoc({ role: Role.HOTEL_MODERATOR, hotelId: { toString: () => 'hotel-1' } }));
       await service.refresh('old.refresh.token');
       expect(jwtService.signAsync).toHaveBeenCalledWith({ sub: ID, role: Role.HOTEL_MODERATOR, hotelId: 'hotel-1' });
@@ -250,6 +257,47 @@ describe('AuthService', () => {
       usersService.findById.mockResolvedValue(null);
       await expect(service.refresh('x')).rejects.toBeInstanceOf(UnauthorizedException);
     });
+    it('401 when the token has no jti (cannot be checked against the revocation list)', async () => {
+      jwtService.verifyAsync.mockResolvedValue({ sub: ID, exp: 1_900_000_000 });
+      await expect(service.refresh('x')).rejects.toThrow('Invalid or expired session');
+    });
+
+    it('401 for a revoked token (ACC-06): the user is not even loaded and nothing is signed', async () => {
+      revocations.isRevoked.mockResolvedValue(true);
+      await expect(service.refresh('x')).rejects.toThrow('Invalid or expired session');
+      expect(revocations.isRevoked).toHaveBeenCalledWith('jti-1');
+      expect(usersService.findById).not.toHaveBeenCalled();
+      expect(jwtService.signAsync).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('logout (ACC-06)', () => {
+    it('revokes the jti until the token would have expired, for the right user', async () => {
+      jwtService.verifyAsync.mockResolvedValue(claims());
+      await service.logout('good.refresh.token');
+      expect(jwtService.verifyAsync).toHaveBeenCalledWith('good.refresh.token', { secret: 'r'.repeat(32), algorithms: ['HS256'] });
+      expect(revocations.revoke).toHaveBeenCalledWith('jti-1', ID, new Date(1_900_000_000 * 1000));
+    });
+
+    it.each([undefined, null, '', 123])('does nothing and does not throw without a token (%p)', async (token) => {
+      await expect(service.logout(token)).resolves.toBeUndefined();
+      expect(revocations.revoke).not.toHaveBeenCalled();
+    });
+
+    it('ignores a token that fails verification (tampered, expired, access token)', async () => {
+      jwtService.verifyAsync.mockRejectedValue(new Error('invalid signature'));
+      await expect(service.logout('bad')).resolves.toBeUndefined();
+      expect(revocations.revoke).not.toHaveBeenCalled();
+    });
+
+    it.each([{ sub: ID, exp: 1 }, { jti: 'j', exp: 1 }, { sub: 'not-an-id', jti: 'j', exp: 1 }])(
+      'ignores a verified token with missing or malformed claims (%j)',
+      async (payload) => {
+        jwtService.verifyAsync.mockResolvedValue(payload);
+        await service.logout('x');
+        expect(revocations.revoke).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe('getCurrentUser', () => {
