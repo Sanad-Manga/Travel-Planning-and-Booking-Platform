@@ -14,7 +14,9 @@ import {
   Visibility,
 } from '../common';
 import { ReferenceDataService } from '../reference-data/reference-data.service';
+import { ActivitiesService } from './activities.service';
 import { UsersService } from '../users/users.service';
+import { ActivityDto } from './dto/activity.dto';
 import { CreateItineraryDayDto } from './dto/create-itinerary-day.dto';
 import { CreateItineraryDto } from './dto/create-itinerary.dto';
 import { ItineraryDayDto, toItineraryDay } from './dto/itinerary-day.dto';
@@ -41,6 +43,7 @@ export class ItinerariesService {
     @InjectModel(Itinerary.name) private readonly model: Model<Itinerary>,
     private readonly referenceData: ReferenceDataService,
     private readonly users: UsersService,
+    private readonly activities: ActivitiesService,
   ) {}
 
   /**
@@ -99,7 +102,7 @@ export class ItinerariesService {
       .lean<ItineraryLean>()
       .exec();
     if (!itinerary) throw new NotFoundException('Itinerary not found');
-    return toItineraryResponse(itinerary);
+    return this.withActivities(itinerary);
   }
 
   /**
@@ -174,7 +177,7 @@ export class ItinerariesService {
       .lean<ItineraryLean>()
       .exec();
     if (!updated) throw new NotFoundException('Itinerary not found');
-    return toItineraryResponse(updated);
+    return this.withActivities(updated);
   }
 
   /**
@@ -182,8 +185,8 @@ export class ItinerariesService {
    * search. A clone (ITN-21) is a full independent copy with its own id and owner, so deleting the original
    * never touches it. The confirmation step ("are you sure?") is the client's job (GEN-03).
    *
-   * Days are embedded, so they go with it. Later tickets that store activities, budgets or transport
-   * costs in their own collections must delete those rows here too.
+   * Days are embedded, so they go with it. Activities (ITN-10) are deleted right after. Later tickets that
+   * store budgets or transport costs in their own collections must delete those rows here too.
    */
   async remove(user: AuthenticatedUser, id: string): Promise<void> {
     const result = await this.model
@@ -192,6 +195,7 @@ export class ItinerariesService {
     if (result.deletedCount === 0) {
       throw new NotFoundException('Itinerary not found');
     }
+    await this.activities.removeForItinerary(new Types.ObjectId(id));
   }
 
   /**
@@ -240,7 +244,7 @@ export class ItinerariesService {
         ],
       });
     }
-    return this.dayResponse(updated, dayId);
+    return this.dayResponse(updated, dayId); // a new day has no activities yet
   }
 
   /**
@@ -280,17 +284,32 @@ export class ItinerariesService {
       .lean<ItineraryLean>()
       .exec();
     if (!updated) throw new NotFoundException('Itinerary or day not found');
-    return this.dayResponse(updated, dayObjectId);
+    return this.dayResponse(
+      updated,
+      dayObjectId,
+      await this.activities.listByItinerary(updated._id),
+    );
+  }
+
+  /** The itinerary response with every day's activities (ITN-10) filled in. */
+  private async withActivities(
+    itinerary: ItineraryLean,
+  ): Promise<ItineraryResponseDto> {
+    return toItineraryResponse(
+      itinerary,
+      await this.activities.listByItinerary(itinerary._id),
+    );
   }
 
   /** The DTO of one day, numbered by its current position in the saved itinerary. */
   private dayResponse(
     itinerary: ItineraryLean,
     dayId: Types.ObjectId,
+    activities: ActivityDto[] = [],
   ): ItineraryDayDto {
     const days = itinerary.days ?? [];
     const index = days.findIndex((day) => day._id.equals(dayId));
-    return toItineraryDay(days[index], index, itinerary.startDate);
+    return toItineraryDay(days[index], index, itinerary.startDate, activities);
   }
 
   /** The city must be in the seeded list shared with hotels and airports (GEN-12). */

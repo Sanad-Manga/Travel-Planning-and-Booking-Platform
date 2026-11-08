@@ -2,15 +2,19 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ReferenceDataModule } from '../reference-data/reference-data.module';
 import { UsersModule } from '../users/users.module';
+import { ActivitiesController } from './activities.controller';
+import { ActivitiesService } from './activities.service';
 import { ItinerariesPublicController } from './itineraries-public.controller';
 import { ItinerariesController } from './itineraries.controller';
 import { ItinerariesService } from './itineraries.service';
+import { Activity, ActivitySchema } from './schemas/activity.schema';
 import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: Itinerary.name, schema: ItinerarySchema },
+      { name: Activity.name, schema: ActivitySchema },
     ]),
     // Countries are validated through ReferenceDataService, never by reading the collection directly.
     ReferenceDataModule,
@@ -18,8 +22,12 @@ import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema';
     UsersModule,
   ],
   // The public controller comes first so its static paths win over ItinerariesController's /:id.
-  controllers: [ItinerariesPublicController, ItinerariesController],
-  providers: [ItinerariesService],
+  controllers: [
+    ItinerariesPublicController,
+    ItinerariesController,
+    ActivitiesController,
+  ],
+  providers: [ItinerariesService, ActivitiesService],
   // Blog (author page) and Reports (hide/delete) look itineraries up through the service, never the model.
   exports: [ItinerariesService],
 })

@@ -435,6 +435,7 @@ describe('ItinerariesService (ITN-01) with an isolated MongoDB', () => {
         date: '2026-12-20',
         cityId: 'cairo',
         notes: '',
+        activities: [],
       });
       expect(second).toMatchObject({
         dayNumber: 2,

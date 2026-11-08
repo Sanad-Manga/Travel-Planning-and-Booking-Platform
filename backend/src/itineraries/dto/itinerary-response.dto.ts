@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Visibility } from '../../common';
 import { ItineraryLean } from '../schemas/itinerary.schema';
+import { ActivityDto } from './activity.dto';
 import { ItineraryDayDto, toItineraryDay } from './itinerary-day.dto';
 
 export class ItineraryResponseDto {
@@ -45,7 +46,10 @@ export class ItineraryResponseDto {
 }
 
 /** Response DTO, never the raw document: `_id` becomes `id`, ids are strings and `__v` is not exposed. */
-export function toItineraryResponse(doc: ItineraryLean): ItineraryResponseDto {
+export function toItineraryResponse(
+  doc: ItineraryLean,
+  activities: ActivityDto[] = [],
+): ItineraryResponseDto {
   return {
     id: doc._id.toString(),
     authorId: doc.authorId.toString(),
@@ -55,7 +59,7 @@ export function toItineraryResponse(doc: ItineraryLean): ItineraryResponseDto {
     visibility: doc.visibility,
     isHidden: doc.isHidden,
     days: (doc.days ?? []).map((day, index) =>
-      toItineraryDay(day, index, doc.startDate),
+      toItineraryDay(day, index, doc.startDate, activities),
     ),
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
