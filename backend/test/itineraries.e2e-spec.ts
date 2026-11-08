@@ -795,6 +795,123 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
     });
   });
 
+  describe('PATCH /api/itineraries/:id/days/reorder (ITN-08)', () => {
+    const addDay = (cookie: string, id: string, body: object) =>
+      http()
+        .post(`/api/itineraries/${id}/days`)
+        .set('Cookie', cookie)
+        .send(body);
+    const reorder = (cookie: string, id: string, body: object) =>
+      http()
+        .patch(`/api/itineraries/${id}/days/reorder`)
+        .set('Cookie', cookie)
+        .send(body);
+    const threeDays = async () => {
+      const { id } = await createAs(alice);
+      const a = await addDay(alice, id, { cityId: 'cairo' }).expect(201);
+      const b = await addDay(alice, id, { cityId: 'dubai' }).expect(201);
+      const c = await addDay(alice, id, {
+        cityId: 'cairo',
+        notes: 'Back home',
+      }).expect(201);
+      return { id, a: a.body, b: b.body, c: c.body };
+    };
+    const savedOrder = async (id: string) => {
+      const saved = await http()
+        .get(`/api/itineraries/${id}`)
+        .set('Cookie', alice)
+        .expect(200);
+      return saved.body.days.map((day: { id: string }) => day.id);
+    };
+
+    it('moves a day (200): returns the itinerary with the days renumbered and re-dated', async () => {
+      const { id, a, b, c } = await threeDays();
+
+      const res = await reorder(alice, id, {
+        dayId: c.id,
+        position: 1,
+      }).expect(200);
+
+      expect(
+        res.body.days.map(
+          (day: { id: string; dayNumber: number; date: string }) => [
+            day.id,
+            day.dayNumber,
+            day.date,
+          ],
+        ),
+      ).toEqual([
+        [c.id, 1, '2026-12-20'],
+        [a.id, 2, '2026-12-21'],
+        [b.id, 3, '2026-12-22'],
+      ]);
+      expect(res.body.days[0]).toMatchObject({
+        cityId: 'cairo',
+        notes: 'Back home',
+      });
+      expect(await savedOrder(id)).toEqual([c.id, a.id, b.id]);
+    });
+
+    it('400 for a missing, non-integer, zero, negative or text position, a malformed day id or an unknown field', async () => {
+      const { id, a } = await threeDays();
+      for (const [body, field] of [
+        [{ dayId: a.id }, 'position'],
+        [{ dayId: a.id, position: 0 }, 'position'],
+        [{ dayId: a.id, position: -1 }, 'position'],
+        [{ dayId: a.id, position: 1.5 }, 'position'],
+        [{ dayId: a.id, position: '2' }, 'position'],
+        [{ dayId: a.id, position: null }, 'position'],
+        [{ position: 1 }, 'dayId'],
+        [{ dayId: 'not-an-id', position: 1 }, 'dayId'],
+        [{ dayId: a.id, position: 1, dayNumber: 2 }, 'dayNumber'],
+      ] as const) {
+        const res = await reorder(alice, id, body).expect(400);
+        expect(res.body.details).toEqual(
+          expect.arrayContaining([expect.objectContaining({ field })]),
+        );
+      }
+    });
+
+    it('400 for a position after the last day; the order is unchanged', async () => {
+      const { id, a, b, c } = await threeDays();
+      const res = await reorder(alice, id, {
+        dayId: a.id,
+        position: 4,
+      }).expect(400);
+      expect(res.body.details).toEqual([
+        expect.objectContaining({ field: 'position' }),
+      ]);
+      expect(await savedOrder(id)).toEqual([a.id, b.id, c.id]);
+    });
+
+    it('400 for a malformed itinerary id', async () => {
+      await reorder(alice, 'not-an-id', {
+        dayId: '674a1b2c3d4e5f6a7b8c9d0e',
+        position: 1,
+      }).expect(400);
+    });
+
+    it("404 for someone else's itinerary or an unknown day; the order is unchanged", async () => {
+      const { id, a, b, c } = await threeDays();
+      await reorder(bob, id, { dayId: a.id, position: 2 }).expect(404);
+      await reorder(alice, id, {
+        dayId: '674a1b2c3d4e5f6a7b8c9d0e',
+        position: 2,
+      }).expect(404);
+      expect(await savedOrder(id)).toEqual([a.id, b.id, c.id]);
+    });
+
+    it('401 without a cookie, 403 for an admin or moderator', async () => {
+      const { id, a } = await threeDays();
+      await http()
+        .patch(`/api/itineraries/${id}/days/reorder`)
+        .send({ dayId: a.id, position: 2 })
+        .expect(401);
+      await reorder(admin, id, { dayId: a.id, position: 2 }).expect(403);
+      await reorder(airlineMod, id, { dayId: a.id, position: 2 }).expect(403);
+    });
+  });
+
   describe('Swagger', () => {
     it('documents the ITN-01, ITN-03 and ITN-05 endpoints under the itineraries tag', async () => {
       const res = await http().get('/api/docs-json').expect(200);
@@ -812,6 +929,9 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
       );
       expect(
         res.body.paths['/api/itineraries/{id}/days/{dayId}'].patch,
+      ).toBeDefined();
+      expect(
+        res.body.paths['/api/itineraries/{id}/days/reorder'].patch,
       ).toBeDefined();
       expect(
         res.body.paths['/api/itineraries/public/search'].get.tags,
