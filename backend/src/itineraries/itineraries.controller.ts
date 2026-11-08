@@ -31,10 +31,14 @@ import {
   Role,
   Roles,
 } from '../common';
+import { CreateItineraryDayDto } from './dto/create-itinerary-day.dto';
 import { CreateItineraryDto } from './dto/create-itinerary.dto';
+import { ItineraryDayParamDto } from './dto/itinerary-day-param.dto';
+import { ItineraryDayDto } from './dto/itinerary-day.dto';
 import { ItineraryIdParamDto } from './dto/itinerary-id-param.dto';
 import { ItineraryResponseDto } from './dto/itinerary-response.dto';
 import { ItineraryRowDto } from './dto/itinerary-row.dto';
+import { UpdateItineraryDayDto } from './dto/update-itinerary-day.dto';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto';
 import { ItinerariesService } from './itineraries.service';
 
@@ -150,5 +154,51 @@ export class ItinerariesController {
     @Param() params: ItineraryIdParamDto,
   ) {
     return this.itineraries.remove(user, params.id);
+  }
+
+  @Post(':id/days')
+  @ApiOperation({
+    summary:
+      'Add a day at the end of my itinerary: city and notes; number and date are derived (max 60 days) - ITN-05',
+  })
+  @ApiCreatedResponse({ type: ItineraryDayDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description:
+      'Invalid id, missing or unknown city, notes too long, an unknown field, or the itinerary already has 60 days',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'No such itinerary (or it belongs to someone else)',
+  })
+  addDay(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: ItineraryIdParamDto,
+    @Body() dto: CreateItineraryDayDto,
+  ) {
+    return this.itineraries.addDay(user, params.id, dto);
+  }
+
+  @Patch(':id/days/:dayId')
+  @ApiOperation({
+    summary: 'Edit a day of my itinerary: city and/or notes - ITN-05',
+  })
+  @ApiOkResponse({ type: ItineraryDayDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description:
+      'Invalid id or dayId, unknown city, notes too long, an unknown field, or an empty body',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description:
+      'No such itinerary or day (or the itinerary belongs to someone else)',
+  })
+  updateDay(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: ItineraryDayParamDto,
+    @Body() dto: UpdateItineraryDayDto,
+  ) {
+    return this.itineraries.updateDay(user, params.id, params.dayId, dto);
   }
 }

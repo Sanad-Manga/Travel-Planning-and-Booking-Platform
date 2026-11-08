@@ -47,11 +47,16 @@ describe('ItinerariesService (ITN-01) with an isolated MongoDB', () => {
 
     const connection = moduleRef.get<Connection>(getConnectionToken());
     users = connection.collection('users');
-    // The seeded countries this module is allowed to accept (the real seed has many more).
+    // The seeded countries and cities this module is allowed to accept (the real seed has many more).
     await connection.collection('countries').insertMany([
       { code: 'EG', name: 'Egypt', currency: 'EGP' },
       { code: 'AE', name: 'United Arab Emirates', currency: 'AED' },
       { code: 'GB', name: 'United Kingdom', currency: 'GBP' },
+    ]);
+    await connection.collection('cities').insertMany([
+      { city_id: 'cairo', name: 'Cairo', country_code: 'EG' },
+      { city_id: 'luxor', name: 'Luxor', country_code: 'EG' },
+      { city_id: 'dubai', name: 'Dubai', country_code: 'AE' },
     ]);
   });
 
@@ -393,6 +398,214 @@ describe('ItinerariesService (ITN-01) with an isolated MongoDB', () => {
         'EG',
         'AE',
       ]);
+    });
+  });
+
+  describe('days (ITN-05)', () => {
+    /** Stores `count` days directly, to reach the limit without 60 requests. */
+    const fillDays = (id: string, count: number) =>
+      model.updateOne(
+        { _id: id },
+        {
+          $set: {
+            days: Array.from({ length: count }, () => ({
+              _id: new Types.ObjectId(),
+              cityId: 'cairo',
+              notes: '',
+            })),
+          },
+        },
+      );
+    const storedDayCount = async (id: string) =>
+      (await model.findById(id).lean())?.days?.length;
+
+    it('adds days at the end, numbered from 1 and dated from the start date', async () => {
+      const { id } = await service.create(owner, validDto);
+
+      const first = await service.addDay(owner, id, { cityId: 'cairo' });
+      const second = await service.addDay(owner, id, {
+        cityId: 'luxor',
+        notes: 'Valley of the Kings',
+      });
+      const third = await service.addDay(owner, id, { cityId: 'dubai' });
+
+      expect(first).toEqual({
+        id: expect.stringMatching(/^[0-9a-f]{24}$/),
+        dayNumber: 1,
+        date: '2026-12-20',
+        cityId: 'cairo',
+        notes: '',
+      });
+      expect(second).toMatchObject({
+        dayNumber: 2,
+        date: '2026-12-21',
+        notes: 'Valley of the Kings',
+      });
+      expect(third).toMatchObject({ dayNumber: 3, date: '2026-12-22' });
+      expect((await service.findMine(owner, id)).days).toEqual([
+        first,
+        second,
+        third,
+      ]);
+    });
+
+    it('derives dates across a month and a year end', async () => {
+      const { id } = await service.create(owner, {
+        ...validDto,
+        startDate: '2026-12-30',
+      });
+      for (let i = 0; i < 3; i++) {
+        await service.addDay(owner, id, { cityId: 'cairo' });
+      }
+      const { days } = await service.findMine(owner, id);
+      expect(days.map((day) => day.date)).toEqual([
+        '2026-12-30',
+        '2026-12-31',
+        '2027-01-01',
+      ]);
+    });
+
+    it('moves every day date when the start date changes', async () => {
+      const { id } = await service.create(owner, validDto);
+      await service.addDay(owner, id, { cityId: 'cairo' });
+      await service.addDay(owner, id, { cityId: 'luxor' });
+
+      const updated = await service.update(owner, id, {
+        startDate: '2027-02-27',
+      });
+
+      expect(updated.days.map((day) => [day.dayNumber, day.date])).toEqual([
+        [1, '2027-02-27'],
+        [2, '2027-02-28'],
+      ]);
+    });
+
+    it('rejects a city that is not in the seeded list with 400 and saves nothing', async () => {
+      const { id } = await service.create(owner, validDto);
+      await expect(
+        service.addDay(owner, id, { cityId: 'atlantis' }),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: { details: [{ field: 'cityId' }] },
+      });
+      expect(await storedDayCount(id)).toBe(0);
+    });
+
+    it("answers 404 for someone else's itinerary or an unknown one, and saves nothing", async () => {
+      const { id } = await service.create(owner, validDto);
+      await expect(
+        service.addDay(stranger, id, { cityId: 'cairo' }),
+      ).rejects.toMatchObject({ status: 404 });
+      await expect(
+        service.addDay(owner, new Types.ObjectId().toString(), {
+          cityId: 'cairo',
+        }),
+      ).rejects.toMatchObject({ status: 404 });
+      expect(await storedDayCount(id)).toBe(0);
+    });
+
+    it('accepts the 60th day and rejects the 61st with 400', async () => {
+      const { id } = await service.create(owner, validDto);
+      await fillDays(id, 59);
+
+      await expect(
+        service.addDay(owner, id, { cityId: 'cairo' }),
+      ).resolves.toMatchObject({ dayNumber: 60, date: '2027-02-17' });
+      await expect(
+        service.addDay(owner, id, { cityId: 'cairo' }),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: { details: [{ field: 'days' }] },
+      });
+      expect(await storedDayCount(id)).toBe(60);
+    });
+
+    it('lets only one of several simultaneous requests add the 60th day', async () => {
+      const { id } = await service.create(owner, validDto);
+      await fillDays(id, 59);
+
+      const results = await Promise.allSettled(
+        Array.from({ length: 5 }, () =>
+          service.addDay(owner, id, { cityId: 'cairo' }),
+        ),
+      );
+
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      expect(await storedDayCount(id)).toBe(60);
+    });
+
+    it('edits one day: city and notes change, number and date stay, other days untouched', async () => {
+      const { id } = await service.create(owner, validDto);
+      const first = await service.addDay(owner, id, { cityId: 'cairo' });
+      const second = await service.addDay(owner, id, { cityId: 'cairo' });
+
+      const edited = await service.updateDay(owner, id, second.id, {
+        cityId: 'dubai',
+        notes: 'Desert safari',
+      });
+
+      expect(edited).toEqual({
+        ...second,
+        cityId: 'dubai',
+        notes: 'Desert safari',
+      });
+      expect((await service.findMine(owner, id)).days).toEqual([first, edited]);
+    });
+
+    it('changes only the field that was sent', async () => {
+      const { id } = await service.create(owner, validDto);
+      const day = await service.addDay(owner, id, {
+        cityId: 'cairo',
+        notes: 'Museum',
+      });
+      await expect(
+        service.updateDay(owner, id, day.id, { notes: 'Khan el-Khalili' }),
+      ).resolves.toMatchObject({ cityId: 'cairo', notes: 'Khan el-Khalili' });
+    });
+
+    it('rejects an edit with an unknown city or an empty body (400) and keeps the day', async () => {
+      const { id } = await service.create(owner, validDto);
+      const day = await service.addDay(owner, id, { cityId: 'cairo' });
+      await expect(
+        service.updateDay(owner, id, day.id, { cityId: 'atlantis' }),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: { details: [{ field: 'cityId' }] },
+      });
+      await expect(
+        service.updateDay(owner, id, day.id, {}),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: { details: [{ field: 'body' }] },
+      });
+      expect((await service.findMine(owner, id)).days[0].cityId).toBe('cairo');
+    });
+
+    it("answers 404 when editing someone else's day, an unknown day, or a day of another itinerary", async () => {
+      const { id } = await service.create(owner, validDto);
+      const day = await service.addDay(owner, id, { cityId: 'cairo' });
+      const other = await service.create(owner, validDto);
+
+      await expect(
+        service.updateDay(stranger, id, day.id, { notes: 'x' }),
+      ).rejects.toMatchObject({ status: 404 });
+      await expect(
+        service.updateDay(owner, id, new Types.ObjectId().toString(), {
+          notes: 'x',
+        }),
+      ).rejects.toMatchObject({ status: 404 });
+      await expect(
+        service.updateDay(owner, other.id, day.id, { notes: 'x' }),
+      ).rejects.toMatchObject({ status: 404 });
+      expect((await service.findMine(owner, id)).days[0].notes).toBe('');
+    });
+
+    it('shows the real day count in the list (ITN-03)', async () => {
+      const { id } = await service.create(owner, validDto);
+      await service.addDay(owner, id, { cityId: 'cairo' });
+      await service.addDay(owner, id, { cityId: 'luxor' });
+      const list = await service.listMine(owner, { page: 1, limit: 10 });
+      expect(list.items[0]).toMatchObject({ id, dayCount: 2 });
     });
   });
 

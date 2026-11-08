@@ -17,9 +17,8 @@ export class ItineraryRowDto {
   startDate: string;
 
   @ApiProperty({
-    example: 0,
-    description:
-      'Number of days in the itinerary. Always 0 until days can be added (ITN-05).',
+    example: 5,
+    description: 'Number of days in the itinerary (ITN-05), at most 60',
   })
   dayCount: number;
 
@@ -39,6 +38,13 @@ export class ItineraryRowDto {
   updatedAt: string;
 }
 
+/**
+ * The fields a list row needs. Only the day ids are read, to count the days: the days' cities and notes
+ * (up to 60 x 2000 characters per itinerary) are never loaded for the list.
+ */
+export const ITINERARY_ROW_PROJECTION =
+  'title countryCodes startDate visibility isHidden updatedAt days._id';
+
 /** Maps a lean document from paginate() to a list row. */
 export function toItineraryRow(doc: ItineraryLean): ItineraryRowDto {
   return {
@@ -46,8 +52,7 @@ export function toItineraryRow(doc: ItineraryLean): ItineraryRowDto {
     title: doc.title,
     countryCodes: doc.countryCodes,
     startDate: doc.startDate,
-    // Days do not exist yet. ITN-05 adds them and replaces this with the real count.
-    dayCount: 0,
+    dayCount: doc.days?.length ?? 0,
     visibility: doc.visibility,
     isHidden: doc.isHidden,
     updatedAt: doc.updatedAt.toISOString(),
