@@ -58,12 +58,13 @@ export class HotelsController {
   @Roles(Role.HOTEL_MODERATOR)
   @ApiOperation({
     summary:
-      'Set the cancellation tiers of the hotel (hotel moderator, own hotel only). The list is replaced as a whole. A tier says: cancelling at least daysBeforeThreshold days before check-in refunds refundPercent %. Thresholds must be unique.',
+      "Set the hotel's policies (hotel moderator, own hotel only): the standard check-in and check-out times (HH:mm, 24-hour, hotel local time) and/or the cancellation tiers. Send any subset, at least one field; fields that are not sent keep their value. A tier says: cancelling at least daysBeforeThreshold days before check-in refunds refundPercent %. The tier list is replaced as a whole and thresholds must be unique.",
   })
   @ApiOkResponse({ type: HotelPoliciesResponseDto })
   @ApiBadRequestResponse({
     type: ErrorResponseDto,
-    description: 'Missing or invalid list, threshold < 0 or not a whole number, percent outside 0-100, duplicate threshold, too many tiers, unknown field',
+    description:
+      'Empty body, time not in HH:mm 24-hour format, invalid tier list, threshold < 0 or not a whole number, percent outside 0-100, duplicate threshold, too many tiers, unknown field',
   })
   @ApiUnauthorizedResponse({ type: ErrorResponseDto, description: 'Not logged in' })
   @ApiForbiddenResponse({ type: ErrorResponseDto, description: "Not a hotel moderator, or not the moderator's own hotel" })

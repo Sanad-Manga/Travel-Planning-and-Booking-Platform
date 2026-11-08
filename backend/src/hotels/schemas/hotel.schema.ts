@@ -69,6 +69,14 @@ export class Hotel {
   })
   cancellationTiers: HotelCancellationTier[];
 
+  // HTL-09: the hotel's standard check-in / check-out time of day, 24-hour "HH:mm", in the hotel's local time
+  // (no time zone is stored with a time of day). null = not set yet. Written only by HotelsService.updatePolicies.
+  @Prop({ type: String, default: null })
+  checkInTime: string | null;
+
+  @Prop({ type: String, default: null })
+  checkOutTime: string | null;
+
   // false = deactivated by Admin (ACC-15): hidden from search and not bookable. This ticket never changes it.
   @Prop({ default: true })
   isActive: boolean;

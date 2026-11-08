@@ -97,7 +97,12 @@ describe('HTL-10 hotel cancellation tiers (e2e)', () => {
   describe('PUT /api/hotels/:id/policies', () => {
     it('the moderator sets tiers on their own hotel; the answer lists them from the largest threshold down', async () => {
       const res = await put(hotelA, modA, { cancellationTiers: [tier(0, 0), tier(14, 100), tier(7, 50)] }).expect(200);
-      expect(res.body).toEqual({ hotelId: hotelA, cancellationTiers: [tier(14, 100), tier(7, 50), tier(0, 0)] });
+      expect(res.body).toEqual({
+        hotelId: hotelA,
+        checkInTime: null,
+        checkOutTime: null,
+        cancellationTiers: [tier(14, 100), tier(7, 50), tier(0, 0)],
+      });
       expect(await stored(hotelA)).toEqual([tier(14, 100), tier(7, 50), tier(0, 0)]);
     });
 
