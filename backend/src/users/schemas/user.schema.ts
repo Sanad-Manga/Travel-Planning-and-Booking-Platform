@@ -39,6 +39,10 @@ export class User {
   @Prop({ default: PLATFORM_CURRENCY })
   preferredCurrency: string;
 
+  // Optional contact number (ACC-09), stored normalized: optional "+" and 7 to 15 digits. Absent when never set or removed.
+  @Prop({ type: String })
+  phone?: string;
+
   // Login lockout (ACC-05). Consecutive wrong passwords; reset to 0 by a successful login.
   @Prop({ type: Number, default: 0 })
   failedAttempts: number;

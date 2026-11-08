@@ -928,6 +928,11 @@ Confirmed CI uses npm run test:e2e and Jest scans backend/test. The original pla
 Date: 2026-11-06
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-09 (SCRUM-40)
+Prompt:
+Implement only ACC-09 per docs/contracts.md: GET /api/users/me and PATCH /api/users/me so any logged-in user can read and edit their own name, phone and preferred currency; the currency must be a supported one from the reference data (ReferenceDataService.findCurrencyById, no edits to reference-data); one invalid field means nothing is saved; email, role and other fields cannot be changed; additive optional phone on the User schema and UserResponseDto; Swagger; unit tests and e2e tests on a real in-memory MongoDB; no .env or secrets.
+How the output was used:
+Added UsersController, ProfileService (all checks run before a single atomic update), UsersService.updateProfile (one findOneAndUpdate limited to ACTIVE users; an empty phone is removed with $unset), UpdateProfileDto with a shared phone rule in dto/phone.ts, the optional phone field on the User schema and UserResponseDto, and registered the controller and ReferenceDataModule in UsersModule. Unknown fields such as email, role and status are rejected by the global whitelist pipe. Added DTO, service and users-service unit tests plus e2e tests on a disposable in-memory MongoDB with throwaway currency rows (invalid field saves nothing, unsupported currency, forbidden fields, per-user isolation, Swagger). I reviewed the code and checked every line is explainable. The real Countries.csv/currency seed was not run against any database.
 Related Requirement: ACC-08 (SCRUM-39)
 Prompt:
 Implement only ACC-08 per docs/contracts.md: PATCH /api/auth/change-password for a logged-in user with the current and a new password; the new password must follow the platform rule (min 8, a letter, a digit) through ONE shared validator that registration and Walid's ACC-07a admin reset can reuse; wrong current password rejected; field-level errors; stored only as a salted bcrypt hash; Swagger and tests on a real in-memory MongoDB; no .env or secrets.

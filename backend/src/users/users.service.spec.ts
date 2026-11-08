@@ -8,13 +8,14 @@ describe('UsersService', () => {
   const select = jest.fn();
   const exec = jest.fn();
   const query = { select, exec };
-  const model = { findOne: jest.fn(), findById: jest.fn(), create: jest.fn() };
+  const model = { findOne: jest.fn(), findById: jest.fn(), findOneAndUpdate: jest.fn(), create: jest.fn() };
 
   beforeEach(async () => {
     jest.resetAllMocks();
     select.mockReturnValue(query);
     model.findOne.mockReturnValue(query);
     model.findById.mockReturnValue(query);
+    model.findOneAndUpdate.mockReturnValue(query);
     const moduleRef = await Test.createTestingModule({
       providers: [UsersService, { provide: getModelToken(User.name), useValue: model }],
     }).compile();
@@ -74,6 +75,38 @@ describe('UsersService', () => {
     it('false for a malformed id, without querying the database', async () => {
       await expect(service.isActive('not-an-id')).resolves.toBe(false);
       expect(model.findById).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('updateProfile (ACC-09)', () => {
+    const ID = '674a1b2c3d4e5f6a7b8c9d0e';
+
+    it('is ONE update, limited to ACTIVE users, returning the new document', async () => {
+      exec.mockResolvedValue({ id: ID });
+      await service.updateProfile(ID, { name: 'N', preferredCurrency: 'EUR' });
+      expect(model.findOneAndUpdate).toHaveBeenCalledTimes(1);
+      expect(model.findOneAndUpdate).toHaveBeenCalledWith(
+        { _id: ID, status: 'ACTIVE' },
+        { $set: { name: 'N', preferredCurrency: 'EUR' } },
+        { new: true },
+      );
+    });
+
+    it('sets a non-empty phone', async () => {
+      exec.mockResolvedValue(null);
+      await service.updateProfile(ID, { phone: '+201001234567' });
+      expect(model.findOneAndUpdate.mock.calls[0][1]).toEqual({ $set: { phone: '+201001234567' } });
+    });
+
+    it('an empty phone is removed with $unset, not stored as an empty string', async () => {
+      exec.mockResolvedValue(null);
+      await service.updateProfile(ID, { name: 'N', phone: '' });
+      expect(model.findOneAndUpdate.mock.calls[0][1]).toEqual({ $set: { name: 'N' }, $unset: { phone: 1 } });
+    });
+
+    it('returns null when no ACTIVE user matched', async () => {
+      exec.mockResolvedValue(null);
+      await expect(service.updateProfile(ID, { name: 'N' })).resolves.toBeNull();
     });
   });
 
