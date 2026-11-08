@@ -925,6 +925,14 @@ Explain the original audit E2E test location honestly, verify repository and Git
 How the output was used:
 Confirmed CI uses npm run test:e2e and Jest scans backend/test. The original placement was an intentional module-ownership choice made despite knowing the discovery restriction; accepting the custom-command gap was a mistake, not a technical advantage. Moved the test into the standard test directory with only five import-path replacements; verified the rest of the file, including every assertion, was unchanged. Updated the audit README to remove the custom command requirement and preserved earlier prompt entries. In an environment-free temporary copy using disposable MongoDB, exact npm run test:e2e passed 203/203 tests (12 suites), full Jest passed 407/407 (27 suites), build and ESLint passed. No production code, shared test configuration, npm scripts, dependency files, real .env, shared database or existing Git index entries were modified; no commit, push, merge or PR was performed.
 
+Date: 2026-11-06
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-08 (SCRUM-39)
+Prompt:
+Implement only ACC-08 per docs/contracts.md: PATCH /api/auth/change-password for a logged-in user with the current and a new password; the new password must follow the platform rule (min 8, a letter, a digit) through ONE shared validator that registration and Walid's ACC-07a admin reset can reuse; wrong current password rejected; field-level errors; stored only as a salted bcrypt hash; Swagger and tests on a real in-memory MongoDB; no .env or secrets.
+How the output was used:
+Extracted the registration password rules into a shared @IsValidPassword() decorator (validators/password.decorator.ts) with unchanged messages and made RegisterDto use it; added ChangePasswordDto, AuthService.changePassword (wrong current password gives a field-level 400; compare-and-set on the old hash gives 409 on a lost race), UsersService.findByIdWithPassword and replacePasswordHash, the authenticated 204 endpoint and its Swagger. Added validator unit tests, service unit tests and e2e tests against a disposable in-memory MongoDB (including parallel changes where only one wins). I reviewed the code and checked every line is explainable. The current session stays valid after a change and other sessions are not revoked (out of scope).
 Date: 2026-11-07
 Student: Hessain Elrefaey
 Tool: Claude
