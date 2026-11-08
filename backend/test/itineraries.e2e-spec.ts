@@ -795,6 +795,102 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
     });
   });
 
+  describe('city groups on GET /api/itineraries/:id (ITN-09)', () => {
+    const addDay = (cookie: string, id: string, body: object) =>
+      http()
+        .post(`/api/itineraries/${id}/days`)
+        .set('Cookie', cookie)
+        .send(body);
+    const open = (cookie: string, id: string) =>
+      http().get(`/api/itineraries/${id}`).set('Cookie', cookie).expect(200);
+
+    it('returns an empty list of groups for an itinerary without days', async () => {
+      const { id } = await createAs(alice);
+      const res = await open(alice, id);
+      expect(res.body.cityGroups).toEqual([]);
+    });
+
+    it('groups consecutive days in the same city: A, A, B, A is three groups', async () => {
+      const { id } = await createAs(alice);
+      for (const cityId of ['cairo', 'cairo', 'dubai', 'cairo']) {
+        await addDay(alice, id, { cityId }).expect(201);
+      }
+
+      const res = await open(alice, id);
+
+      expect(res.body.cityGroups).toEqual([
+        {
+          cityId: 'cairo',
+          fromDayNumber: 1,
+          toDayNumber: 2,
+          dayCount: 2,
+          startDate: '2026-12-20',
+          endDate: '2026-12-21',
+          subtotalCents: 0,
+        },
+        {
+          cityId: 'dubai',
+          fromDayNumber: 3,
+          toDayNumber: 3,
+          dayCount: 1,
+          startDate: '2026-12-22',
+          endDate: '2026-12-22',
+          subtotalCents: 0,
+        },
+        {
+          cityId: 'cairo',
+          fromDayNumber: 4,
+          toDayNumber: 4,
+          dayCount: 1,
+          startDate: '2026-12-23',
+          endDate: '2026-12-23',
+          subtotalCents: 0,
+        },
+      ]);
+    });
+
+    it('merges two groups when the day between them is edited to the same city', async () => {
+      const { id } = await createAs(alice);
+      await addDay(alice, id, { cityId: 'cairo' }).expect(201);
+      const middle = await addDay(alice, id, { cityId: 'dubai' }).expect(201);
+      await addDay(alice, id, { cityId: 'cairo' }).expect(201);
+      expect((await open(alice, id)).body.cityGroups).toHaveLength(3);
+
+      await http()
+        .patch(`/api/itineraries/${id}/days/${middle.body.id}`)
+        .set('Cookie', alice)
+        .send({ cityId: 'cairo' })
+        .expect(200);
+
+      const groups = (await open(alice, id)).body.cityGroups;
+      expect(groups).toHaveLength(1);
+      expect(groups[0]).toMatchObject({ cityId: 'cairo', dayCount: 3 });
+    });
+
+    it('is part of the create and edit responses too, and moves with the start date', async () => {
+      const created = await http()
+        .post('/api/itineraries')
+        .set('Cookie', alice)
+        .send(valid)
+        .expect(201);
+      expect(created.body.cityGroups).toEqual([]);
+
+      await addDay(alice, created.body.id, { cityId: 'dubai' }).expect(201);
+      const edited = await http()
+        .patch(`/api/itineraries/${created.body.id}`)
+        .set('Cookie', alice)
+        .send({ startDate: '2027-03-01' })
+        .expect(200);
+      expect(edited.body.cityGroups).toEqual([
+        expect.objectContaining({
+          cityId: 'dubai',
+          startDate: '2027-03-01',
+          endDate: '2027-03-01',
+        }),
+      ]);
+    });
+  });
+
   describe('Swagger', () => {
     it('documents the ITN-01, ITN-03 and ITN-05 endpoints under the itineraries tag', async () => {
       const res = await http().get('/api/docs-json').expect(200);

@@ -1087,3 +1087,21 @@ stored; replaced it with a "validate when sent" rule (ValidateIf on undefined) a
 of PartialType. The new HTTP test failed first (201) and passes now. (2) The ITN-03 list loaded every day's notes
 only to count days; it now projects only the day ids. Lint, build, all 478 unit tests and all 237 e2e tests pass.
 ================================================
+
+================================================
+Date: 2026-11-08
+Student: Yassin Yahya
+Tool: Claude (Claude Code)
+Related Requirement: ITN-09 (SCRUM-71)
+Prompt:
+Start working on all my itinerary tickets that are not blocked, one ticket per branch and PR. For ITN-09,
+following docs/contracts.md and the Jira checklist: GET /api/itineraries/:id returns groups of consecutive days in
+the same city (A, B, A is three groups), each with its day count, start and end date and budget subtotal, and a day
+without a city is rejected. Write the tests first, then the code, then open the PR and update Jira.
+How the output was used:
+Used a pure function groupDaysByCity that runs on every read, so the groups are derived from the days and can
+never be out of date after an add, edit, delete, move or start-date change. Used a group shape of cityId, from and
+to day number, dayCount, startDate, endDate and subtotalCents. Kept subtotalCents at 0 and said so in Swagger and
+the PR, because activities and budgets (ITN-10, ITN-14) do not exist yet. The tests failed first (module missing)
+and pass now. Lint, build, 646 unit and 390 e2e tests pass.
+================================================
