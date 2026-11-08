@@ -1087,3 +1087,25 @@ stored; replaced it with a "validate when sent" rule (ValidateIf on undefined) a
 of PartialType. The new HTTP test failed first (201) and passes now. (2) The ITN-03 list loaded every day's notes
 only to count days; it now projects only the day ids. Lint, build, all 478 unit tests and all 237 e2e tests pass.
 ================================================
+
+================================================
+Date: 2026-11-08
+Student: Yassin Yahya
+Tool: Claude (Claude Code)
+Related Requirement: ITN-16 (SCRUM-94)
+Prompt:
+Start working on all my itinerary tickets that are not blocked, one ticket per branch and PR. For ITN-16,
+following docs/contracts.md and the Jira checklist: a user adds, edits and deletes intercity transport cost entries
+(POST /api/itineraries/:id/transport-costs, PATCH/DELETE /api/transport-costs/:id) with mode, from city, to city,
+amount, currency and day; cities must be in the seeded list, the day must belong to the itinerary, negative amounts
+are rejected, the currency must be supported, owner only. Write the tests first, then the code, then open the PR
+and update Jira.
+How the output was used:
+Used a separate transportCosts collection with the author copied as ownerId, so edit and delete check ownership in
+one atomic query. Used ReferenceDataService.findCityById and findCurrencyById for the checks and reported every
+bad field at once. Used a local TransportMode enum because common has none (flagged in the PR), an amountCents
+integer from 0 up, and the currency stored as entered (ITN-18 converts it). Added transportCosts to the itinerary
+response and delete them with the itinerary. The budget total is left to ITN-14 and the day delete cleanup to
+ITN-07 (both noted in the PR). The service tests failed first (service missing) and pass now. Lint, build,
+655 unit and 397 e2e tests pass.
+================================================

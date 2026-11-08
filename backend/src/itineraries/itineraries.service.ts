@@ -14,6 +14,7 @@ import {
   Visibility,
 } from '../common';
 import { ReferenceDataService } from '../reference-data/reference-data.service';
+import { TransportCostsService } from './transport-costs.service';
 import { UsersService } from '../users/users.service';
 import { CreateItineraryDayDto } from './dto/create-itinerary-day.dto';
 import { CreateItineraryDto } from './dto/create-itinerary.dto';
@@ -41,6 +42,7 @@ export class ItinerariesService {
     @InjectModel(Itinerary.name) private readonly model: Model<Itinerary>,
     private readonly referenceData: ReferenceDataService,
     private readonly users: UsersService,
+    private readonly transportCosts: TransportCostsService,
   ) {}
 
   /**
@@ -99,7 +101,7 @@ export class ItinerariesService {
       .lean<ItineraryLean>()
       .exec();
     if (!itinerary) throw new NotFoundException('Itinerary not found');
-    return toItineraryResponse(itinerary);
+    return this.withTransportCosts(itinerary);
   }
 
   /**
@@ -174,7 +176,7 @@ export class ItinerariesService {
       .lean<ItineraryLean>()
       .exec();
     if (!updated) throw new NotFoundException('Itinerary not found');
-    return toItineraryResponse(updated);
+    return this.withTransportCosts(updated);
   }
 
   /**
@@ -182,8 +184,8 @@ export class ItinerariesService {
    * search. A clone (ITN-21) is a full independent copy with its own id and owner, so deleting the original
    * never touches it. The confirmation step ("are you sure?") is the client's job (GEN-03).
    *
-   * Days are embedded, so they go with it. Later tickets that store activities, budgets or transport
-   * costs in their own collections must delete those rows here too.
+   * Days are embedded, so they go with it. Transport costs (ITN-16) are deleted right after. Later tickets that
+   * store activities or budgets in their own collections must delete those rows here too.
    */
   async remove(user: AuthenticatedUser, id: string): Promise<void> {
     const result = await this.model
@@ -192,6 +194,7 @@ export class ItinerariesService {
     if (result.deletedCount === 0) {
       throw new NotFoundException('Itinerary not found');
     }
+    await this.transportCosts.removeForItinerary(new Types.ObjectId(id));
   }
 
   /**
@@ -281,6 +284,16 @@ export class ItinerariesService {
       .exec();
     if (!updated) throw new NotFoundException('Itinerary or day not found');
     return this.dayResponse(updated, dayObjectId);
+  }
+
+  /** The itinerary response with its transport costs (ITN-16) filled in. */
+  private async withTransportCosts(
+    itinerary: ItineraryLean,
+  ): Promise<ItineraryResponseDto> {
+    return toItineraryResponse(
+      itinerary,
+      await this.transportCosts.listByItinerary(itinerary._id),
+    );
   }
 
   /** The DTO of one day, numbered by its current position in the saved itinerary. */

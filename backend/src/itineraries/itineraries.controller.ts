@@ -32,6 +32,9 @@ import {
   Roles,
 } from '../common';
 import { CreateItineraryDayDto } from './dto/create-itinerary-day.dto';
+import { CreateTransportCostDto } from './dto/create-transport-cost.dto';
+import { TransportCostDto } from './dto/transport-cost.dto';
+import { TransportCostsService } from './transport-costs.service';
 import { CreateItineraryDto } from './dto/create-itinerary.dto';
 import { ItineraryDayParamDto } from './dto/itinerary-day-param.dto';
 import { ItineraryDayDto } from './dto/itinerary-day.dto';
@@ -57,7 +60,10 @@ import { ItinerariesService } from './itineraries.service';
 @Roles(Role.USER)
 @Controller('itineraries')
 export class ItinerariesController {
-  constructor(private readonly itineraries: ItinerariesService) {}
+  constructor(
+    private readonly itineraries: ItinerariesService,
+    private readonly transportCosts: TransportCostsService,
+  ) {}
 
   @Post()
   @ApiOperation({
@@ -200,5 +206,28 @@ export class ItinerariesController {
     @Body() dto: UpdateItineraryDayDto,
   ) {
     return this.itineraries.updateDay(user, params.id, params.dayId, dto);
+  }
+
+  @Post(':id/transport-costs')
+  @ApiOperation({
+    summary:
+      'Add an intercity transport cost to my itinerary: mode, from and to city, amount in cents, currency and day - ITN-16',
+  })
+  @ApiCreatedResponse({ type: TransportCostDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description:
+      'Invalid id, a missing field, a mode that is not allowed, an unknown city, an unsupported currency, a negative or fractional amount, a day that is not a day of this itinerary, or an unknown field',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'No such itinerary (or it belongs to someone else)',
+  })
+  addTransportCost(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: ItineraryIdParamDto,
+    @Body() dto: CreateTransportCostDto,
+  ) {
+    return this.transportCosts.create(user, params.id, dto);
   }
 }
