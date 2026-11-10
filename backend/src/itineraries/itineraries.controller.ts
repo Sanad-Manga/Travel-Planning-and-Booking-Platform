@@ -31,6 +31,9 @@ import {
   Role,
   Roles,
 } from '../common';
+import { ActivitiesService } from './activities.service';
+import { ActivityDto } from './dto/activity.dto';
+import { CreateActivityDto } from './dto/create-activity.dto';
 import { CreateItineraryDayDto } from './dto/create-itinerary-day.dto';
 import { CreateItineraryDto } from './dto/create-itinerary.dto';
 import { ItineraryDayParamDto } from './dto/itinerary-day-param.dto';
@@ -58,7 +61,10 @@ import { ItinerariesService } from './itineraries.service';
 @Roles(Role.USER)
 @Controller('itineraries')
 export class ItinerariesController {
-  constructor(private readonly itineraries: ItinerariesService) {}
+  constructor(
+    private readonly itineraries: ItinerariesService,
+    private readonly activities: ActivitiesService,
+  ) {}
 
   @Post()
   @ApiOperation({
@@ -226,6 +232,30 @@ export class ItinerariesController {
     @Body() dto: UpdateItineraryDayDto,
   ) {
     return this.itineraries.updateDay(user, params.id, params.dayId, dto);
+  }
+
+  @Post(':id/days/:dayId/activities')
+  @ApiOperation({
+    summary:
+      'Add an activity to a day of my itinerary: name, optional description, time (HH:mm) and cost in cents - ITN-10',
+  })
+  @ApiCreatedResponse({ type: ActivityDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description:
+      'Invalid id or dayId, a missing or too long name, a time that is not HH:mm, a negative or fractional cost, or an unknown field',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description:
+      'No such itinerary or day (or the itinerary belongs to someone else)',
+  })
+  addActivity(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: ItineraryDayParamDto,
+    @Body() dto: CreateActivityDto,
+  ) {
+    return this.activities.create(user, params.id, params.dayId, dto);
   }
 
   @Delete(':id/days/:dayId')
