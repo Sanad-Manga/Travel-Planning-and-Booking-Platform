@@ -694,6 +694,107 @@ describe('ItinerariesService (ITN-01) with an isolated MongoDB', () => {
     });
   });
 
+  describe('delete a day (ITN-07)', () => {
+    /** An itinerary with three days: cairo, luxor, dubai (day 1, 2, 3). */
+    const withThreeDays = async () => {
+      const { id } = await service.create(owner, validDto);
+      const first = await service.addDay(owner, id, { cityId: 'cairo' });
+      const second = await service.addDay(owner, id, {
+        cityId: 'luxor',
+        notes: 'Karnak',
+      });
+      const third = await service.addDay(owner, id, { cityId: 'dubai' });
+      return { id, first, second, third };
+    };
+
+    it('removes a middle day: the rest are renumbered with no gap and re-dated from the start date', async () => {
+      const { id, first, second, third } = await withThreeDays();
+
+      await service.removeDay(owner, id, second.id);
+
+      const { days } = await service.findMine(owner, id);
+      expect(days).toEqual([
+        first,
+        { ...third, dayNumber: 2, date: '2026-12-21' },
+      ]);
+    });
+
+    it('removes the first day: the next one becomes day 1 and takes the start date', async () => {
+      const { id, second, third } = await withThreeDays();
+
+      await service.removeDay(
+        owner,
+        id,
+        (await service.findMine(owner, id)).days[0].id,
+      );
+
+      const { days } = await service.findMine(owner, id);
+      expect(days).toEqual([
+        { ...second, dayNumber: 1, date: '2026-12-20' },
+        { ...third, dayNumber: 2, date: '2026-12-21' },
+      ]);
+    });
+
+    it('removes the last day and can remove the only day, leaving an empty list', async () => {
+      const { id, third, second, first } = await withThreeDays();
+      await service.removeDay(owner, id, third.id);
+      await service.removeDay(owner, id, second.id);
+      await service.removeDay(owner, id, first.id);
+
+      expect((await service.findMine(owner, id)).days).toEqual([]);
+    });
+
+    it('shows the new day count in the list (ITN-03)', async () => {
+      const { id, second } = await withThreeDays();
+      await service.removeDay(owner, id, second.id);
+      const list = await service.listMine(owner, { page: 1, limit: 10 });
+      expect(list.items[0]).toMatchObject({ id, dayCount: 2 });
+    });
+
+    it('lets a day be added again after a delete, numbered after the last one', async () => {
+      const { id, second } = await withThreeDays();
+      await service.removeDay(owner, id, second.id);
+      await expect(
+        service.addDay(owner, id, { cityId: 'cairo' }),
+      ).resolves.toMatchObject({ dayNumber: 3, date: '2026-12-22' });
+    });
+
+    it('answers 404 for someone else, an unknown day, a day of another itinerary or a day already deleted, and keeps every day', async () => {
+      const { id, second } = await withThreeDays();
+      const other = await service.create(owner, validDto);
+
+      await expect(
+        service.removeDay(stranger, id, second.id),
+      ).rejects.toMatchObject({ status: 404 });
+      await expect(
+        service.removeDay(owner, id, new Types.ObjectId().toString()),
+      ).rejects.toMatchObject({ status: 404 });
+      await expect(
+        service.removeDay(owner, other.id, second.id),
+      ).rejects.toMatchObject({ status: 404 });
+      expect((await service.findMine(owner, id)).days).toHaveLength(3);
+
+      await service.removeDay(owner, id, second.id);
+      await expect(
+        service.removeDay(owner, id, second.id),
+      ).rejects.toMatchObject({ status: 404 });
+      expect((await service.findMine(owner, id)).days).toHaveLength(2);
+    });
+
+    it('removes a day once when the same delete is sent several times at once', async () => {
+      const { id, second } = await withThreeDays();
+
+      const results = await Promise.allSettled(
+        Array.from({ length: 5 }, () =>
+          service.removeDay(owner, id, second.id),
+        ),
+      );
+
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      expect((await service.findMine(owner, id)).days).toHaveLength(2);
+    });
+  });
+
   describe('remove', () => {
     it('lets the owner delete it', async () => {
       const { id } = await service.create(owner, validDto);
