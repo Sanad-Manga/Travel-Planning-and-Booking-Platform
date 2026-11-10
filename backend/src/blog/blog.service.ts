@@ -88,6 +88,11 @@ export class BlogService {
     };
   }
 
+  /** BLG-08: clicking a tag lists its published, non-hidden posts. Same rules and rows as the public list. */
+  listByTag(tag: string, query: PaginationDto): Promise<PaginatedResponse<PostListRowDto>> {
+    return this.listPublished({ ...query, tag });
+  }
+
   /**
    * BLG-02: open one post. `viewer` is the logged-in caller, or undefined for a guest.
    * Only PUBLISHED posts open here; a draft never does. A hidden post is visible only to its author

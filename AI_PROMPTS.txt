@@ -1092,6 +1092,11 @@ only to count days; it now projects only the day ids. Lint, build, all 478 unit 
 Date: 2026-11-08
 Student: Yusuf Eser
 Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: BLG-08 (SCRUM) Tags on posts (max 5) and tag listing
+Prompt:
+Implement ONLY ticket BLG-08 following docs/contracts.md and the travel-platform skill: an author adds up to 5 tags (max 30 characters) to a post and edits them later (PATCH /api/posts/:id), and GET /api/tags/:tag/posts lists the matching published posts, paginated. List assumptions first, only touch backend/src/blog and a new e2e test.
+How the output was used:
+The assistant first checked what already existed: BLG-01 and BLG-04 already normalise tags (trim, lower-case, de-duplicate) and enforce 5 tags of 30 characters on create and PATCH, with author-only editing (404 for others), so no change was needed there and I only added tests that prove it for tags. New: TagsController (GET /api/tags/:tag/posts, public), TagParamDto (trim, lower-case, max 30, so an over-long tag is a 400) and BlogService.listByTag, which reuses listPublished so it has exactly the BLG-02 filter (PUBLISHED, not hidden), sort, row shape and pagination. An unknown tag returns an empty page. 13 new e2e tests in tags.e2e-spec.ts. Build, lint and the posts and tags e2e suites pass locally.
 Related Requirement: HTL-03 (SCRUM) Add rooms to a hotel
 Prompt:
 Implement ONLY ticket HTL-03 (add rooms to a hotel) following docs/contracts.md and the travel-platform skill: POST /api/hotels/:id/rooms, hotel moderator for their own hotel only; room number/name unique within the hotel; fields type, beds, maxOccupancy (>= 1), pricePerNightCents (> 0, integer cents). List assumptions first, only touch backend/src/hotels and a new e2e test.
