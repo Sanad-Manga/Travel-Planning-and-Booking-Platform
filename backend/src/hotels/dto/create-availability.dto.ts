@@ -1,13 +1,13 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsDateOnly } from './is-date-only.decorator';
+import { IsCalendarDate } from '../../common';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 
 export class CreateAvailabilityDto {
   @ApiProperty({ description: 'First bookable night (check-in day), YYYY-MM-DD.', example: '2026-12-01' })
   @Transform(trim)
-  @IsDateOnly()
+  @IsCalendarDate()
   startDate: string;
 
   @ApiProperty({
@@ -15,6 +15,6 @@ export class CreateAvailabilityDto {
     example: '2026-12-15',
   })
   @Transform(trim)
-  @IsDateOnly()
+  @IsCalendarDate()
   endDate: string;
 }
