@@ -795,120 +795,99 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
     });
   });
 
-  describe('PATCH /api/itineraries/:id/days/reorder (ITN-08)', () => {
+  describe('city groups on GET /api/itineraries/:id (ITN-09)', () => {
     const addDay = (cookie: string, id: string, body: object) =>
       http()
         .post(`/api/itineraries/${id}/days`)
         .set('Cookie', cookie)
         .send(body);
-    const reorder = (cookie: string, id: string, body: object) =>
-      http()
-        .patch(`/api/itineraries/${id}/days/reorder`)
-        .set('Cookie', cookie)
-        .send(body);
-    const threeDays = async () => {
+    const open = (cookie: string, id: string) =>
+      http().get(`/api/itineraries/${id}`).set('Cookie', cookie).expect(200);
+
+    it('returns an empty list of groups for an itinerary without days', async () => {
       const { id } = await createAs(alice);
-      const a = await addDay(alice, id, { cityId: 'cairo' }).expect(201);
-      const b = await addDay(alice, id, { cityId: 'dubai' }).expect(201);
-      const c = await addDay(alice, id, {
-        cityId: 'cairo',
-        notes: 'Back home',
-      }).expect(201);
-      return { id, a: a.body, b: b.body, c: c.body };
-    };
-    const savedOrder = async (id: string) => {
-      const saved = await http()
-        .get(`/api/itineraries/${id}`)
-        .set('Cookie', alice)
-        .expect(200);
-      return saved.body.days.map((day: { id: string }) => day.id);
-    };
-
-    it('moves a day (200): returns the itinerary with the days renumbered and re-dated', async () => {
-      const { id, a, b, c } = await threeDays();
-
-      const res = await reorder(alice, id, {
-        dayId: c.id,
-        position: 1,
-      }).expect(200);
-
-      expect(
-        res.body.days.map(
-          (day: { id: string; dayNumber: number; date: string }) => [
-            day.id,
-            day.dayNumber,
-            day.date,
-          ],
-        ),
-      ).toEqual([
-        [c.id, 1, '2026-12-20'],
-        [a.id, 2, '2026-12-21'],
-        [b.id, 3, '2026-12-22'],
-      ]);
-      expect(res.body.days[0]).toMatchObject({
-        cityId: 'cairo',
-        notes: 'Back home',
-      });
-      expect(await savedOrder(id)).toEqual([c.id, a.id, b.id]);
+      const res = await open(alice, id);
+      expect(res.body.cityGroups).toEqual([]);
     });
 
-    it('400 for a missing, non-integer, zero, negative or text position, a malformed day id or an unknown field', async () => {
-      const { id, a } = await threeDays();
-      for (const [body, field] of [
-        [{ dayId: a.id }, 'position'],
-        [{ dayId: a.id, position: 0 }, 'position'],
-        [{ dayId: a.id, position: -1 }, 'position'],
-        [{ dayId: a.id, position: 1.5 }, 'position'],
-        [{ dayId: a.id, position: '2' }, 'position'],
-        [{ dayId: a.id, position: null }, 'position'],
-        [{ position: 1 }, 'dayId'],
-        [{ dayId: 'not-an-id', position: 1 }, 'dayId'],
-        [{ dayId: a.id, position: 1, dayNumber: 2 }, 'dayNumber'],
-      ] as const) {
-        const res = await reorder(alice, id, body).expect(400);
-        expect(res.body.details).toEqual(
-          expect.arrayContaining([expect.objectContaining({ field })]),
-        );
+    it('groups consecutive days in the same city: A, A, B, A is three groups', async () => {
+      const { id } = await createAs(alice);
+      for (const cityId of ['cairo', 'cairo', 'dubai', 'cairo']) {
+        await addDay(alice, id, { cityId }).expect(201);
       }
-    });
 
-    it('400 for a position after the last day; the order is unchanged', async () => {
-      const { id, a, b, c } = await threeDays();
-      const res = await reorder(alice, id, {
-        dayId: a.id,
-        position: 4,
-      }).expect(400);
-      expect(res.body.details).toEqual([
-        expect.objectContaining({ field: 'position' }),
+      const res = await open(alice, id);
+
+      expect(res.body.cityGroups).toEqual([
+        {
+          cityId: 'cairo',
+          fromDayNumber: 1,
+          toDayNumber: 2,
+          dayCount: 2,
+          startDate: '2026-12-20',
+          endDate: '2026-12-21',
+          subtotalCents: 0,
+        },
+        {
+          cityId: 'dubai',
+          fromDayNumber: 3,
+          toDayNumber: 3,
+          dayCount: 1,
+          startDate: '2026-12-22',
+          endDate: '2026-12-22',
+          subtotalCents: 0,
+        },
+        {
+          cityId: 'cairo',
+          fromDayNumber: 4,
+          toDayNumber: 4,
+          dayCount: 1,
+          startDate: '2026-12-23',
+          endDate: '2026-12-23',
+          subtotalCents: 0,
+        },
       ]);
-      expect(await savedOrder(id)).toEqual([a.id, b.id, c.id]);
     });
 
-    it('400 for a malformed itinerary id', async () => {
-      await reorder(alice, 'not-an-id', {
-        dayId: '674a1b2c3d4e5f6a7b8c9d0e',
-        position: 1,
-      }).expect(400);
-    });
+    it('merges two groups when the day between them is edited to the same city', async () => {
+      const { id } = await createAs(alice);
+      await addDay(alice, id, { cityId: 'cairo' }).expect(201);
+      const middle = await addDay(alice, id, { cityId: 'dubai' }).expect(201);
+      await addDay(alice, id, { cityId: 'cairo' }).expect(201);
+      expect((await open(alice, id)).body.cityGroups).toHaveLength(3);
 
-    it("404 for someone else's itinerary or an unknown day; the order is unchanged", async () => {
-      const { id, a, b, c } = await threeDays();
-      await reorder(bob, id, { dayId: a.id, position: 2 }).expect(404);
-      await reorder(alice, id, {
-        dayId: '674a1b2c3d4e5f6a7b8c9d0e',
-        position: 2,
-      }).expect(404);
-      expect(await savedOrder(id)).toEqual([a.id, b.id, c.id]);
-    });
-
-    it('401 without a cookie, 403 for an admin or moderator', async () => {
-      const { id, a } = await threeDays();
       await http()
-        .patch(`/api/itineraries/${id}/days/reorder`)
-        .send({ dayId: a.id, position: 2 })
-        .expect(401);
-      await reorder(admin, id, { dayId: a.id, position: 2 }).expect(403);
-      await reorder(airlineMod, id, { dayId: a.id, position: 2 }).expect(403);
+        .patch(`/api/itineraries/${id}/days/${middle.body.id}`)
+        .set('Cookie', alice)
+        .send({ cityId: 'cairo' })
+        .expect(200);
+
+      const groups = (await open(alice, id)).body.cityGroups;
+      expect(groups).toHaveLength(1);
+      expect(groups[0]).toMatchObject({ cityId: 'cairo', dayCount: 3 });
+    });
+
+    it('is part of the create and edit responses too, and moves with the start date', async () => {
+      const created = await http()
+        .post('/api/itineraries')
+        .set('Cookie', alice)
+        .send(valid)
+        .expect(201);
+      expect(created.body.cityGroups).toEqual([]);
+
+      await addDay(alice, created.body.id, { cityId: 'dubai' }).expect(201);
+      const edited = await http()
+        .patch(`/api/itineraries/${created.body.id}`)
+        .set('Cookie', alice)
+        .send({ startDate: '2027-03-01' })
+        .expect(200);
+      expect(edited.body.cityGroups).toEqual([
+        expect.objectContaining({
+          cityId: 'dubai',
+          startDate: '2027-03-01',
+          endDate: '2027-03-01',
+        }),
+      ]);
     });
   });
 
