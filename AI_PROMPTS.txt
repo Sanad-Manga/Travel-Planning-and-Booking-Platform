@@ -1105,4 +1105,11 @@ themselves. A stranger, an unknown day, a day of another itinerary and a day tha
 404, and 5 simultaneous deletes of the same day remove it once. The tests failed first (404 instead of 204) and
 pass now. Lint, build, all 644 unit tests and all 391 e2e tests pass. Activities and transport costs of the day
 do not exist yet; ITN-10 and ITN-16 must delete a day's rows when it is deleted (noted in the PR).
+Student: Yusuf Eser
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: HTL-03 (SCRUM) Add rooms to a hotel
+Prompt:
+Implement ONLY ticket HTL-03 (add rooms to a hotel) following docs/contracts.md and the travel-platform skill: POST /api/hotels/:id/rooms, hotel moderator for their own hotel only; room number/name unique within the hotel; fields type, beds, maxOccupancy (>= 1), pricePerNightCents (> 0, integer cents). List assumptions first, only touch backend/src/hotels and a new e2e test.
+How the output was used:
+The assistant added the Room schema (unique index on hotelId + lower-cased name), CreateRoomDto and RoomResponseDto, RoomsService (ownership check in the service, 403 for another or unknown hotel as in HTL-01, duplicate settled by the unique index and returned as 409), RoomsController with Swagger decorators, module wiring and 10 e2e tests. I kept the free-text room type and the module-local upper limits (20 beds, 50 guests, 10,000,000 cents) as assumptions, to confirm with the lead and with Hessain. Build, lint, 637 unit tests and the hotels and rooms e2e suites pass locally.
 ================================================
