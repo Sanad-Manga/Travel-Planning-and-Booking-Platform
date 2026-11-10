@@ -2,6 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { Visibility } from '../../common';
 import { ItineraryLean } from '../schemas/itinerary.schema';
 import { ActivityDto } from './activity.dto';
+import { CityGroupDto, groupDaysByCity } from './city-group.dto';
 import { ItineraryDayDto, toItineraryDay } from './itinerary-day.dto';
 
 export class ItineraryResponseDto {
@@ -37,6 +38,13 @@ export class ItineraryResponseDto {
     description: 'The days in order (ITN-05), numbered from 1',
   })
   days: ItineraryDayDto[];
+
+  @ApiProperty({
+    type: [CityGroupDto],
+    description:
+      'Consecutive days in the same city, grouped (ITN-09): A, B, A is three groups. Each has its day count, start and end date and budget subtotal.',
+  })
+  cityGroups: CityGroupDto[];
 
   @ApiProperty({ example: '2026-11-04T10:00:00.000Z' })
   createdAt: string;

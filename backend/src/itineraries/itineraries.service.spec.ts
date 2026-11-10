@@ -610,6 +610,91 @@ describe('ItinerariesService (ITN-01) with an isolated MongoDB', () => {
     });
   });
 
+  describe('city groups (ITN-09)', () => {
+    it('has no groups before the first day', async () => {
+      const created = await service.create(owner, validDto);
+      expect(created.cityGroups).toEqual([]);
+      expect((await service.findMine(owner, created.id)).cityGroups).toEqual(
+        [],
+      );
+    });
+
+    it('groups consecutive days in the same city, with day count, dates and subtotal', async () => {
+      const { id } = await service.create(owner, validDto);
+      for (const cityId of ['cairo', 'cairo', 'luxor', 'cairo']) {
+        await service.addDay(owner, id, { cityId });
+      }
+
+      const { cityGroups } = await service.findMine(owner, id);
+
+      expect(cityGroups).toEqual([
+        {
+          cityId: 'cairo',
+          fromDayNumber: 1,
+          toDayNumber: 2,
+          dayCount: 2,
+          startDate: '2026-12-20',
+          endDate: '2026-12-21',
+          subtotalCents: 0,
+        },
+        {
+          cityId: 'luxor',
+          fromDayNumber: 3,
+          toDayNumber: 3,
+          dayCount: 1,
+          startDate: '2026-12-22',
+          endDate: '2026-12-22',
+          subtotalCents: 0,
+        },
+        {
+          cityId: 'cairo',
+          fromDayNumber: 4,
+          toDayNumber: 4,
+          dayCount: 1,
+          startDate: '2026-12-23',
+          endDate: '2026-12-23',
+          subtotalCents: 0,
+        },
+      ]);
+    });
+
+    it('recalculates the groups when a day city changes and when the start date changes', async () => {
+      const { id } = await service.create(owner, validDto);
+      await service.addDay(owner, id, { cityId: 'cairo' });
+      const middle = await service.addDay(owner, id, { cityId: 'luxor' });
+      await service.addDay(owner, id, { cityId: 'cairo' });
+      expect((await service.findMine(owner, id)).cityGroups).toHaveLength(3);
+
+      await service.updateDay(owner, id, middle.id, { cityId: 'cairo' });
+      const merged = (await service.findMine(owner, id)).cityGroups;
+      expect(merged).toHaveLength(1);
+      expect(merged[0]).toMatchObject({ cityId: 'cairo', dayCount: 3 });
+
+      const moved = await service.update(owner, id, {
+        startDate: '2027-01-10',
+      });
+      expect(moved.cityGroups[0]).toMatchObject({
+        startDate: '2027-01-10',
+        endDate: '2027-01-12',
+      });
+    });
+
+    it('rejects a day without a known city with 400, so no group can be without a city', async () => {
+      const { id } = await service.create(owner, validDto);
+
+      await expect(
+        service.addDay(owner, id, { cityId: '' }),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: { details: [{ field: 'cityId' }] },
+      });
+
+      const { days, cityGroups } = await service.findMine(owner, id);
+      expect(days).toEqual([]);
+      expect(cityGroups).toEqual([]);
+    });
+  });
+
   describe('delete a day (ITN-07)', () => {
     /** An itinerary with three days: cairo, luxor, dubai (day 1, 2, 3). */
     const withThreeDays = async () => {

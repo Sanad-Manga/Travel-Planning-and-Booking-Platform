@@ -33,6 +33,7 @@ import {
   PublicItineraryRowDto,
   toPublicItineraryRow,
 } from './dto/public-itinerary-row.dto';
+import { ReorderDaysDto } from './dto/reorder-days.dto';
 import { UpdateItineraryDayDto } from './dto/update-itinerary-day.dto';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto';
 import { Itinerary, ItineraryLean } from './schemas/itinerary.schema';
@@ -299,6 +300,110 @@ export class ItinerariesService {
       itinerary,
       await this.activities.listByItinerary(itinerary._id),
     );
+  }
+
+  /**
+   * ITN-08: the owner moves one day to a new position. The move is ONE atomic update (an aggregation-pipeline
+   * update), not "read the days, reorder in memory, write them back", so two moves at once can never lose or
+   * duplicate a day: each one rebuilds the array from what is stored at that moment.
+   *
+   * Only the order of the stored days changes. Number, date and city grouping are derived from the position
+   * (ITN-05), so they are recalculated by the next read with no extra work, and each day keeps its own
+   * id, city and notes. The filter holds the itinerary id, the owner, the day id AND "the position is not
+   * after the last day": a stranger or an unknown day is 404, a position past the end is 400.
+   */
+  async reorderDay(
+    user: AuthenticatedUser,
+    id: string,
+    dto: ReorderDaysDto,
+  ): Promise<ItineraryResponseDto> {
+    const dayObjectId = new Types.ObjectId(dto.dayId);
+    const ownerFilter = {
+      _id: id,
+      authorId: new Types.ObjectId(user.userId),
+      'days._id': dayObjectId,
+    };
+    const target = dto.position - 1; // 0-based index of the new place
+    const dayCount = { $size: { $ifNull: ['$days', []] } };
+
+    const updated = await this.model
+      .findOneAndUpdate(
+        { ...ownerFilter, $expr: { $lte: [dto.position, dayCount] } },
+        [
+          {
+            $set: {
+              days: {
+                $let: {
+                  vars: {
+                    moved: {
+                      $filter: {
+                        input: '$days',
+                        as: 'day',
+                        cond: { $eq: ['$$day._id', dayObjectId] },
+                      },
+                    },
+                    rest: {
+                      $filter: {
+                        input: '$days',
+                        as: 'day',
+                        cond: { $ne: ['$$day._id', dayObjectId] },
+                      },
+                    },
+                  },
+                  // New array, place by place: the moved day goes to `target`; the others keep their order
+                  // around it (the ones before `target` stay at their index, the later ones shift by one).
+                  in: {
+                    $map: {
+                      input: { $range: [0, dayCount] },
+                      as: 'place',
+                      in: {
+                        $cond: [
+                          { $eq: ['$$place', target] },
+                          { $arrayElemAt: ['$$moved', 0] },
+                          {
+                            $arrayElemAt: [
+                              '$$rest',
+                              {
+                                $cond: [
+                                  { $lt: ['$$place', target] },
+                                  '$$place',
+                                  { $subtract: ['$$place', 1] },
+                                ],
+                              },
+                            ],
+                          },
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+              updatedAt: '$$NOW',
+            },
+          },
+        ],
+        { new: true },
+      )
+      .lean<ItineraryLean>()
+      .exec();
+
+    if (!updated) {
+      // Nothing matched: not the caller's itinerary or day (404), or the position is past the last day.
+      // This read only picks the error; it decides nothing that is then written.
+      if (!(await this.model.exists(ownerFilter))) {
+        throw new NotFoundException('Itinerary or day not found');
+      }
+      throw new BadRequestException({
+        message: 'Validation failed',
+        details: [
+          {
+            field: 'position',
+            message: 'position must not be after the last day of the itinerary',
+          },
+        ],
+      });
+    }
+    return toItineraryResponse(updated);
   }
 
   /**
