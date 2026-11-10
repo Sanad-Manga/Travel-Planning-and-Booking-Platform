@@ -151,6 +151,14 @@ export class TransportCostsService {
     await this.model.deleteMany({ itineraryId }).exec();
   }
 
+  /** Called when one day is deleted (ITN-07): the entries of that day go with it, the other days keep theirs. */
+  async removeForDay(
+    itineraryId: Types.ObjectId,
+    dayId: Types.ObjectId,
+  ): Promise<void> {
+    await this.model.deleteMany({ itineraryId, dayId }).exec();
+  }
+
   /**
    * Checks the fields that are present: a day must be one of the itinerary's days, both cities must be in the
    * seeded list and the currency must be a supported code. Reports every problem at once as field-level errors.
