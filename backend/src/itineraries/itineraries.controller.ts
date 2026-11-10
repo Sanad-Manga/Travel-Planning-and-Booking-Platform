@@ -31,6 +31,9 @@ import {
   Role,
   Roles,
 } from '../common';
+import { ActivitiesService } from './activities.service';
+import { ActivityDto } from './dto/activity.dto';
+import { CreateActivityDto } from './dto/create-activity.dto';
 import { CreateItineraryDayDto } from './dto/create-itinerary-day.dto';
 import { CreateTransportCostDto } from './dto/create-transport-cost.dto';
 import { TransportCostDto } from './dto/transport-cost.dto';
@@ -41,6 +44,7 @@ import { ItineraryDayDto } from './dto/itinerary-day.dto';
 import { ItineraryIdParamDto } from './dto/itinerary-id-param.dto';
 import { ItineraryResponseDto } from './dto/itinerary-response.dto';
 import { ItineraryRowDto } from './dto/itinerary-row.dto';
+import { ReorderDaysDto } from './dto/reorder-days.dto';
 import { UpdateItineraryDayDto } from './dto/update-itinerary-day.dto';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto';
 import { ItinerariesService } from './itineraries.service';
@@ -183,6 +187,31 @@ export class ItinerariesController {
     @Body() dto: CreateItineraryDayDto,
   ) {
     return this.itineraries.addDay(user, params.id, dto);
+  }
+
+  // Declared before ':id/days/:dayId' so "reorder" is not read as a day id (which would answer 400).
+  @Patch(':id/days/reorder')
+  @ApiOperation({
+    summary:
+      'Move one day of my itinerary to a new position; the days are renumbered and re-dated and the city groups follow - ITN-08',
+  })
+  @ApiOkResponse({ type: ItineraryResponseDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description:
+      'Invalid id or dayId, a position that is missing, not a whole number, below 1 or after the last day, or an unknown field',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description:
+      'No such itinerary or day (or the itinerary belongs to someone else)',
+  })
+  reorderDay(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: ItineraryIdParamDto,
+    @Body() dto: ReorderDaysDto,
+  ) {
+    return this.itineraries.reorderDay(user, params.id, dto);
   }
 
   @Patch(':id/days/:dayId')

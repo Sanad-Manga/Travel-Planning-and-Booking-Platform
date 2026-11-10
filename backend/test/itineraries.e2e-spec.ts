@@ -662,6 +662,7 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
         date: '2026-12-20',
         cityId: 'cairo',
         notes: '',
+        activities: [],
       });
       expect(second.body).toMatchObject({
         dayNumber: 2,
@@ -1147,6 +1148,9 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
       );
       expect(
         res.body.paths['/api/itineraries/{id}/days/{dayId}'].patch,
+      ).toBeDefined();
+      expect(
+        res.body.paths['/api/itineraries/{id}/days/reorder'].patch,
       ).toBeDefined();
       expect(
         res.body.paths['/api/itineraries/{id}/days/{dayId}'].delete,

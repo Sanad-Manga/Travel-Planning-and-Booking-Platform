@@ -1,6 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Visibility } from '../../common';
 import { ItineraryLean } from '../schemas/itinerary.schema';
+import { ActivityDto } from './activity.dto';
+import { CityGroupDto, groupDaysByCity } from './city-group.dto';
 import { ItineraryDayDto, toItineraryDay } from './itinerary-day.dto';
 import { TransportCostDto } from './transport-cost.dto';
 
@@ -66,7 +68,7 @@ export function toItineraryResponse(
     visibility: doc.visibility,
     isHidden: doc.isHidden,
     days: (doc.days ?? []).map((day, index) =>
-      toItineraryDay(day, index, doc.startDate),
+      toItineraryDay(day, index, doc.startDate, activities),
     ),
     transportCosts,
     createdAt: doc.createdAt.toISOString(),

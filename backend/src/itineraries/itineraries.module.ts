@@ -2,9 +2,12 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ReferenceDataModule } from '../reference-data/reference-data.module';
 import { UsersModule } from '../users/users.module';
+import { ActivitiesController } from './activities.controller';
+import { ActivitiesService } from './activities.service';
 import { ItinerariesPublicController } from './itineraries-public.controller';
 import { ItinerariesController } from './itineraries.controller';
 import { ItinerariesService } from './itineraries.service';
+import { Activity, ActivitySchema } from './schemas/activity.schema';
 import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema';
 import {
   TransportCost,
