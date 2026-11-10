@@ -912,6 +912,97 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
     });
   });
 
+  describe('DELETE /api/itineraries/:id/days/:dayId (ITN-07)', () => {
+    const addDay = (cookie: string, id: string, body: object) =>
+      http()
+        .post(`/api/itineraries/${id}/days`)
+        .set('Cookie', cookie)
+        .send(body);
+    const removeDay = (cookie: string, id: string, dayId: string) =>
+      http()
+        .delete(`/api/itineraries/${id}/days/${dayId}`)
+        .set('Cookie', cookie);
+
+    it('deletes a day (204): the others are renumbered and re-dated, and the list shows the new count', async () => {
+      const { id } = await createAs(alice);
+      await addDay(alice, id, { cityId: 'cairo' }).expect(201);
+      const middle = await addDay(alice, id, { cityId: 'dubai' }).expect(201);
+      const last = await addDay(alice, id, {
+        cityId: 'cairo',
+        notes: 'Back home',
+      }).expect(201);
+
+      await removeDay(alice, id, middle.body.id).expect(204);
+
+      const itinerary = await http()
+        .get(`/api/itineraries/${id}`)
+        .set('Cookie', alice)
+        .expect(200);
+      expect(
+        itinerary.body.days.map((day: { dayNumber: number; date: string }) => [
+          day.dayNumber,
+          day.date,
+        ]),
+      ).toEqual([
+        [1, '2026-12-20'],
+        [2, '2026-12-21'],
+      ]);
+      expect(itinerary.body.days[1]).toEqual({
+        ...last.body,
+        dayNumber: 2,
+        date: '2026-12-21',
+      });
+
+      const list = await http()
+        .get('/api/itineraries')
+        .set('Cookie', alice)
+        .expect(200);
+      expect(
+        list.body.items.find((row: { id: string }) => row.id === id),
+      ).toMatchObject({ dayCount: 2 });
+    });
+
+    it('404 for a day that was already deleted, an unknown day, or a day of someone else; nothing is removed', async () => {
+      const { id } = await createAs(alice);
+      const day = await addDay(alice, id, { cityId: 'cairo' }).expect(201);
+
+      await removeDay(bob, id, day.body.id).expect(404);
+      await removeDay(alice, id, '674a1b2c3d4e5f6a7b8c9d0e').expect(404);
+      await removeDay(alice, id, day.body.id).expect(204);
+      await removeDay(alice, id, day.body.id).expect(404);
+    });
+
+    it("keeps someone else's day when a stranger tries to delete it", async () => {
+      const { id } = await createAs(alice);
+      const day = await addDay(alice, id, { cityId: 'cairo' }).expect(201);
+      await removeDay(bob, id, day.body.id).expect(404);
+
+      const res = await http()
+        .get(`/api/itineraries/${id}`)
+        .set('Cookie', alice)
+        .expect(200);
+      expect(res.body.days).toEqual([day.body]);
+    });
+
+    it('400 for a malformed id or day id', async () => {
+      const { id } = await createAs(alice);
+      await removeDay(alice, id, 'not-an-id').expect(400);
+      await removeDay(alice, 'not-an-id', '674a1b2c3d4e5f6a7b8c9d0e').expect(
+        400,
+      );
+    });
+
+    it('401 without a cookie, 403 for an admin or moderator', async () => {
+      const { id } = await createAs(alice);
+      const day = await addDay(alice, id, { cityId: 'cairo' }).expect(201);
+      await http()
+        .delete(`/api/itineraries/${id}/days/${day.body.id}`)
+        .expect(401);
+      await removeDay(admin, id, day.body.id).expect(403);
+      await removeDay(airlineMod, id, day.body.id).expect(403);
+    });
+  });
+
   describe('Swagger', () => {
     it('documents the ITN-01, ITN-03 and ITN-05 endpoints under the itineraries tag', async () => {
       const res = await http().get('/api/docs-json').expect(200);
@@ -932,6 +1023,9 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
       ).toBeDefined();
       expect(
         res.body.paths['/api/itineraries/{id}/days/reorder'].patch,
+      ).toBeDefined();
+      expect(
+        res.body.paths['/api/itineraries/{id}/days/{dayId}'].delete,
       ).toBeDefined();
       expect(
         res.body.paths['/api/itineraries/public/search'].get.tags,
