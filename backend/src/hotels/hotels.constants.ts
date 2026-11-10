@@ -6,3 +6,11 @@ export const HOTEL_MIN_STARS = 1;
 export const HOTEL_MAX_STARS = 5;
 export const HOTEL_MAX_AMENITIES = 30;
 export const HOTEL_AMENITY_MAX_LENGTH = 50;
+
+// HTL-03 room limits (module-local: the contract only fixes "occupancy >= 1" and "price > 0").
+export const ROOM_NAME_MAX_LENGTH = 50;
+export const ROOM_TYPE_MAX_LENGTH = 50;
+export const ROOM_MAX_BEDS = 20;
+export const ROOM_MAX_OCCUPANCY = 50;
+// Upper bound only to keep the value a safe integer / sane (100 000.00 per night).
+export const ROOM_MAX_PRICE_CENTS = 10_000_000;

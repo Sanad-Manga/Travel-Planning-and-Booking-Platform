@@ -301,6 +301,39 @@ export class ItinerariesService {
     );
   }
 
+  /**
+   * ITN-07: the owner deletes one day. ONE atomic update pulls the day out of the array; its filter holds the
+   * itinerary id, the owner AND the day id, so a stranger, an unknown day or a day that is already gone all
+   * match nothing and answer 404 (two simultaneous deletes of the same day: one wins, the other gets 404).
+   *
+   * Nothing is renumbered or re-dated in the database: a day's number is its position and its date is the
+   * start date + position (ITN-05), so the days after the deleted one move up by themselves, with no gap.
+   * The "are you sure?" step is the client's job (GEN-03).
+   *
+   * Activities (ITN-10) and transport costs (ITN-16) that belong to the day live in their own collections;
+   * their tickets delete a day's rows here, so budget totals stop counting them.
+   */
+  async removeDay(
+    user: AuthenticatedUser,
+    id: string,
+    dayId: string,
+  ): Promise<void> {
+    const dayObjectId = new Types.ObjectId(dayId);
+    const updated = await this.model
+      .findOneAndUpdate(
+        {
+          _id: id,
+          authorId: new Types.ObjectId(user.userId),
+          'days._id': dayObjectId,
+        },
+        { $pull: { days: { _id: dayObjectId } } },
+      )
+      .select('_id')
+      .lean()
+      .exec();
+    if (!updated) throw new NotFoundException('Itinerary or day not found');
+  }
+
   /** The DTO of one day, numbered by its current position in the saved itinerary. */
   private dayResponse(
     itinerary: ItineraryLean,

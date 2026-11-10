@@ -1106,4 +1106,29 @@ description never accept null. Used a HH:mm time rule and a non-negative whole-c
 every day of the itinerary response, ordered by time with no-time last, and deleted with the itinerary. The
 budget total is left to ITN-14 and the day delete cleanup to ITN-07 (both noted in the PR). The service tests
 failed first (service missing) and pass now. Lint, build, 652 unit and 396 e2e tests pass.
+Related Requirement: ITN-07 (SCRUM-69)
+Prompt:
+Start working on all my itinerary tickets that are not blocked, one ticket per branch and PR. For ITN-07,
+following docs/contracts.md and the Jira checklist: DELETE /api/itineraries/:id/days/:dayId removes one day,
+the remaining days are renumbered with no gap and re-dated from the start date, owner only. Write the tests
+first, then the code, then open the PR and update Jira.
+How the output was used:
+Used the design from ITN-05 (day number and date are derived from the position, never stored), so deleting a day
+is one atomic $pull whose filter holds the itinerary id, the owner and the day id; the days after it move up by
+themselves. A stranger, an unknown day, a day of another itinerary and a day that is already deleted all answer
+404, and 5 simultaneous deletes of the same day remove it once. The tests failed first (404 instead of 204) and
+pass now. Lint, build, all 644 unit tests and all 391 e2e tests pass. Activities and transport costs of the day
+do not exist yet; ITN-10 and ITN-16 must delete a day's rows when it is deleted (noted in the PR).
+Student: Yusuf Eser
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: BLG-08 (SCRUM) Tags on posts (max 5) and tag listing
+Prompt:
+Implement ONLY ticket BLG-08 following docs/contracts.md and the travel-platform skill: an author adds up to 5 tags (max 30 characters) to a post and edits them later (PATCH /api/posts/:id), and GET /api/tags/:tag/posts lists the matching published posts, paginated. List assumptions first, only touch backend/src/blog and a new e2e test.
+How the output was used:
+The assistant first checked what already existed: BLG-01 and BLG-04 already normalise tags (trim, lower-case, de-duplicate) and enforce 5 tags of 30 characters on create and PATCH, with author-only editing (404 for others), so no change was needed there and I only added tests that prove it for tags. New: TagsController (GET /api/tags/:tag/posts, public), TagParamDto (trim, lower-case, max 30, so an over-long tag is a 400) and BlogService.listByTag, which reuses listPublished so it has exactly the BLG-02 filter (PUBLISHED, not hidden), sort, row shape and pagination. An unknown tag returns an empty page. 13 new e2e tests in tags.e2e-spec.ts. Build, lint and the posts and tags e2e suites pass locally.
+Related Requirement: HTL-03 (SCRUM) Add rooms to a hotel
+Prompt:
+Implement ONLY ticket HTL-03 (add rooms to a hotel) following docs/contracts.md and the travel-platform skill: POST /api/hotels/:id/rooms, hotel moderator for their own hotel only; room number/name unique within the hotel; fields type, beds, maxOccupancy (>= 1), pricePerNightCents (> 0, integer cents). List assumptions first, only touch backend/src/hotels and a new e2e test.
+How the output was used:
+The assistant added the Room schema (unique index on hotelId + lower-cased name), CreateRoomDto and RoomResponseDto, RoomsService (ownership check in the service, 403 for another or unknown hotel as in HTL-01, duplicate settled by the unique index and returned as 409), RoomsController with Swagger decorators, module wiring and 10 e2e tests. I kept the free-text room type and the module-local upper limits (20 beds, 50 guests, 10,000,000 cents) as assumptions, to confirm with the lead and with Hessain. Build, lint, 637 unit tests and the hotels and rooms e2e suites pass locally.
 ================================================
