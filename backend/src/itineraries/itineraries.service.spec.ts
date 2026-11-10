@@ -609,6 +609,134 @@ describe('ItinerariesService (ITN-01) with an isolated MongoDB', () => {
     });
   });
 
+  describe('reorder days (ITN-08)', () => {
+    /** An itinerary with four days: cairo, luxor, dubai, cairo, each with its own notes. */
+    const withFourDays = async () => {
+      const { id } = await service.create(owner, validDto);
+      const days = [];
+      for (const [cityId, notes] of [
+        ['cairo', 'arrive'],
+        ['luxor', 'Karnak'],
+        ['dubai', 'Burj'],
+        ['cairo', 'fly home'],
+      ]) {
+        days.push(await service.addDay(owner, id, { cityId, notes }));
+      }
+      return { id, days };
+    };
+    const order = async (id: string) =>
+      (await service.findMine(owner, id)).days.map((day) => day.id);
+
+    it('moves a day up: it takes the new position, the others shift down, numbers and dates follow', async () => {
+      const { id, days } = await withFourDays();
+
+      const result = await service.reorderDay(owner, id, {
+        dayId: days[2].id,
+        position: 1,
+      });
+
+      expect(result.days.map((day) => day.id)).toEqual([
+        days[2].id,
+        days[0].id,
+        days[1].id,
+        days[3].id,
+      ]);
+      expect(result.days.map((day) => [day.dayNumber, day.date])).toEqual([
+        [1, '2026-12-20'],
+        [2, '2026-12-21'],
+        [3, '2026-12-22'],
+        [4, '2026-12-23'],
+      ]);
+      expect(await order(id)).toEqual(result.days.map((day) => day.id));
+    });
+
+    it('moves a day down, to the last position', async () => {
+      const { id, days } = await withFourDays();
+
+      await service.reorderDay(owner, id, { dayId: days[0].id, position: 4 });
+
+      expect(await order(id)).toEqual([
+        days[1].id,
+        days[2].id,
+        days[3].id,
+        days[0].id,
+      ]);
+    });
+
+    it('keeps each moved day city and notes, and changes nothing but the order', async () => {
+      const { id, days } = await withFourDays();
+
+      await service.reorderDay(owner, id, { dayId: days[1].id, position: 3 });
+
+      const after = (await service.findMine(owner, id)).days;
+      const byId = new Map(after.map((day) => [day.id, day]));
+      for (const day of days) {
+        expect(byId.get(day.id)).toMatchObject({
+          cityId: day.cityId,
+          notes: day.notes,
+        });
+      }
+      expect(after).toHaveLength(4);
+    });
+
+    it("accepts the day's own position as a move that changes nothing", async () => {
+      const { id, days } = await withFourDays();
+      await service.reorderDay(owner, id, { dayId: days[1].id, position: 2 });
+      expect(await order(id)).toEqual(days.map((day) => day.id));
+    });
+
+    it('rejects a position after the last day with 400 and keeps the order', async () => {
+      const { id, days } = await withFourDays();
+
+      await expect(
+        service.reorderDay(owner, id, { dayId: days[0].id, position: 5 }),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: { details: [{ field: 'position' }] },
+      });
+      expect(await order(id)).toEqual(days.map((day) => day.id));
+    });
+
+    it("answers 404 for someone else's itinerary, an unknown day or a day of another itinerary, and keeps the order", async () => {
+      const { id, days } = await withFourDays();
+      const other = await service.create(owner, validDto);
+
+      await expect(
+        service.reorderDay(stranger, id, { dayId: days[0].id, position: 2 }),
+      ).rejects.toMatchObject({ status: 404 });
+      await expect(
+        service.reorderDay(owner, id, {
+          dayId: new Types.ObjectId().toString(),
+          position: 2,
+        }),
+      ).rejects.toMatchObject({ status: 404 });
+      await expect(
+        service.reorderDay(owner, other.id, {
+          dayId: days[0].id,
+          position: 1,
+        }),
+      ).rejects.toMatchObject({ status: 404 });
+      expect(await order(id)).toEqual(days.map((day) => day.id));
+    });
+
+    it('never loses or duplicates a day when several moves run at once', async () => {
+      const { id, days } = await withFourDays();
+
+      await Promise.all(
+        days.map((day, index) =>
+          service.reorderDay(owner, id, {
+            dayId: day.id,
+            position: days.length - index,
+          }),
+        ),
+      );
+
+      expect([...(await order(id))].sort()).toEqual(
+        days.map((day) => day.id).sort(),
+      );
+    });
+  });
+
   describe('delete a day (ITN-07)', () => {
     /** An itinerary with three days: cairo, luxor, dubai (day 1, 2, 3). */
     const withThreeDays = async () => {
