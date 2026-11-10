@@ -142,4 +142,12 @@ export class ActivitiesService {
   async removeForItinerary(itineraryId: Types.ObjectId): Promise<void> {
     await this.model.deleteMany({ itineraryId }).exec();
   }
+
+  /** Called when one day is deleted (ITN-07): the activities of that day go with it, the other days keep theirs. */
+  async removeForDay(
+    itineraryId: Types.ObjectId,
+    dayId: Types.ObjectId,
+  ): Promise<void> {
+    await this.model.deleteMany({ itineraryId, dayId }).exec();
+  }
 }

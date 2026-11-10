@@ -310,8 +310,9 @@ export class ItinerariesService {
    * start date + position (ITN-05), so the days after the deleted one move up by themselves, with no gap.
    * The "are you sure?" step is the client's job (GEN-03).
    *
-   * Activities (ITN-10) and transport costs (ITN-16) that belong to the day live in their own collections;
-   * their tickets delete a day's rows here, so budget totals stop counting them.
+   * Activities (ITN-10) and transport costs (ITN-16) that belong to the day live in their own collections, so
+   * their rows are deleted here, so budget totals stop counting them. The activities of the day are deleted
+   * right after the day is pulled out; transport costs are added here by ITN-16.
    */
   async removeDay(
     user: AuthenticatedUser,
@@ -332,6 +333,7 @@ export class ItinerariesService {
       .lean()
       .exec();
     if (!updated) throw new NotFoundException('Itinerary or day not found');
+    await this.activities.removeForDay(updated._id, dayObjectId);
   }
 
   /** The DTO of one day, numbered by its current position in the saved itinerary. */

@@ -325,5 +325,33 @@ describe('ActivitiesService (ITN-10) with an isolated MongoDB', () => {
       expect(await storedCount(id)).toBe(0);
       expect(await storedCount(other.id)).toBe(1);
     });
+
+    it('is deleted with its day (ITN-07), and the other days keep theirs', async () => {
+      const { id, first, second } = await withTwoDays();
+      await activities.create(owner, id, first.id, { name: 'Museum' });
+      await activities.create(owner, id, first.id, { name: 'Souk' });
+      await activities.create(owner, id, second.id, { name: 'Burj Khalifa' });
+      expect(await storedCount(id)).toBe(3);
+
+      await itineraries.removeDay(owner, id, first.id);
+
+      expect(await storedCount(id)).toBe(1);
+      const left = await itineraries.findMine(owner, id);
+      expect(left.days).toHaveLength(1);
+      expect(left.days[0].activities.map((a) => a.name)).toEqual([
+        'Burj Khalifa',
+      ]);
+    });
+
+    it('keeps the activities of a day when someone else tries to delete it', async () => {
+      const { id, first } = await withTwoDays();
+      await activities.create(owner, id, first.id, { name: 'Museum' });
+
+      await expect(
+        itineraries.removeDay(stranger, id, first.id),
+      ).rejects.toThrow();
+
+      expect(await storedCount(id)).toBe(1);
+    });
   });
 });

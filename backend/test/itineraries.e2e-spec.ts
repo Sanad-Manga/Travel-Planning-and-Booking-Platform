@@ -1017,6 +1017,34 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
           .countDocuments({ itineraryId: new Types.ObjectId(id) }),
       ).toBe(0);
     });
+
+    it('deleting a day deletes its activities and keeps the other days', async () => {
+      const { id, dayId } = await withDay();
+      const second = await addDay(alice, id, { cityId: 'dubai' }).expect(201);
+      await addActivity(alice, id, dayId, { name: 'Museum' }).expect(201);
+      await addActivity(alice, id, second.body.id, { name: 'Souk' }).expect(
+        201,
+      );
+
+      await http()
+        .delete(`/api/itineraries/${id}/days/${dayId}`)
+        .set('Cookie', alice)
+        .expect(204);
+
+      const activities = connection.collection('activities');
+      expect(
+        await activities.countDocuments({
+          itineraryId: new Types.ObjectId(id),
+          dayId: new Types.ObjectId(dayId),
+        }),
+      ).toBe(0);
+      expect(
+        await activities.countDocuments({
+          itineraryId: new Types.ObjectId(id),
+          dayId: new Types.ObjectId(second.body.id),
+        }),
+      ).toBe(1);
+    });
   });
 
   describe('DELETE /api/itineraries/:id/days/:dayId (ITN-07)', () => {
