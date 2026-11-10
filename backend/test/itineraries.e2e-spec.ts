@@ -100,6 +100,10 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
       { city_id: 'dubai', name: 'Dubai', country_code: 'AE' },
     ]);
 
+    await connection
+      .collection('currencies')
+      .insertMany([{ code: 'USD' }, { code: 'EGP' }, { code: 'AED' }]);
+
     alice = await loginAs('alice@example.com');
     bob = await loginAs('bob@example.com');
     admin = await loginAs('admin@example.com', { role: Role.ADMIN });
@@ -796,215 +800,206 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
     });
   });
 
-  describe('activities (ITN-10)', () => {
+  describe('transport costs (ITN-16)', () => {
     const addDay = (cookie: string, id: string, body: object) =>
       http()
         .post(`/api/itineraries/${id}/days`)
         .set('Cookie', cookie)
         .send(body);
-    const addActivity = (
-      cookie: string,
-      id: string,
-      dayId: string,
-      body: object,
-    ) =>
+    const add = (cookie: string, id: string, body: object) =>
       http()
-        .post(`/api/itineraries/${id}/days/${dayId}/activities`)
+        .post(`/api/itineraries/${id}/transport-costs`)
         .set('Cookie', cookie)
         .send(body);
-    const editActivity = (cookie: string, activityId: string, body: object) =>
+    const edit = (cookie: string, costId: string, body: object) =>
       http()
-        .patch(`/api/activities/${activityId}`)
+        .patch(`/api/transport-costs/${costId}`)
         .set('Cookie', cookie)
         .send(body);
-    const removeActivity = (cookie: string, activityId: string) =>
-      http().delete(`/api/activities/${activityId}`).set('Cookie', cookie);
+    const remove = (cookie: string, costId: string) =>
+      http().delete(`/api/transport-costs/${costId}`).set('Cookie', cookie);
     const withDay = async () => {
       const { id } = await createAs(alice);
       const day = await addDay(alice, id, { cityId: 'cairo' }).expect(201);
-      return { id, dayId: day.body.id as string };
+      const body = (dayId: string) => ({
+        mode: 'FLIGHT',
+        fromCityId: 'cairo',
+        toCityId: 'dubai',
+        amountCents: 25000,
+        currency: 'USD',
+        dayId,
+      });
+      return { id, dayId: day.body.id as string, body };
     };
 
-    it('adds an activity (201) that shows up under its day on the itinerary', async () => {
-      const { id, dayId } = await withDay();
+    it('adds an entry (201) that shows up on the itinerary', async () => {
+      const { id, dayId, body } = await withDay();
 
-      const created = await addActivity(alice, id, dayId, {
-        name: '  Pyramids of Giza  ',
-        description: 'Early morning',
-        time: '08:30',
-        costCents: 3500,
-      }).expect(201);
+      const created = await add(alice, id, body(dayId)).expect(201);
 
       expect(created.body).toEqual({
         id: expect.stringMatching(/^[0-9a-f]{24}$/),
         itineraryId: id,
         dayId,
-        name: 'Pyramids of Giza',
-        description: 'Early morning',
-        time: '08:30',
-        costCents: 3500,
-        currency: expect.any(String),
+        mode: 'FLIGHT',
+        fromCityId: 'cairo',
+        toCityId: 'dubai',
+        amountCents: 25000,
+        currency: 'USD',
       });
-
       const itinerary = await http()
         .get(`/api/itineraries/${id}`)
         .set('Cookie', alice)
         .expect(200);
-      expect(itinerary.body.days[0].activities).toEqual([created.body]);
+      expect(itinerary.body.transportCosts).toEqual([created.body]);
     });
 
-    it('needs only a name: time and cost are optional', async () => {
-      const { id, dayId } = await withDay();
-      const created = await addActivity(alice, id, dayId, {
-        name: 'Free walk',
+    it('accepts an amount of 0 and a lower-case currency code, stored as upper case', async () => {
+      const { id, dayId, body } = await withDay();
+      const created = await add(alice, id, {
+        ...body(dayId),
+        amountCents: 0,
+        currency: ' egp ',
       }).expect(201);
-      expect(created.body).toMatchObject({
-        description: '',
-        time: null,
-        costCents: null,
-      });
+      expect(created.body).toMatchObject({ amountCents: 0, currency: 'EGP' });
     });
 
-    it('400 for a missing, blank or too long name, a bad time, a negative, fractional or text cost, or an unknown field', async () => {
-      const { id, dayId } = await withDay();
-      for (const [body, field] of [
-        [{}, 'name'],
-        [{ name: '   ' }, 'name'],
-        [{ name: 'a'.repeat(101) }, 'name'],
-        [{ name: 'x', description: 'a'.repeat(2001) }, 'description'],
-        [{ name: 'x', time: '25:00' }, 'time'],
-        [{ name: 'x', time: '9:30' }, 'time'],
-        [{ name: 'x', time: 'noon' }, 'time'],
-        [{ name: 'x', costCents: -1 }, 'costCents'],
-        [{ name: 'x', costCents: 12.5 }, 'costCents'],
-        [{ name: 'x', costCents: '100' }, 'costCents'],
-        [{ name: 'x', itineraryId: id }, 'itineraryId'],
-        [{ name: 'x', ownerId: id }, 'ownerId'],
+    it('400 for a missing field, a mode that is not allowed, a negative, fractional or text amount, an unknown currency or city, or an unknown field', async () => {
+      const { id, dayId, body } = await withDay();
+      const { mode, ...withoutMode } = body(dayId);
+      expect(mode).toBe('FLIGHT');
+      for (const [payload, field] of [
+        [withoutMode, 'mode'],
+        [{ ...body(dayId), mode: 'TELEPORT' }, 'mode'],
+        [{ ...body(dayId), fromCityId: undefined }, 'fromCityId'],
+        [{ ...body(dayId), toCityId: undefined }, 'toCityId'],
+        [{ ...body(dayId), amountCents: undefined }, 'amountCents'],
+        [{ ...body(dayId), amountCents: -1 }, 'amountCents'],
+        [{ ...body(dayId), amountCents: 10.5 }, 'amountCents'],
+        [{ ...body(dayId), amountCents: '100' }, 'amountCents'],
+        [{ ...body(dayId), currency: undefined }, 'currency'],
+        [{ ...body(dayId), currency: 'XXX' }, 'currency'],
+        [{ ...body(dayId), fromCityId: 'atlantis' }, 'fromCityId'],
+        [{ ...body(dayId), toCityId: 'atlantis' }, 'toCityId'],
+        [{ ...body(dayId), dayId: undefined }, 'dayId'],
+        [{ ...body(dayId), dayId: 'not-an-id' }, 'dayId'],
+        [{ ...body(dayId), itineraryId: id }, 'itineraryId'],
+        [{ ...body(dayId), ownerId: id }, 'ownerId'],
       ] as const) {
-        const res = await addActivity(alice, id, dayId, body).expect(400);
+        const res = await add(alice, id, payload).expect(400);
         expect(res.body.details).toEqual(
           expect.arrayContaining([expect.objectContaining({ field })]),
         );
       }
     });
 
-    it('400 for a null name or description, and for a malformed id or day id', async () => {
-      const { id, dayId } = await withDay();
-      for (const [body, field] of [
-        [{ name: null }, 'name'],
-        [{ name: 'x', description: null }, 'description'],
-      ] as const) {
-        const res = await addActivity(alice, id, dayId, body).expect(400);
-        expect(res.body.details).toEqual(
-          expect.arrayContaining([expect.objectContaining({ field })]),
-        );
-      }
-      await addActivity(alice, id, 'not-an-id', { name: 'x' }).expect(400);
-      await addActivity(alice, 'not-an-id', dayId, { name: 'x' }).expect(400);
+    it('400 for a day that belongs to another itinerary; nothing is saved', async () => {
+      const { id, body } = await withDay();
+      const other = await withDay();
+
+      const res = await add(alice, id, body(other.dayId)).expect(400);
+
+      expect(res.body.details).toEqual([
+        expect.objectContaining({ field: 'dayId' }),
+      ]);
+      const itinerary = await http()
+        .get(`/api/itineraries/${id}`)
+        .set('Cookie', alice)
+        .expect(200);
+      expect(itinerary.body.transportCosts).toEqual([]);
     });
 
-    it('edits an activity (200) and clears the time and the cost with null', async () => {
-      const { id, dayId } = await withDay();
-      const created = await addActivity(alice, id, dayId, {
-        name: 'Museum',
-        time: '10:00',
-        costCents: 1500,
-      }).expect(201);
+    it('400 for a malformed itinerary id', async () => {
+      const { dayId, body } = await withDay();
+      await add(alice, 'not-an-id', body(dayId)).expect(400);
+    });
 
-      const renamed = await editActivity(alice, created.body.id, {
-        name: 'Egyptian Museum',
-        costCents: 1800,
+    it('edits an entry (200): only the sent fields change', async () => {
+      const { id, dayId, body } = await withDay();
+      const created = await add(alice, id, body(dayId)).expect(201);
+
+      const edited = await edit(alice, created.body.id, {
+        mode: 'TRAIN',
+        amountCents: 18000,
+        currency: 'EGP',
       }).expect(200);
-      expect(renamed.body).toEqual({
+
+      expect(edited.body).toEqual({
         ...created.body,
-        name: 'Egyptian Museum',
-        costCents: 1800,
+        mode: 'TRAIN',
+        amountCents: 18000,
+        currency: 'EGP',
       });
-
-      const cleared = await editActivity(alice, created.body.id, {
-        time: null,
-        costCents: null,
-      }).expect(200);
-      expect(cleared.body).toMatchObject({ time: null, costCents: null });
     });
 
-    it('400 for an empty edit, a null name, a bad time or cost, or a malformed activity id', async () => {
-      const { id, dayId } = await withDay();
-      const created = await addActivity(alice, id, dayId, {
-        name: 'Museum',
-      }).expect(201);
-      await editActivity(alice, created.body.id, {}).expect(400);
-      await editActivity(alice, created.body.id, { name: null }).expect(400);
-      await editActivity(alice, created.body.id, { time: '24:00' }).expect(400);
-      await editActivity(alice, created.body.id, { costCents: -5 }).expect(400);
-      await editActivity(alice, 'not-an-id', { name: 'x' }).expect(400);
+    it('400 for an empty edit, a negative amount, an unknown currency or city, a null field or a malformed id', async () => {
+      const { id, dayId, body } = await withDay();
+      const created = await add(alice, id, body(dayId)).expect(201);
+      await edit(alice, created.body.id, {}).expect(400);
+      await edit(alice, created.body.id, { amountCents: -5 }).expect(400);
+      await edit(alice, created.body.id, { currency: 'XXX' }).expect(400);
+      await edit(alice, created.body.id, { toCityId: 'atlantis' }).expect(400);
+      await edit(alice, created.body.id, { mode: null }).expect(400);
+      await edit(alice, created.body.id, { amountCents: null }).expect(400);
+      await edit(alice, 'not-an-id', { amountCents: 1 }).expect(400);
     });
 
-    it('deletes an activity (204); a second delete is 404', async () => {
-      const { id, dayId } = await withDay();
-      const created = await addActivity(alice, id, dayId, {
-        name: 'Museum',
-      }).expect(201);
+    it('deletes an entry (204); a second delete is 404', async () => {
+      const { id, dayId, body } = await withDay();
+      const created = await add(alice, id, body(dayId)).expect(201);
 
-      await removeActivity(alice, created.body.id).expect(204);
-      await removeActivity(alice, created.body.id).expect(404);
+      await remove(alice, created.body.id).expect(204);
+      await remove(alice, created.body.id).expect(404);
 
       const itinerary = await http()
         .get(`/api/itineraries/${id}`)
         .set('Cookie', alice)
         .expect(200);
-      expect(itinerary.body.days[0].activities).toEqual([]);
+      expect(itinerary.body.transportCosts).toEqual([]);
     });
 
-    it('404 when someone else adds, edits or deletes; the activity is unchanged; an unknown day or activity is 404 too', async () => {
-      const { id, dayId } = await withDay();
-      const created = await addActivity(alice, id, dayId, {
-        name: 'Museum',
-      }).expect(201);
+    it('404 when someone else adds, edits or deletes; the entry is unchanged', async () => {
+      const { id, dayId, body } = await withDay();
+      const created = await add(alice, id, body(dayId)).expect(201);
 
-      await addActivity(bob, id, dayId, { name: 'x' }).expect(404);
-      await editActivity(bob, created.body.id, { name: 'Hijacked' }).expect(
+      await add(bob, id, body(dayId)).expect(404);
+      await edit(bob, created.body.id, { amountCents: 1 }).expect(404);
+      await remove(bob, created.body.id).expect(404);
+      await edit(alice, '674a1b2c3d4e5f6a7b8c9d0e', { amountCents: 1 }).expect(
         404,
       );
-      await removeActivity(bob, created.body.id).expect(404);
-      await addActivity(alice, id, '674a1b2c3d4e5f6a7b8c9d0e', {
-        name: 'x',
-      }).expect(404);
-      await editActivity(alice, '674a1b2c3d4e5f6a7b8c9d0e', {
-        name: 'x',
-      }).expect(404);
 
       const itinerary = await http()
         .get(`/api/itineraries/${id}`)
         .set('Cookie', alice)
         .expect(200);
-      expect(itinerary.body.days[0].activities).toEqual([created.body]);
+      expect(itinerary.body.transportCosts).toEqual([created.body]);
     });
 
-    it('401 without a cookie, 403 for an admin or moderator', async () => {
-      const { id, dayId } = await withDay();
-      const created = await addActivity(alice, id, dayId, {
-        name: 'Museum',
-      }).expect(201);
+    it('401 without a cookie on all three routes, 403 for an admin or moderator', async () => {
+      const { id, dayId, body } = await withDay();
+      const created = await add(alice, id, body(dayId)).expect(201);
 
       await http()
-        .post(`/api/itineraries/${id}/days/${dayId}/activities`)
-        .send({ name: 'x' })
+        .post(`/api/itineraries/${id}/transport-costs`)
+        .send(body(dayId))
         .expect(401);
       await http()
-        .patch(`/api/activities/${created.body.id}`)
-        .send({ name: 'x' })
+        .patch(`/api/transport-costs/${created.body.id}`)
+        .send({ amountCents: 1 })
         .expect(401);
-      await http().delete(`/api/activities/${created.body.id}`).expect(401);
+      await http()
+        .delete(`/api/transport-costs/${created.body.id}`)
+        .expect(401);
 
-      await addActivity(admin, id, dayId, { name: 'x' }).expect(403);
-      await editActivity(admin, created.body.id, { name: 'x' }).expect(403);
-      await removeActivity(airlineMod, created.body.id).expect(403);
+      await add(admin, id, body(dayId)).expect(403);
+      await edit(admin, created.body.id, { amountCents: 1 }).expect(403);
+      await remove(airlineMod, created.body.id).expect(403);
     });
 
-    it('deleting the itinerary deletes its activities', async () => {
-      const { id, dayId } = await withDay();
-      await addActivity(alice, id, dayId, { name: 'Museum' }).expect(201);
+    it('deleting the itinerary deletes its entries', async () => {
+      const { id, dayId, body } = await withDay();
+      await add(alice, id, body(dayId)).expect(201);
 
       await http()
         .delete(`/api/itineraries/${id}`)
@@ -1013,33 +1008,31 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
 
       expect(
         await connection
-          .collection('activities')
+          .collection('transportCosts')
           .countDocuments({ itineraryId: new Types.ObjectId(id) }),
       ).toBe(0);
     });
 
-    it('deleting a day deletes its activities and keeps the other days', async () => {
-      const { id, dayId } = await withDay();
+    it('deleting a day deletes its entries and keeps the other days', async () => {
+      const { id, dayId, body } = await withDay();
       const second = await addDay(alice, id, { cityId: 'dubai' }).expect(201);
-      await addActivity(alice, id, dayId, { name: 'Museum' }).expect(201);
-      await addActivity(alice, id, second.body.id, { name: 'Souk' }).expect(
-        201,
-      );
+      await add(alice, id, body(dayId)).expect(201);
+      await add(alice, id, body(second.body.id)).expect(201);
 
       await http()
         .delete(`/api/itineraries/${id}/days/${dayId}`)
         .set('Cookie', alice)
         .expect(204);
 
-      const activities = connection.collection('activities');
+      const costs = connection.collection('transportCosts');
       expect(
-        await activities.countDocuments({
+        await costs.countDocuments({
           itineraryId: new Types.ObjectId(id),
           dayId: new Types.ObjectId(dayId),
         }),
       ).toBe(0);
       expect(
-        await activities.countDocuments({
+        await costs.countDocuments({
           itineraryId: new Types.ObjectId(id),
           dayId: new Types.ObjectId(second.body.id),
         }),
@@ -1163,11 +1156,10 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
         res.body.paths['/api/itineraries/{id}/days/{dayId}'].delete,
       ).toBeDefined();
       expect(
-        res.body.paths['/api/itineraries/{id}/days/{dayId}/activities'].post
-          .tags,
+        res.body.paths['/api/itineraries/{id}/transport-costs'].post.tags,
       ).toContain('itineraries');
-      expect(res.body.paths['/api/activities/{id}'].patch).toBeDefined();
-      expect(res.body.paths['/api/activities/{id}'].delete).toBeDefined();
+      expect(res.body.paths['/api/transport-costs/{id}'].patch).toBeDefined();
+      expect(res.body.paths['/api/transport-costs/{id}'].delete).toBeDefined();
       expect(
         res.body.paths['/api/itineraries/public/search'].get.tags,
       ).toContain('itineraries');

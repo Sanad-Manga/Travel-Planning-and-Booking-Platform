@@ -35,6 +35,9 @@ import { ActivitiesService } from './activities.service';
 import { ActivityDto } from './dto/activity.dto';
 import { CreateActivityDto } from './dto/create-activity.dto';
 import { CreateItineraryDayDto } from './dto/create-itinerary-day.dto';
+import { CreateTransportCostDto } from './dto/create-transport-cost.dto';
+import { TransportCostDto } from './dto/transport-cost.dto';
+import { TransportCostsService } from './transport-costs.service';
 import { CreateItineraryDto } from './dto/create-itinerary.dto';
 import { ItineraryDayParamDto } from './dto/itinerary-day-param.dto';
 import { ItineraryDayDto } from './dto/itinerary-day.dto';
@@ -63,7 +66,7 @@ import { ItinerariesService } from './itineraries.service';
 export class ItinerariesController {
   constructor(
     private readonly itineraries: ItinerariesService,
-    private readonly activities: ActivitiesService,
+    private readonly transportCosts: TransportCostsService,
   ) {}
 
   @Post()
@@ -234,28 +237,27 @@ export class ItinerariesController {
     return this.itineraries.updateDay(user, params.id, params.dayId, dto);
   }
 
-  @Post(':id/days/:dayId/activities')
+  @Post(':id/transport-costs')
   @ApiOperation({
     summary:
-      'Add an activity to a day of my itinerary: name, optional description, time (HH:mm) and cost in cents - ITN-10',
+      'Add an intercity transport cost to my itinerary: mode, from and to city, amount in cents, currency and day - ITN-16',
   })
-  @ApiCreatedResponse({ type: ActivityDto })
+  @ApiCreatedResponse({ type: TransportCostDto })
   @ApiBadRequestResponse({
     type: ErrorResponseDto,
     description:
-      'Invalid id or dayId, a missing or too long name, a time that is not HH:mm, a negative or fractional cost, or an unknown field',
+      'Invalid id, a missing field, a mode that is not allowed, an unknown city, an unsupported currency, a negative or fractional amount, a day that is not a day of this itinerary, or an unknown field',
   })
   @ApiNotFoundResponse({
     type: ErrorResponseDto,
-    description:
-      'No such itinerary or day (or the itinerary belongs to someone else)',
+    description: 'No such itinerary (or it belongs to someone else)',
   })
-  addActivity(
+  addTransportCost(
     @CurrentUser() user: AuthenticatedUser,
-    @Param() params: ItineraryDayParamDto,
-    @Body() dto: CreateActivityDto,
+    @Param() params: ItineraryIdParamDto,
+    @Body() dto: CreateTransportCostDto,
   ) {
-    return this.activities.create(user, params.id, params.dayId, dto);
+    return this.transportCosts.create(user, params.id, dto);
   }
 
   @Delete(':id/days/:dayId')

@@ -9,12 +9,18 @@ import { ItinerariesController } from './itineraries.controller';
 import { ItinerariesService } from './itineraries.service';
 import { Activity, ActivitySchema } from './schemas/activity.schema';
 import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema';
+import {
+  TransportCost,
+  TransportCostSchema,
+} from './schemas/transport-cost.schema';
+import { TransportCostsController } from './transport-costs.controller';
+import { TransportCostsService } from './transport-costs.service';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: Itinerary.name, schema: ItinerarySchema },
-      { name: Activity.name, schema: ActivitySchema },
+      { name: TransportCost.name, schema: TransportCostSchema },
     ]),
     // Countries are validated through ReferenceDataService, never by reading the collection directly.
     ReferenceDataModule,
@@ -25,9 +31,9 @@ import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema';
   controllers: [
     ItinerariesPublicController,
     ItinerariesController,
-    ActivitiesController,
+    TransportCostsController,
   ],
-  providers: [ItinerariesService, ActivitiesService],
+  providers: [ItinerariesService, TransportCostsService],
   // Blog (author page) and Reports (hide/delete) look itineraries up through the service, never the model.
   exports: [ItinerariesService],
 })
