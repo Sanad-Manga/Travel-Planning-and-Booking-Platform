@@ -201,4 +201,27 @@ export class ItinerariesController {
   ) {
     return this.itineraries.updateDay(user, params.id, params.dayId, dto);
   }
+
+  @Delete(':id/days/:dayId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary:
+      'Delete a day of my itinerary (the client asks for confirmation first). The other days are renumbered and re-dated by themselves - ITN-07',
+  })
+  @ApiNoContentResponse({ description: 'Deleted' })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: 'id or dayId is not a valid id',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description:
+      'No such itinerary or day (or the itinerary belongs to someone else)',
+  })
+  removeDay(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: ItineraryDayParamDto,
+  ) {
+    return this.itineraries.removeDay(user, params.id, params.dayId);
+  }
 }

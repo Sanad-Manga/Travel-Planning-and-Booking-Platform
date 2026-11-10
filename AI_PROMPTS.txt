@@ -1090,6 +1090,21 @@ only to count days; it now projects only the day ids. Lint, build, all 478 unit 
 
 ================================================
 Date: 2026-11-08
+Student: Yassin Yahya
+Tool: Claude (Claude Code)
+Related Requirement: ITN-07 (SCRUM-69)
+Prompt:
+Start working on all my itinerary tickets that are not blocked, one ticket per branch and PR. For ITN-07,
+following docs/contracts.md and the Jira checklist: DELETE /api/itineraries/:id/days/:dayId removes one day,
+the remaining days are renumbered with no gap and re-dated from the start date, owner only. Write the tests
+first, then the code, then open the PR and update Jira.
+How the output was used:
+Used the design from ITN-05 (day number and date are derived from the position, never stored), so deleting a day
+is one atomic $pull whose filter holds the itinerary id, the owner and the day id; the days after it move up by
+themselves. A stranger, an unknown day, a day of another itinerary and a day that is already deleted all answer
+404, and 5 simultaneous deletes of the same day remove it once. The tests failed first (404 instead of 204) and
+pass now. Lint, build, all 644 unit tests and all 391 e2e tests pass. Activities and transport costs of the day
+do not exist yet; ITN-10 and ITN-16 must delete a day's rows when it is deleted (noted in the PR).
 Student: Yusuf Eser
 Tool: Claude (Claude Code, Sonnet 5.5)
 Related Requirement: BLG-08 (SCRUM) Tags on posts (max 5) and tag listing
