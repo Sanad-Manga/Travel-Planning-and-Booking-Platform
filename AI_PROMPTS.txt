@@ -1087,3 +1087,14 @@ stored; replaced it with a "validate when sent" rule (ValidateIf on undefined) a
 of PartialType. The new HTTP test failed first (201) and passes now. (2) The ITN-03 list loaded every day's notes
 only to count days; it now projects only the day ids. Lint, build, all 478 unit tests and all 237 e2e tests pass.
 ================================================
+
+================================================
+Date: 2026-11-08
+Student: Yusuf Eser
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: HTL-03 (SCRUM) Add rooms to a hotel
+Prompt:
+Implement ONLY ticket HTL-03 (add rooms to a hotel) following docs/contracts.md and the travel-platform skill: POST /api/hotels/:id/rooms, hotel moderator for their own hotel only; room number/name unique within the hotel; fields type, beds, maxOccupancy (>= 1), pricePerNightCents (> 0, integer cents). List assumptions first, only touch backend/src/hotels and a new e2e test.
+How the output was used:
+The assistant added the Room schema (unique index on hotelId + lower-cased name), CreateRoomDto and RoomResponseDto, RoomsService (ownership check in the service, 403 for another or unknown hotel as in HTL-01, duplicate settled by the unique index and returned as 409), RoomsController with Swagger decorators, module wiring and 10 e2e tests. I kept the free-text room type and the module-local upper limits (20 beds, 50 guests, 10,000,000 cents) as assumptions, to confirm with the lead and with Hessain. Build, lint, 637 unit tests and the hotels and rooms e2e suites pass locally.
+================================================
