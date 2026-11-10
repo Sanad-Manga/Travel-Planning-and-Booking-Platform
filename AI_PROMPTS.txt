@@ -1104,6 +1104,19 @@ never be out of date after an add, edit, delete, move or start-date change. Used
 to day number, dayCount, startDate, endDate and subtotalCents. Kept subtotalCents at 0 and said so in Swagger and
 the PR, because activities and budgets (ITN-10, ITN-14) do not exist yet. The tests failed first (module missing)
 and pass now. Lint, build, 646 unit and 390 e2e tests pass.
+Related Requirement: ITN-08 (SCRUM-70)
+Prompt:
+Start working on all my itinerary tickets that are not blocked, one ticket per branch and PR. For ITN-08,
+following docs/contracts.md and the Jira checklist: PATCH /api/itineraries/:id/days/reorder moves a day to a new
+position, days are renumbered and dates and city groups are recalculated, an invalid target position is rejected,
+owner only. Write the tests first, then the code, then open the PR and update Jira.
+How the output was used:
+Used the design from ITN-05 (number, date and city groups are derived from the position), so a move only changes
+the order of the stored days. Used a body of { dayId, position } and one atomic aggregation-pipeline update that
+rebuilds the array from what is stored, instead of read, reorder in memory and write back, so simultaneous moves
+cannot lose or duplicate a day (tested with 4 at once). Used the route declared before days/:dayId, because
+"reorder" would otherwise be read as a day id. A position after the last day is 400, a stranger or unknown day is
+404. The tests failed first (400 instead of 200) and pass now. Lint, build, 644 unit and 392 e2e tests pass.
 Related Requirement: ITN-07 (SCRUM-69)
 Prompt:
 Start working on all my itinerary tickets that are not blocked, one ticket per branch and PR. For ITN-07,

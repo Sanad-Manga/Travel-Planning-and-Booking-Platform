@@ -1001,6 +1001,9 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
         res.body.paths['/api/itineraries/{id}/days/{dayId}'].patch,
       ).toBeDefined();
       expect(
+        res.body.paths['/api/itineraries/{id}/days/reorder'].patch,
+      ).toBeDefined();
+      expect(
         res.body.paths['/api/itineraries/{id}/days/{dayId}'].delete,
       ).toBeDefined();
       expect(
