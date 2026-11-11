@@ -31,13 +31,20 @@ import {
   Role,
   Roles,
 } from '../common';
+import { ActivitiesService } from './activities.service';
+import { ActivityDto } from './dto/activity.dto';
+import { CreateActivityDto } from './dto/create-activity.dto';
 import { CreateItineraryDayDto } from './dto/create-itinerary-day.dto';
+import { CreateTransportCostDto } from './dto/create-transport-cost.dto';
+import { TransportCostDto } from './dto/transport-cost.dto';
+import { TransportCostsService } from './transport-costs.service';
 import { CreateItineraryDto } from './dto/create-itinerary.dto';
 import { ItineraryDayParamDto } from './dto/itinerary-day-param.dto';
 import { ItineraryDayDto } from './dto/itinerary-day.dto';
 import { ItineraryIdParamDto } from './dto/itinerary-id-param.dto';
 import { ItineraryResponseDto } from './dto/itinerary-response.dto';
 import { ItineraryRowDto } from './dto/itinerary-row.dto';
+import { ReorderDaysDto } from './dto/reorder-days.dto';
 import { UpdateItineraryDayDto } from './dto/update-itinerary-day.dto';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto';
 import { ItinerariesService } from './itineraries.service';
@@ -57,7 +64,11 @@ import { ItinerariesService } from './itineraries.service';
 @Roles(Role.USER)
 @Controller('itineraries')
 export class ItinerariesController {
-  constructor(private readonly itineraries: ItinerariesService) {}
+  constructor(
+    private readonly itineraries: ItinerariesService,
+    private readonly activities: ActivitiesService,
+    private readonly transportCosts: TransportCostsService,
+  ) {}
 
   @Post()
   @ApiOperation({
@@ -179,6 +190,31 @@ export class ItinerariesController {
     return this.itineraries.addDay(user, params.id, dto);
   }
 
+  // Declared before ':id/days/:dayId' so "reorder" is not read as a day id (which would answer 400).
+  @Patch(':id/days/reorder')
+  @ApiOperation({
+    summary:
+      'Move one day of my itinerary to a new position; the days are renumbered and re-dated and the city groups follow - ITN-08',
+  })
+  @ApiOkResponse({ type: ItineraryResponseDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description:
+      'Invalid id or dayId, a position that is missing, not a whole number, below 1 or after the last day, or an unknown field',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description:
+      'No such itinerary or day (or the itinerary belongs to someone else)',
+  })
+  reorderDay(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: ItineraryIdParamDto,
+    @Body() dto: ReorderDaysDto,
+  ) {
+    return this.itineraries.reorderDay(user, params.id, dto);
+  }
+
   @Patch(':id/days/:dayId')
   @ApiOperation({
     summary: 'Edit a day of my itinerary: city and/or notes - ITN-05',
@@ -200,5 +236,75 @@ export class ItinerariesController {
     @Body() dto: UpdateItineraryDayDto,
   ) {
     return this.itineraries.updateDay(user, params.id, params.dayId, dto);
+  }
+
+  @Post(':id/days/:dayId/activities')
+  @ApiOperation({
+    summary:
+      'Add an activity to a day of my itinerary: name, optional description, time (HH:mm) and cost in cents - ITN-10',
+  })
+  @ApiCreatedResponse({ type: ActivityDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description:
+      'Invalid id or dayId, a missing or too long name, a time that is not HH:mm, a negative or fractional cost, or an unknown field',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description:
+      'No such itinerary or day (or the itinerary belongs to someone else)',
+  })
+  addActivity(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: ItineraryDayParamDto,
+    @Body() dto: CreateActivityDto,
+  ) {
+    return this.activities.create(user, params.id, params.dayId, dto);
+  }
+
+  @Post(':id/transport-costs')
+  @ApiOperation({
+    summary:
+      'Add an intercity transport cost to my itinerary: mode, from and to city, amount in cents, currency and day - ITN-16',
+  })
+  @ApiCreatedResponse({ type: TransportCostDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description:
+      'Invalid id, a missing field, a mode that is not allowed, an unknown city, an unsupported currency, a negative or fractional amount, a day that is not a day of this itinerary, or an unknown field',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'No such itinerary (or it belongs to someone else)',
+  })
+  addTransportCost(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: ItineraryIdParamDto,
+    @Body() dto: CreateTransportCostDto,
+  ) {
+    return this.transportCosts.create(user, params.id, dto);
+  }
+
+  @Delete(':id/days/:dayId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary:
+      'Delete a day of my itinerary (the client asks for confirmation first). The other days are renumbered and re-dated by themselves - ITN-07',
+  })
+  @ApiNoContentResponse({ description: 'Deleted' })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: 'id or dayId is not a valid id',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description:
+      'No such itinerary or day (or the itinerary belongs to someone else)',
+  })
+  removeDay(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: ItineraryDayParamDto,
+  ) {
+    return this.itineraries.removeDay(user, params.id, params.dayId);
   }
 }
