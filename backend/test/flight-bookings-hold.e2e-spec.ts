@@ -160,7 +160,7 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
     app = moduleRef.createNestApplication();
     setupApp(app);
     setupSwagger(app);
-    await app.init();
+    await app.listen(0, '127.0.0.1');
     connection = app.get<Connection>(getConnectionToken());
     lifecycle = app.get(BookingLifecycle);
     bookingModel = app.get<Model<FlightBooking>>(
