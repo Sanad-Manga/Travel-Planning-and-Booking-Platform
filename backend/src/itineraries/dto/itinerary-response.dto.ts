@@ -1,7 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Visibility } from '../../common';
 import { ItineraryLean } from '../schemas/itinerary.schema';
+import { ActivityDto } from './activity.dto';
+import { CityGroupDto, groupDaysByCity } from './city-group.dto';
 import { ItineraryDayDto, toItineraryDay } from './itinerary-day.dto';
+import { TransportCostDto } from './transport-cost.dto';
 
 export class ItineraryResponseDto {
   @ApiProperty({ example: '674a1b2c3d4e5f6a7b8c9d0e' })
@@ -37,6 +40,20 @@ export class ItineraryResponseDto {
   })
   days: ItineraryDayDto[];
 
+  @ApiProperty({
+    type: [CityGroupDto],
+    description:
+      'Consecutive days in the same city, grouped (ITN-09): A, B, A is three groups. Each has its day count, start and end date and budget subtotal.',
+  })
+  cityGroups: CityGroupDto[];
+
+  @ApiProperty({
+    type: [TransportCostDto],
+    description:
+      'The intercity transport costs (ITN-16), oldest first. Each belongs to one day (dayId).',
+  })
+  transportCosts: TransportCostDto[];
+
   @ApiProperty({ example: '2026-11-04T10:00:00.000Z' })
   createdAt: string;
 
@@ -45,7 +62,14 @@ export class ItineraryResponseDto {
 }
 
 /** Response DTO, never the raw document: `_id` becomes `id`, ids are strings and `__v` is not exposed. */
-export function toItineraryResponse(doc: ItineraryLean): ItineraryResponseDto {
+export function toItineraryResponse(
+  doc: ItineraryLean,
+  activities: ActivityDto[] = [],
+  transportCosts: TransportCostDto[] = [],
+): ItineraryResponseDto {
+  const days = (doc.days ?? []).map((day, index) =>
+    toItineraryDay(day, index, doc.startDate, activities),
+  );
   return {
     id: doc._id.toString(),
     authorId: doc.authorId.toString(),
@@ -54,9 +78,9 @@ export function toItineraryResponse(doc: ItineraryLean): ItineraryResponseDto {
     startDate: doc.startDate,
     visibility: doc.visibility,
     isHidden: doc.isHidden,
-    days: (doc.days ?? []).map((day, index) =>
-      toItineraryDay(day, index, doc.startDate),
-    ),
+    days,
+    cityGroups: groupDaysByCity(days),
+    transportCosts,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
   };
