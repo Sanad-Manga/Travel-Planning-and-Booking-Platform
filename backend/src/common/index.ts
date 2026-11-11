@@ -11,3 +11,5 @@ export * from './interfaces/access-token-payload';
 // Auth: JwtAuthGuard and RolesGuard are global; use @Public() to open a route, @Roles(...) to restrict, @CurrentUser() for the principal.
 export * from './decorators';
 export * from './guards';
+// Shared class-validator decorators (date-only fields, contracts section 3).
+export * from './validators';

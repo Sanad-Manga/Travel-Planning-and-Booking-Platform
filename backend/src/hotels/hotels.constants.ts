@@ -14,3 +14,6 @@ export const ROOM_MAX_BEDS = 20;
 export const ROOM_MAX_OCCUPANCY = 50;
 // Upper bound only to keep the value a safe integer / sane (100 000.00 per night).
 export const ROOM_MAX_PRICE_CENTS = 10_000_000;
+
+// HTL-04: bounded child data embedded in the room, so the no-overlap rule can be one atomic update.
+export const ROOM_MAX_AVAILABILITY_RANGES = 100;

@@ -9,8 +9,7 @@ import {
   IsString,
   MaxLength,
 } from 'class-validator';
-import { ITINERARY_TITLE_MAX_LENGTH } from '../../common';
-import { IsCalendarDate } from './is-calendar-date.decorator';
+import { IsCalendarDate, ITINERARY_TITLE_MAX_LENGTH } from '../../common';
 
 /** More than the number of countries in the seed. Stops a huge array from causing thousands of lookups. */
 export const ITINERARY_MAX_COUNTRIES = 250;
