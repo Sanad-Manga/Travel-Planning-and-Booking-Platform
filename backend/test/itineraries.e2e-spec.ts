@@ -100,6 +100,10 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
       { city_id: 'dubai', name: 'Dubai', country_code: 'AE' },
     ]);
 
+    await connection
+      .collection('currencies')
+      .insertMany([{ code: 'USD' }, { code: 'EGP' }, { code: 'AED' }]);
+
     alice = await loginAs('alice@example.com');
     bob = await loginAs('bob@example.com');
     admin = await loginAs('admin@example.com', { role: Role.ADMIN });
