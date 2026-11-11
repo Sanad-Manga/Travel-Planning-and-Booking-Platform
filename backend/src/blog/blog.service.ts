@@ -3,6 +3,7 @@ import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, FilterQuery, Model, Types } from 'mongoose';
 import { AuthenticatedUser, MAX_IMAGES_PER_ENTITY, paginate, PaginatedResponse, PaginationDto, POST_MAX_TAGS, PostStatus, Role } from '../common';
 import { UsersService } from '../users/users.service';
+import { CommentsService } from './comments.service';
 import { BrowsePostsQueryDto } from './dto/browse-posts-query.dto';
 import { CreatePostDto } from './dto/create-post.dto';
 import { MyPostRowDto } from './dto/my-post-row.dto';
@@ -26,6 +27,7 @@ export class BlogService {
     @InjectModel(Post.name) private readonly posts: Model<Post>,
     @InjectConnection() private readonly connection: Connection,
     private readonly users: UsersService,
+    private readonly commentsService: CommentsService,
   ) {}
 
   /**
@@ -98,14 +100,30 @@ export class BlogService {
    * Only PUBLISHED posts open here; a draft never does. A hidden post is visible only to its author
    * and admins (contracts section 7). Everyone else gets 404, never 403 (section 4).
    */
-  async findOne(id: string, viewer?: AuthenticatedUser): Promise<PostDetailDto> {
-    if (!/^[0-9a-f]{24}$/i.test(id)) throw new NotFoundException('Post not found');
+   async findOne(
+    id: string,
+    viewer?: AuthenticatedUser,
+    query: PaginationDto = new PaginationDto(),
+  ): Promise<PostDetailDto> {
+    if (!/^[0-9a-f]{24}$/i.test(id)) {
+      throw new NotFoundException('Post not found');
+    }
+
     const post = await this.posts.findById(id).lean<LeanPost>().exec();
-    if (!post || !this.canView(post, viewer)) throw new NotFoundException('Post not found');
+
+    if (!post || !this.canView(post, viewer)) {
+      throw new NotFoundException('Post not found');
+    }
 
     const authorId = post.authorId.toString();
     const names = await this.authorNames([authorId]);
-    return PostDetailDto.fromLean(post, names.get(authorId) ?? UNKNOWN_AUTHOR);
+    const comments = await this.commentsService.list(id, query, viewer);
+
+    return PostDetailDto.fromLean(
+      post,
+      names.get(authorId) ?? UNKNOWN_AUTHOR,
+      comments.items,
+    );
   }
 
   /**
