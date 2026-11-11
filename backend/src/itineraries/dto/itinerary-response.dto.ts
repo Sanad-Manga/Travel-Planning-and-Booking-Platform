@@ -41,6 +41,13 @@ export class ItineraryResponseDto {
   days: ItineraryDayDto[];
 
   @ApiProperty({
+    type: [CityGroupDto],
+    description:
+      'Consecutive days in the same city, grouped (ITN-09): A, B, A is three groups. Each has its day count, start and end date and budget subtotal.',
+  })
+  cityGroups: CityGroupDto[];
+
+  @ApiProperty({
     type: [TransportCostDto],
     description:
       'The intercity transport costs (ITN-16), oldest first. Each belongs to one day (dayId).',
@@ -57,8 +64,12 @@ export class ItineraryResponseDto {
 /** Response DTO, never the raw document: `_id` becomes `id`, ids are strings and `__v` is not exposed. */
 export function toItineraryResponse(
   doc: ItineraryLean,
+  activities: ActivityDto[] = [],
   transportCosts: TransportCostDto[] = [],
 ): ItineraryResponseDto {
+  const days = (doc.days ?? []).map((day, index) =>
+    toItineraryDay(day, index, doc.startDate, activities),
+  );
   return {
     id: doc._id.toString(),
     authorId: doc.authorId.toString(),
@@ -67,9 +78,8 @@ export function toItineraryResponse(
     startDate: doc.startDate,
     visibility: doc.visibility,
     isHidden: doc.isHidden,
-    days: (doc.days ?? []).map((day, index) =>
-      toItineraryDay(day, index, doc.startDate, activities),
-    ),
+    days,
+    cityGroups: groupDaysByCity(days),
     transportCosts,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),

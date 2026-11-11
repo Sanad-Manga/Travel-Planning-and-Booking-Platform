@@ -20,6 +20,7 @@ import { TransportCostsService } from './transport-costs.service';
   imports: [
     MongooseModule.forFeature([
       { name: Itinerary.name, schema: ItinerarySchema },
+      { name: Activity.name, schema: ActivitySchema },
       { name: TransportCost.name, schema: TransportCostSchema },
     ]),
     // Countries are validated through ReferenceDataService, never by reading the collection directly.
@@ -31,9 +32,10 @@ import { TransportCostsService } from './transport-costs.service';
   controllers: [
     ItinerariesPublicController,
     ItinerariesController,
+    ActivitiesController,
     TransportCostsController,
   ],
-  providers: [ItinerariesService, TransportCostsService],
+  providers: [ItinerariesService, ActivitiesService, TransportCostsService],
   // Blog (author page) and Reports (hide/delete) look itineraries up through the service, never the model.
   exports: [ItinerariesService],
 })

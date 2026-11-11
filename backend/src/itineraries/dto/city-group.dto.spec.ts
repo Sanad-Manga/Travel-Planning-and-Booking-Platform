@@ -9,6 +9,7 @@ const daysIn = (...cityIds: string[]): ItineraryDayDto[] =>
     date: `2026-12-${20 + index}`,
     cityId,
     notes: '',
+    activities: [],
   }));
 
 describe('groupDaysByCity (ITN-09)', () => {
