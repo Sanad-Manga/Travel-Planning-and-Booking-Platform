@@ -1193,3 +1193,14 @@ Prompt:
 Review comment on the HTL-04 PR: hotels/dto/is-date-only.decorator.ts duplicates itineraries/dto/is-calendar-date.decorator.ts. Move the date validator into backend/src/common (contracts keep shared code there) and flag the itineraries touch in the PR.
 How the output was used:
 Moved the itineraries decorator and its spec with git mv to common/validators (names unchanged: IsCalendarDate / isCalendarDate), exported it from common/index.ts, deleted the hotels copy and switched create-availability.dto.ts to it. The only edit in the itineraries module is the import line in create-itinerary.dto.ts. Re-ran build, lint, npm test and the e2e tests.
+
+================================================
+Date: 2026-11-11
+Student: Hussein Elrefaey
+Tool: Copilot SDK in VS Code
+Related Requirement: BLG-06 (Like / unlike a post)
+Prompt:
+Implement only BLG-06 in the blog module: users can like and unlike a post, only once per user, including under parallel requests; return the updated like count; add the required Swagger documentation and tests. Follow docs/contracts.md and list assumptions first.
+How the output was used:
+Added a Like schema with a unique postId + userId index, authenticated POST and DELETE like routes, and transaction-backed counter updates. Repeated like/unlike requests are idempotent. Added integration tests for duplicate and parallel likes, unlike, count updates, unavailable posts, and guest authorization. Build and lint pass; all 8 BLG-06 integration tests pass.
+================================================

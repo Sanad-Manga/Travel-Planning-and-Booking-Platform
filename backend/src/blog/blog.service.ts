@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, FilterQuery, Model, Types } from 'mongoose';
 import { AuthenticatedUser, MAX_IMAGES_PER_ENTITY, paginate, PaginatedResponse, PaginationDto, POST_MAX_TAGS, PostStatus, Role } from '../common';
@@ -7,9 +12,11 @@ import { BrowsePostsQueryDto } from './dto/browse-posts-query.dto';
 import { CreatePostDto } from './dto/create-post.dto';
 import { MyPostRowDto } from './dto/my-post-row.dto';
 import { PostDetailDto } from './dto/post-detail.dto';
+import { PostLikeResponseDto } from './dto/post-like-response.dto';
 import { PostListRowDto } from './dto/post-list-row.dto';
 import { PostResponseDto } from './dto/post-response.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
+import { Like } from './schemas/like.schema';
 import { Post } from './schemas/post.schema';
 
 // See deletePostAndDependents for the assumption behind these names.
@@ -20,10 +27,20 @@ const UNKNOWN_AUTHOR = 'Unknown user';
 
 type LeanPost = Post & { _id: Types.ObjectId };
 
+function isDuplicateKeyError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 11000
+  );
+}
+
 @Injectable()
 export class BlogService {
   constructor(
     @InjectModel(Post.name) private readonly posts: Model<Post>,
+    @InjectModel(Like.name) private readonly likes: Model<Like>,
     @InjectConnection() private readonly connection: Connection,
     private readonly users: UsersService,
   ) {}
@@ -108,6 +125,143 @@ export class BlogService {
     return PostDetailDto.fromLean(post, names.get(authorId) ?? UNKNOWN_AUTHOR);
   }
 
+  async like(
+    id: string,
+    actor: AuthenticatedUser,
+  ): Promise<PostLikeResponseDto> {
+    const postId = this.postObjectId(id);
+    const userId = new Types.ObjectId(actor.userId);
+    const visiblePost: FilterQuery<Post> = {
+      _id: postId,
+      status: PostStatus.PUBLISHED,
+      isHidden: false,
+    };
+
+    try {
+      return await this.connection.transaction(async (session) => {
+        const post = await this.posts
+          .findOne(visiblePost)
+          .select('_id')
+          .session(session)
+          .lean()
+          .exec();
+
+        if (!post) {
+          throw new NotFoundException('Post not found');
+        }
+
+        await this.likes.create([{ postId, userId }], { session });
+
+        const result = await this.posts.updateOne(
+          visiblePost,
+          { $inc: { likeCount: 1 } },
+          { session },
+        );
+
+        if (result.matchedCount === 0) {
+          throw new NotFoundException('Post not found');
+        }
+
+        const updatedPost = await this.posts
+          .findById(postId)
+          .select('likeCount')
+          .session(session)
+          .lean()
+          .exec();
+
+        if (!updatedPost) {
+          throw new NotFoundException('Post not found');
+        }
+
+        return {
+          postId: id,
+          liked: true,
+          likeCount: updatedPost.likeCount,
+        };
+      });
+    } catch (error) {
+      if (!isDuplicateKeyError(error)) {
+        throw error;
+      }
+
+      const [post, existingLike] = await Promise.all([
+        this.posts.findOne(visiblePost).select('likeCount').lean().exec(),
+        this.likes.findOne({ postId, userId }).select('_id').lean().exec(),
+      ]);
+
+      if (!post) {
+        throw new NotFoundException('Post not found');
+      }
+
+      if (!existingLike) {
+        throw error;
+      }
+
+      return {
+        postId: id,
+        liked: true,
+        likeCount: post.likeCount,
+      };
+    }
+  }
+
+  async unlike(
+    id: string,
+    actor: AuthenticatedUser,
+  ): Promise<PostLikeResponseDto> {
+    const postId = this.postObjectId(id);
+    const userId = new Types.ObjectId(actor.userId);
+
+    return this.connection.transaction(async (session) => {
+      const post = await this.posts
+        .findById(postId)
+        .select('_id')
+        .session(session)
+        .lean()
+        .exec();
+
+      if (!post) {
+        throw new NotFoundException('Post not found');
+      }
+
+      const result = await this.likes.deleteOne(
+        { postId, userId },
+        { session },
+      );
+
+      if (result.deletedCount > 0) {
+        const update = await this.posts.updateOne(
+          { _id: postId, likeCount: { $gt: 0 } },
+          { $inc: { likeCount: -1 } },
+          { session },
+        );
+
+        if (update.matchedCount === 0) {
+          throw new InternalServerErrorException(
+            'Post like count is inconsistent',
+          );
+        }
+      }
+
+      const updatedPost = await this.posts
+        .findById(postId)
+        .select('likeCount')
+        .session(session)
+        .lean()
+        .exec();
+
+      if (!updatedPost) {
+        throw new NotFoundException('Post not found');
+      }
+
+      return {
+        postId: id,
+        liked: false,
+        likeCount: updatedPost.likeCount,
+      };
+    });
+  }
+
   /**
    * BLG-04: the author edits their own post (hidden posts included). One atomic findOneAndUpdate
    * filtered by {_id, authorId}: someone else's, unknown or malformed id gives 404, never 403.
@@ -186,6 +340,13 @@ export class BlogService {
   private ownedFilter(id: string, actor: AuthenticatedUser): FilterQuery<Post> {
     if (!/^[0-9a-f]{24}$/i.test(id)) throw new NotFoundException('Post not found');
     return { _id: new Types.ObjectId(id), authorId: new Types.ObjectId(actor.userId) };
+  }
+
+  private postObjectId(id: string): Types.ObjectId {
+    if (!/^[0-9a-f]{24}$/i.test(id)) {
+      throw new NotFoundException('Post not found');
+    }
+    return new Types.ObjectId(id);
   }
 
   private assertLimit(field: string, items: unknown[] | undefined, max: number): void {

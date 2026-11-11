@@ -3,11 +3,18 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { UsersModule } from '../users/users.module';
 import { BlogController } from './blog.controller';
 import { BlogService } from './blog.service';
+import { Like, LikeSchema } from './schemas/like.schema';
 import { Post, PostSchema } from './schemas/post.schema';
 import { TagsController } from './tags.controller';
 
 @Module({
-  imports: [MongooseModule.forFeature([{ name: Post.name, schema: PostSchema }]), UsersModule],
+  imports: [
+    MongooseModule.forFeature([
+      { name: Post.name, schema: PostSchema },
+      { name: Like.name, schema: LikeSchema },
+    ]),
+    UsersModule,
+  ],
   controllers: [BlogController, TagsController],
   providers: [BlogService],
   // Comments, likes and search (other BLG tickets) will inject BlogService / the Post model from here.
