@@ -1173,3 +1173,13 @@ Implement ONLY ticket HTL-03 (add rooms to a hotel) following docs/contracts.md 
 How the output was used:
 The assistant added the Room schema (unique index on hotelId + lower-cased name), CreateRoomDto and RoomResponseDto, RoomsService (ownership check in the service, 403 for another or unknown hotel as in HTL-01, duplicate settled by the unique index and returned as 409), RoomsController with Swagger decorators, module wiring and 10 e2e tests. I kept the free-text room type and the module-local upper limits (20 beds, 50 guests, 10,000,000 cents) as assumptions, to confirm with the lead and with Hessain. Build, lint, 637 unit tests and the hotels and rooms e2e suites pass locally.
 ================================================
+
+Date: 2026-11-11
+Student: Ahmed Sanad
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: GEN-06 (SCRUM-48) Flight times in each airport local time zone
+Prompt:
+Implement ONLY GEN-06: one shared helper in common/ that converts local <-> UTC, flight times stay UTC in storage, and flight responses also include departureLocal / arrivalLocal plus the IANA time zones. Others (search results, e-ticket, itineraries) should import the helper.
+How the output was used:
+The assistant moved my FLT-03 conversion helper from flights/utils to common/local-time.ts (exported from common, so `import { localToUtc, utcToLocal } from "../common"`), added utcToLocal (local date-time plus the UTC offset at that moment, e.g. 2026-12-01T14:30:00+02:00), and added departureLocal and arrivalLocal to the create-flight response and to the flight search result items. Tests cover two zones, half-hour offsets, day rollover, daylight-saving changes in New York and London, and a round trip with localToUtc. Decision I accepted: local times are shown as ISO text with offset, not a Date, so clients cannot mis-read them as UTC. I ran lint, prettier and the common, flights and e2e tests and read every file before committing.
+================================================

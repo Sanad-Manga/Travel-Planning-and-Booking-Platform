@@ -4,6 +4,7 @@ export * from './constants';
 export * from './filters';
 export * from './pagination';
 export * from './pipes';
+export * from './local-time';
 export * from './interfaces/authenticated-user';
 export * from './interfaces/authenticated-request';
 export * from './interfaces/access-token-payload';
