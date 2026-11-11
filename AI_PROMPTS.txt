@@ -1087,3 +1087,17 @@ stored; replaced it with a "validate when sent" rule (ValidateIf on undefined) a
 of PartialType. The new HTTP test failed first (201) and passes now. (2) The ITN-03 list loaded every day's notes
 only to count days; it now projects only the day ids. Lint, build, all 478 unit tests and all 237 e2e tests pass.
 ================================================
+================================================
+Date: 2026-11-07
+Student: Abdulrahman Mohamad Hosny
+Tool: Claude
+Related Requirement: FLT-22, FLT-19, FLT-21, FLT-17
+Prompt:
+Shared the four Flights B tickets, the project skill file and the repository link, and asked
+which ticket to start with after reviewing the develop branch.
+How the output was used:
+Used the review of develop (lifecycle and provider interface merged, cabin schema merged,
+baggage rules and cancellation tiers not yet merged, no flight-bookings module) and the
+contract v1.3 differences to choose the order FLT-22, FLT-19, FLT-21, with FLT-17 as a
+flexible ticket, and to prepare questions for the lead.
+================================================
