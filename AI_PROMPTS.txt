@@ -1173,3 +1173,23 @@ Implement ONLY ticket HTL-03 (add rooms to a hotel) following docs/contracts.md 
 How the output was used:
 The assistant added the Room schema (unique index on hotelId + lower-cased name), CreateRoomDto and RoomResponseDto, RoomsService (ownership check in the service, 403 for another or unknown hotel as in HTL-01, duplicate settled by the unique index and returned as 409), RoomsController with Swagger decorators, module wiring and 10 e2e tests. I kept the free-text room type and the module-local upper limits (20 beds, 50 guests, 10,000,000 cents) as assumptions, to confirm with the lead and with Hessain. Build, lint, 637 unit tests and the hotels and rooms e2e suites pass locally.
 ================================================
+
+================================================
+Date: 2026-11-08
+Student: Yusuf Eser
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: HTL-04 (SCRUM) Room availability date ranges
+Prompt:
+Implement ONLY ticket HTL-04 following docs/contracts.md and the travel-platform skill: POST /api/hotels/:id/rooms/:roomId/availability. A hotel moderator defines non-overlapping bookable date ranges for a room of their own hotel; overlapping ranges for the same room are rejected; end date must be after start date. List assumptions first, only touch backend/src/hotels and a new e2e test.
+How the output was used:
+The assistant embedded the ranges in the Room document (availability array of {_id, startDate, endDate}, YYYY-MM-DD strings, half-open [start, end)) so the no-overlap rule is ONE atomic updateOne with a $not/$elemMatch filter and $push (no read-then-write, no transaction needed). It added CreateAvailabilityDto with a local YYYY-MM-DD validator, the endDate > startDate rule and the 409 overlap / 404 room / 403 hotel rules in RoomsService, the controller endpoint with Swagger, and 12 e2e tests (every overlap shape, adjacent ranges, parallel requests, cap of 100 ranges). Assumptions I accepted and must confirm with Hessain: half-open ranges (endDate = check-out day), date-only strings, ranges embedded in rooms.availability, and a cap of 100 ranges per room. Build, lint and the hotels, rooms and availability e2e suites pass locally.
+================================================
+
+Date: 2026-11-10
+Student: Yusuf Eser
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: HTL-04 (PR review change)
+Prompt:
+Review comment on the HTL-04 PR: hotels/dto/is-date-only.decorator.ts duplicates itineraries/dto/is-calendar-date.decorator.ts. Move the date validator into backend/src/common (contracts keep shared code there) and flag the itineraries touch in the PR.
+How the output was used:
+Moved the itineraries decorator and its spec with git mv to common/validators (names unchanged: IsCalendarDate / isCalendarDate), exported it from common/index.ts, deleted the hotels copy and switched create-availability.dto.ts to it. The only edit in the itineraries module is the import line in create-itinerary.dto.ts. Re-ran build, lint, npm test and the e2e tests.
