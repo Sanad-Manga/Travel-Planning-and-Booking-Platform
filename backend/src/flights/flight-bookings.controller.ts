@@ -1,4 +1,4 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
@@ -6,6 +6,7 @@ import {
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
+  ApiOkResponse,
   ApiOperation,
   ApiTags,
   ApiUnauthorizedResponse,
@@ -19,6 +20,7 @@ import {
 } from '../common';
 import { FlightBookingResponseDto } from './dto/flight-booking-response.dto';
 import { CreateFlightBookingDto } from './dto/create-flight-booking.dto';
+import { FlightBookingSummaryResponseDto } from './dto/flight-booking-summary-response.dto';
 import { HoldFlightBookingDto } from './dto/hold-flight-booking.dto';
 import { FlightBookingsService } from './flight-bookings.service';
 
@@ -31,6 +33,32 @@ import { FlightBookingsService } from './flight-bookings.service';
 @Controller('flight-bookings')
 export class FlightBookingsController {
   constructor(private readonly bookings: FlightBookingsService) {}
+
+  @Get(':id')
+  @Roles(Role.USER)
+  @ApiOperation({
+    summary: 'Get the pending flight booking summary - FLT-21',
+    description:
+      'Returns flight, passenger, baggage and payable-total details for the booking owner. ' +
+      'The total is read from the same getPayable amount used by Payments.',
+  })
+  @ApiOkResponse({ type: FlightBookingSummaryResponseDto })
+  @ApiForbiddenResponse({
+    type: ErrorResponseDto,
+    description: 'Only travelers (role USER) can view a flight booking summary',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'The booking is unknown or belongs to another traveler',
+  })
+  @ApiConflictResponse({
+    type: ErrorResponseDto,
+    description:
+      'A summary is available only while the booking is pending payment',
+  })
+  getSummary(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.bookings.getSummary(user, id);
+  }
 
   @Post()
   @Roles(Role.USER)

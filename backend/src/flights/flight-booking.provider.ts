@@ -9,7 +9,17 @@ import {
   BookingStatusSnapshot,
 } from '../payments/booking-provider.interface';
 import { BookingProviderRegistry } from '../payments/booking-provider.registry';
-import { FlightBooking, FlightBookingLean } from './schemas/flight-booking.schema';
+import {
+  FlightBooking,
+  FlightBookingLean,
+} from './schemas/flight-booking.schema';
+
+export interface FlightPayable {
+  amountCents: number;
+  currency: string;
+  status: BookingStatus;
+  holdExpiresAt: Date | null;
+}
 
 /**
  * Flights B's side of the booking-provider contract (docs/contracts.md section 7): what BookingLifecycle,
@@ -19,7 +29,8 @@ import { FlightBooking, FlightBookingLean } from './schemas/flight-booking.schem
 @Injectable()
 export class FlightBookingProvider implements BookingProvider, OnModuleInit {
   constructor(
-    @InjectModel(FlightBooking.name) private readonly model: Model<FlightBooking>,
+    @InjectModel(FlightBooking.name)
+    private readonly model: Model<FlightBooking>,
     @InjectConnection() private readonly connection: Connection,
     private readonly inventory: FlightInventoryService,
     private readonly notifications: NotificationsService,
@@ -30,6 +41,33 @@ export class FlightBookingProvider implements BookingProvider, OnModuleInit {
     this.registry.register(BookingType.FLIGHT, this);
   }
 
+  /** FLT-21/PAY-01: expose the stored booking total through the documented payable shape. */
+  async getPayable(id: string, userId: string): Promise<FlightPayable | null> {
+    if (!Types.ObjectId.isValid(id) || !Types.ObjectId.isValid(userId)) {
+      return null;
+    }
+    const booking = await this.model
+      .findOne({
+        _id: new Types.ObjectId(id),
+        userId: new Types.ObjectId(userId),
+      })
+      .select('totalCents currency status holdExpiresAt')
+      .lean<
+        Pick<
+          FlightBookingLean,
+          'totalCents' | 'currency' | 'status' | 'holdExpiresAt'
+        >
+      >()
+      .exec();
+    if (!booking) return null;
+    return {
+      amountCents: booking.totalCents,
+      currency: booking.currency,
+      status: booking.status,
+      holdExpiresAt: booking.holdExpiresAt ?? null,
+    };
+  }
+
   async getStatus(id: string): Promise<BookingStatusSnapshot | null> {
     if (!Types.ObjectId.isValid(id)) return null;
     const booking = await this.model
@@ -38,7 +76,10 @@ export class FlightBookingProvider implements BookingProvider, OnModuleInit {
       .lean<Pick<FlightBookingLean, 'status' | 'holdExpiresAt'>>()
       .exec();
     if (!booking) return null;
-    return { status: booking.status, holdExpiresAt: booking.holdExpiresAt ?? null };
+    return {
+      status: booking.status,
+      holdExpiresAt: booking.holdExpiresAt ?? null,
+    };
   }
 
   /**
@@ -147,7 +188,8 @@ export class FlightBookingProvider implements BookingProvider, OnModuleInit {
         userId: outcome.booking.userId.toString(),
         type: NotificationType.BOOKING_CONFIRMED,
         title: 'Flight booking confirmed',
-        message: 'Your payment was received and your flight booking is confirmed.',
+        message:
+          'Your payment was received and your flight booking is confirmed.',
         link: `/flight-bookings/${id}`,
       });
     }

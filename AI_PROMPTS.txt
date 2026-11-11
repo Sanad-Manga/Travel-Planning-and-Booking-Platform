@@ -1217,3 +1217,12 @@ Implement FLT-19 using the existing FLT-22 booking hold and FLT-08 baggage polic
 How the output was used:
 Added POST /api/flight-bookings to create a pending booking with passenger details, deriving passenger types from the flight's local departure date and reusing the atomic seat-hold flow. Reused the airline baggage-policy getter; validated per-passenger bag counts and cabin weight limits, and included the baggage fee in totalCents. Passport/ID numbers are stored but excluded from the response. The flight-booking E2E suite passed (43 tests), the booking-price unit suite passed (4 tests), and the backend build, lint and formatting checks passed.
 ================================================
+Date: 2026-11-11
+Student: Abdulrahman Mohamad Hosny
+Tool: Copilot SDK in VS Code
+Related Requirement: FLT-21
+Prompt:
+Branch from FLT-19 and implement FLT-21: GET /api/flight-bookings/:id returns the pending booking owner's flight, passenger, baggage and total summary; make sure its cents total equals the flight provider's getPayable amount. Update Swagger and E2E tests, verify them, and record the prompt.
+How the output was used:
+Added the owner-only pending summary endpoint, flight and passenger/baggage response details, and a Flights-side getPayable implementation that reads the stored booking total. The endpoint resolves overdue holds through BookingLifecycle before returning the summary. E2E coverage verifies owner authorization, pending status, expiry, payable-total equality and the Swagger document; all 49 flight-booking E2E tests pass. The current Payments BookingProvider interface still lacks the getPayable signature described in docs/contracts.md; flagged this for the lead/Payments owner rather than editing another module.
+================================================
