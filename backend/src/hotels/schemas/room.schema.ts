@@ -2,6 +2,23 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 
 /**
+ * One bookable range of a room (HTL-04). Date-only `YYYY-MM-DD` strings (contracts section 4), half-open:
+ * the nights startDate ... endDate-1 are bookable, endDate is the check-out day. Strings of this shape sort
+ * like dates, so Mongo can compare them with $lt / $gt. Blocked ranges (HTL-05) are a separate concern.
+ */
+@Schema({ _id: true })
+export class AvailabilityRange {
+  _id: Types.ObjectId;
+
+  @Prop({ required: true })
+  startDate: string;
+
+  @Prop({ required: true })
+  endDate: string;
+}
+export const AvailabilityRangeSchema = SchemaFactory.createForClass(AvailabilityRange);
+
+/**
  * Collection `rooms`: ONE individually bookable unit of a hotel (HTL-03).
  * Hotels B (search, holds, bookings) reserves rooms by `_id`; availability (HTL-04) and the
  * edit/delete tickets (HTL-05/06) build on this. Agreed fields for Hotels B: roomId (= `_id`),
@@ -38,6 +55,12 @@ export class Room {
   // false = taken out of sale by the moderator (HTL-06). New rooms are active.
   @Prop({ default: true })
   isActive: boolean;
+
+  // HTL-04: when the room is bookable. Bounded child data, so embedded in the room; this lets the
+  // "no overlap" rule be ONE atomic conditional update (see RoomsService.addAvailability).
+  // Read by Hotels B's hold (HTL-11/18): a night D is bookable if some range has startDate <= D < endDate.
+  @Prop({ type: [AvailabilityRangeSchema], default: [] })
+  availability: AvailabilityRange[];
 
   createdAt?: Date;
   updatedAt?: Date;
