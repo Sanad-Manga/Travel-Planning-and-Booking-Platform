@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsMongoId, IsOptional } from 'class-validator';
-import { IsDateOnly } from './is-date-only.decorator';
+import { IsCalendarDate } from '../../common';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 
@@ -13,7 +13,7 @@ export class UpdateAvailabilityDto {
   @ApiPropertyOptional({ description: 'New first bookable night, YYYY-MM-DD. Omit to keep the current one.', example: '2026-12-03' })
   @IsOptional()
   @Transform(trim)
-  @IsDateOnly()
+  @IsCalendarDate()
   startDate?: string;
 
   @ApiPropertyOptional({
@@ -22,6 +22,6 @@ export class UpdateAvailabilityDto {
   })
   @IsOptional()
   @Transform(trim)
-  @IsDateOnly()
+  @IsCalendarDate()
   endDate?: string;
 }
