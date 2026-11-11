@@ -14,6 +14,7 @@ import {
   Visibility,
 } from '../common';
 import { ReferenceDataService } from '../reference-data/reference-data.service';
+import { ActivitiesService } from './activities.service';
 import { TransportCostsService } from './transport-costs.service';
 import { UsersService } from '../users/users.service';
 import { ActivityDto } from './dto/activity.dto';
@@ -44,6 +45,7 @@ export class ItinerariesService {
     @InjectModel(Itinerary.name) private readonly model: Model<Itinerary>,
     private readonly referenceData: ReferenceDataService,
     private readonly users: UsersService,
+    private readonly activities: ActivitiesService,
     private readonly transportCosts: TransportCostsService,
   ) {}
 
@@ -103,7 +105,7 @@ export class ItinerariesService {
       .lean<ItineraryLean>()
       .exec();
     if (!itinerary) throw new NotFoundException('Itinerary not found');
-    return this.withTransportCosts(itinerary);
+    return this.withActivities(itinerary);
   }
 
   /**
@@ -178,7 +180,7 @@ export class ItinerariesService {
       .lean<ItineraryLean>()
       .exec();
     if (!updated) throw new NotFoundException('Itinerary not found');
-    return this.withTransportCosts(updated);
+    return this.withActivities(updated);
   }
 
   /**
@@ -186,8 +188,8 @@ export class ItinerariesService {
    * search. A clone (ITN-21) is a full independent copy with its own id and owner, so deleting the original
    * never touches it. The confirmation step ("are you sure?") is the client's job (GEN-03).
    *
-   * Days are embedded, so they go with it. Transport costs (ITN-16) are deleted right after. Later tickets that
-   * store activities or budgets in their own collections must delete those rows here too.
+   * Days are embedded, so they go with it. Activities (ITN-10) and transport costs (ITN-16) are deleted right
+   * after. Later tickets that store budgets in their own collection must delete those rows here too.
    */
   async remove(user: AuthenticatedUser, id: string): Promise<void> {
     const result = await this.model
@@ -196,6 +198,7 @@ export class ItinerariesService {
     if (result.deletedCount === 0) {
       throw new NotFoundException('Itinerary not found');
     }
+    await this.activities.removeForItinerary(new Types.ObjectId(id));
     await this.transportCosts.removeForItinerary(new Types.ObjectId(id));
   }
 
@@ -292,14 +295,15 @@ export class ItinerariesService {
     );
   }
 
-  /** The itinerary response with every day's activities (ITN-10) filled in. */
+  /** The itinerary response with every day's activities (ITN-10) and its transport costs (ITN-16) filled in. */
   private async withActivities(
     itinerary: ItineraryLean,
   ): Promise<ItineraryResponseDto> {
-    return toItineraryResponse(
-      itinerary,
-      await this.activities.listByItinerary(itinerary._id),
-    );
+    const [activities, transportCosts] = await Promise.all([
+      this.activities.listByItinerary(itinerary._id),
+      this.transportCosts.listByItinerary(itinerary._id),
+    ]);
+    return toItineraryResponse(itinerary, activities, transportCosts);
   }
 
   /**
@@ -406,16 +410,6 @@ export class ItinerariesService {
     return toItineraryResponse(updated);
   }
 
-  /** The itinerary response with its transport costs (ITN-16) filled in. */
-  private async withTransportCosts(
-    itinerary: ItineraryLean,
-  ): Promise<ItineraryResponseDto> {
-    return toItineraryResponse(
-      itinerary,
-      await this.transportCosts.listByItinerary(itinerary._id),
-    );
-  }
-
   /**
    * ITN-07: the owner deletes one day. ONE atomic update pulls the day out of the array; its filter holds the
    * itinerary id, the owner AND the day id, so a stranger, an unknown day or a day that is already gone all
@@ -426,8 +420,8 @@ export class ItinerariesService {
    * The "are you sure?" step is the client's job (GEN-03).
    *
    * Activities (ITN-10) and transport costs (ITN-16) that belong to the day live in their own collections, so
-   * their rows are deleted here, so budget totals stop counting them. The transport costs of the day are
-   * deleted right after the day is pulled out; activities are added here by ITN-10.
+   * their rows are deleted here, so budget totals stop counting them. The activities and the transport costs
+   * of the day are deleted right after the day is pulled out.
    */
   async removeDay(
     user: AuthenticatedUser,
@@ -448,6 +442,7 @@ export class ItinerariesService {
       .lean()
       .exec();
     if (!updated) throw new NotFoundException('Itinerary or day not found');
+    await this.activities.removeForDay(updated._id, dayObjectId);
     await this.transportCosts.removeForDay(updated._id, dayObjectId);
   }
 
