@@ -152,6 +152,11 @@ export class RoomsService {
     const endDate = dto.endDate ?? current.endDate;
     this.assertEndAfterStart(startDate, endDate);
 
+    // The dates already are what was asked for: nothing to write (a write that changes nothing would look like a conflict).
+    if (startDate === current.startDate && endDate === current.endDate) {
+      return { id: dto.rangeId, roomId, hotelId, startDate, endDate };
+    }
+
     for (const [from, to] of this.removedNights(current, { startDate, endDate })) {
       if (await this.reservations.hasConfirmedReservation(roomId, from, to)) {
         throw new ConflictException(`Availability cannot be removed for ${from} to ${to}: the room has a confirmed reservation then`);

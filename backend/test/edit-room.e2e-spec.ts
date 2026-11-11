@@ -204,6 +204,12 @@ describe('HTL-05 edit room and availability (e2e)', () => {
       expect((await storedRanges(room)).find((r) => r._id.toString() === r1)).toMatchObject({ startDate: '2027-01-02', endDate: '2027-01-10' });
     });
 
+    it('sending the dates the range already has is 200 and changes nothing (not a false 409)', async () => {
+      const res = await editRange(hotelA, room, modA, { rangeId: r1, startDate: '2027-01-02', endDate: '2027-01-10' }).expect(200);
+      expect(res.body).toEqual({ id: r1, roomId: room, hotelId: hotelA, startDate: '2027-01-02', endDate: '2027-01-10' });
+      expect((await storedRanges(room)).find((r) => r._id.toString() === r1)).toMatchObject({ startDate: '2027-01-02', endDate: '2027-01-10' });
+    });
+
     it('409 when the removed dates have a confirmed reservation, and nothing changes', async () => {
       // removes 2027-01-02..2027-01-07 which contains the reservation 01-04..01-06
       const res = await editRange(hotelA, room, modA, { rangeId: r1, startDate: '2027-01-07' }).expect(409);
