@@ -14,7 +14,10 @@ import {
   Visibility,
 } from '../common';
 import { ReferenceDataService } from '../reference-data/reference-data.service';
+import { ActivitiesService } from './activities.service';
+import { TransportCostsService } from './transport-costs.service';
 import { UsersService } from '../users/users.service';
+import { ActivityDto } from './dto/activity.dto';
 import { CreateItineraryDayDto } from './dto/create-itinerary-day.dto';
 import { CreateItineraryDto } from './dto/create-itinerary.dto';
 import { ItineraryDayDto, toItineraryDay } from './dto/itinerary-day.dto';
@@ -31,6 +34,7 @@ import {
   PublicItineraryRowDto,
   toPublicItineraryRow,
 } from './dto/public-itinerary-row.dto';
+import { ReorderDaysDto } from './dto/reorder-days.dto';
 import { UpdateItineraryDayDto } from './dto/update-itinerary-day.dto';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto';
 import { Itinerary, ItineraryLean } from './schemas/itinerary.schema';
@@ -41,6 +45,8 @@ export class ItinerariesService {
     @InjectModel(Itinerary.name) private readonly model: Model<Itinerary>,
     private readonly referenceData: ReferenceDataService,
     private readonly users: UsersService,
+    private readonly activities: ActivitiesService,
+    private readonly transportCosts: TransportCostsService,
   ) {}
 
   /**
@@ -99,7 +105,7 @@ export class ItinerariesService {
       .lean<ItineraryLean>()
       .exec();
     if (!itinerary) throw new NotFoundException('Itinerary not found');
-    return toItineraryResponse(itinerary);
+    return this.withActivities(itinerary);
   }
 
   /**
@@ -174,7 +180,7 @@ export class ItinerariesService {
       .lean<ItineraryLean>()
       .exec();
     if (!updated) throw new NotFoundException('Itinerary not found');
-    return toItineraryResponse(updated);
+    return this.withActivities(updated);
   }
 
   /**
@@ -182,8 +188,8 @@ export class ItinerariesService {
    * search. A clone (ITN-21) is a full independent copy with its own id and owner, so deleting the original
    * never touches it. The confirmation step ("are you sure?") is the client's job (GEN-03).
    *
-   * Days are embedded, so they go with it. Later tickets that store activities, budgets or transport
-   * costs in their own collections must delete those rows here too.
+   * Days are embedded, so they go with it. Activities (ITN-10) and transport costs (ITN-16) are deleted right
+   * after. Later tickets that store budgets in their own collection must delete those rows here too.
    */
   async remove(user: AuthenticatedUser, id: string): Promise<void> {
     const result = await this.model
@@ -192,6 +198,8 @@ export class ItinerariesService {
     if (result.deletedCount === 0) {
       throw new NotFoundException('Itinerary not found');
     }
+    await this.activities.removeForItinerary(new Types.ObjectId(id));
+    await this.transportCosts.removeForItinerary(new Types.ObjectId(id));
   }
 
   /**
@@ -240,7 +248,7 @@ export class ItinerariesService {
         ],
       });
     }
-    return this.dayResponse(updated, dayId);
+    return this.dayResponse(updated, dayId); // a new day has no activities yet
   }
 
   /**
@@ -280,17 +288,173 @@ export class ItinerariesService {
       .lean<ItineraryLean>()
       .exec();
     if (!updated) throw new NotFoundException('Itinerary or day not found');
-    return this.dayResponse(updated, dayObjectId);
+    return this.dayResponse(
+      updated,
+      dayObjectId,
+      await this.activities.listByItinerary(updated._id),
+    );
+  }
+
+  /** The itinerary response with every day's activities (ITN-10) and its transport costs (ITN-16) filled in. */
+  private async withActivities(
+    itinerary: ItineraryLean,
+  ): Promise<ItineraryResponseDto> {
+    const [activities, transportCosts] = await Promise.all([
+      this.activities.listByItinerary(itinerary._id),
+      this.transportCosts.listByItinerary(itinerary._id),
+    ]);
+    return toItineraryResponse(itinerary, activities, transportCosts);
+  }
+
+  /**
+   * ITN-08: the owner moves one day to a new position. The move is ONE atomic update (an aggregation-pipeline
+   * update), not "read the days, reorder in memory, write them back", so two moves at once can never lose or
+   * duplicate a day: each one rebuilds the array from what is stored at that moment.
+   *
+   * Only the order of the stored days changes. Number, date and city grouping are derived from the position
+   * (ITN-05), so they are recalculated by the next read with no extra work, and each day keeps its own
+   * id, city and notes. The filter holds the itinerary id, the owner, the day id AND "the position is not
+   * after the last day": a stranger or an unknown day is 404, a position past the end is 400.
+   */
+  async reorderDay(
+    user: AuthenticatedUser,
+    id: string,
+    dto: ReorderDaysDto,
+  ): Promise<ItineraryResponseDto> {
+    const dayObjectId = new Types.ObjectId(dto.dayId);
+    const ownerFilter = {
+      _id: id,
+      authorId: new Types.ObjectId(user.userId),
+      'days._id': dayObjectId,
+    };
+    const target = dto.position - 1; // 0-based index of the new place
+    const dayCount = { $size: { $ifNull: ['$days', []] } };
+
+    const updated = await this.model
+      .findOneAndUpdate(
+        { ...ownerFilter, $expr: { $lte: [dto.position, dayCount] } },
+        [
+          {
+            $set: {
+              days: {
+                $let: {
+                  vars: {
+                    moved: {
+                      $filter: {
+                        input: '$days',
+                        as: 'day',
+                        cond: { $eq: ['$$day._id', dayObjectId] },
+                      },
+                    },
+                    rest: {
+                      $filter: {
+                        input: '$days',
+                        as: 'day',
+                        cond: { $ne: ['$$day._id', dayObjectId] },
+                      },
+                    },
+                  },
+                  // New array, place by place: the moved day goes to `target`; the others keep their order
+                  // around it (the ones before `target` stay at their index, the later ones shift by one).
+                  in: {
+                    $map: {
+                      input: { $range: [0, dayCount] },
+                      as: 'place',
+                      in: {
+                        $cond: [
+                          { $eq: ['$$place', target] },
+                          { $arrayElemAt: ['$$moved', 0] },
+                          {
+                            $arrayElemAt: [
+                              '$$rest',
+                              {
+                                $cond: [
+                                  { $lt: ['$$place', target] },
+                                  '$$place',
+                                  { $subtract: ['$$place', 1] },
+                                ],
+                              },
+                            ],
+                          },
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+              updatedAt: '$$NOW',
+            },
+          },
+        ],
+        { new: true },
+      )
+      .lean<ItineraryLean>()
+      .exec();
+
+    if (!updated) {
+      // Nothing matched: not the caller's itinerary or day (404), or the position is past the last day.
+      // This read only picks the error; it decides nothing that is then written.
+      if (!(await this.model.exists(ownerFilter))) {
+        throw new NotFoundException('Itinerary or day not found');
+      }
+      throw new BadRequestException({
+        message: 'Validation failed',
+        details: [
+          {
+            field: 'position',
+            message: 'position must not be after the last day of the itinerary',
+          },
+        ],
+      });
+    }
+    return toItineraryResponse(updated);
+  }
+
+  /**
+   * ITN-07: the owner deletes one day. ONE atomic update pulls the day out of the array; its filter holds the
+   * itinerary id, the owner AND the day id, so a stranger, an unknown day or a day that is already gone all
+   * match nothing and answer 404 (two simultaneous deletes of the same day: one wins, the other gets 404).
+   *
+   * Nothing is renumbered or re-dated in the database: a day's number is its position and its date is the
+   * start date + position (ITN-05), so the days after the deleted one move up by themselves, with no gap.
+   * The "are you sure?" step is the client's job (GEN-03).
+   *
+   * Activities (ITN-10) and transport costs (ITN-16) that belong to the day live in their own collections, so
+   * their rows are deleted here, so budget totals stop counting them. The activities and the transport costs
+   * of the day are deleted right after the day is pulled out.
+   */
+  async removeDay(
+    user: AuthenticatedUser,
+    id: string,
+    dayId: string,
+  ): Promise<void> {
+    const dayObjectId = new Types.ObjectId(dayId);
+    const updated = await this.model
+      .findOneAndUpdate(
+        {
+          _id: id,
+          authorId: new Types.ObjectId(user.userId),
+          'days._id': dayObjectId,
+        },
+        { $pull: { days: { _id: dayObjectId } } },
+      )
+      .select('_id')
+      .lean()
+      .exec();
+    if (!updated) throw new NotFoundException('Itinerary or day not found');
+    await this.activities.removeForDay(updated._id, dayObjectId);
+    await this.transportCosts.removeForDay(updated._id, dayObjectId);
   }
 
   /** The DTO of one day, numbered by its current position in the saved itinerary. */
   private dayResponse(
     itinerary: ItineraryLean,
     dayId: Types.ObjectId,
+    activities: ActivityDto[] = [],
   ): ItineraryDayDto {
     const days = itinerary.days ?? [];
     const index = days.findIndex((day) => day._id.equals(dayId));
-    return toItineraryDay(days[index], index, itinerary.startDate);
+    return toItineraryDay(days[index], index, itinerary.startDate, activities);
   }
 
   /** The city must be in the seeded list shared with hotels and airports (GEN-12). */

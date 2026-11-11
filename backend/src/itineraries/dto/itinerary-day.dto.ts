@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { ItineraryDayLean } from '../schemas/itinerary.schema';
+import { ActivityDto } from './activity.dto';
 
 export class ItineraryDayDto {
   @ApiProperty({ example: '674a1b2c3d4e5f6a7b8c9d10' })
@@ -25,6 +26,13 @@ export class ItineraryDayDto {
 
   @ApiProperty({ example: 'Pyramids of Giza in the morning' })
   notes: string;
+
+  @ApiProperty({
+    type: [ActivityDto],
+    description:
+      'The activities planned for this day (ITN-10), by time of day; those without a time come last',
+  })
+  activities: ActivityDto[];
 }
 
 /** `startDate` (YYYY-MM-DD) + `offset` days, as YYYY-MM-DD. Calculated in UTC, so no time zone can shift it. */
@@ -34,17 +42,23 @@ export function addDays(startDate: string, offset: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-/** The day at `index` (0-based) of an itinerary starting on `startDate`. */
+/**
+ * The day at `index` (0-based) of an itinerary starting on `startDate`. `activities` are all the activities of
+ * the itinerary (ITN-10); only the ones planned for this day are kept.
+ */
 export function toItineraryDay(
   day: ItineraryDayLean,
   index: number,
   startDate: string,
+  activities: ActivityDto[] = [],
 ): ItineraryDayDto {
+  const id = day._id.toString();
   return {
-    id: day._id.toString(),
+    id,
     dayNumber: index + 1,
     date: addDays(startDate, index),
     cityId: day.cityId,
     notes: day.notes ?? '',
+    activities: activities.filter((activity) => activity.dayId === id),
   };
 }
