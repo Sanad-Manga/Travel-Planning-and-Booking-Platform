@@ -16,13 +16,15 @@ export function infantFareCents(farePerPassengerCents: number): number {
   return Math.round((farePerPassengerCents * INFANT_FARE_PERCENT) / 100);
 }
 
-/** Total to pay in integer cents (never floats). FLT-19 adds the baggage fee on top of this. */
+/** Total to pay in integer cents (never floats), including any FLT-19 baggage fee. */
 export function bookingTotalCents(
   farePerPassengerCents: number,
   counts: PassengerCountsInput,
+  baggageFeeCents = 0,
 ): number {
   return (
     seatsNeeded(counts) * farePerPassengerCents +
-    counts.infants * infantFareCents(farePerPassengerCents)
+    counts.infants * infantFareCents(farePerPassengerCents) +
+    baggageFeeCents
   );
 }
