@@ -18,3 +18,6 @@ export const ROOM_MAX_PRICE_CENTS = 10_000_000;
 // HTL-10 cancellation tiers. A threshold is a whole number of days; a year ahead is more than any booking allows.
 export const HOTEL_MAX_CANCELLATION_TIERS = 20;
 export const HOTEL_MAX_TIER_DAYS = 365;
+
+// HTL-04: bounded child data embedded in the room, so the no-overlap rule can be one atomic update.
+export const ROOM_MAX_AVAILABILITY_RANGES = 100;
