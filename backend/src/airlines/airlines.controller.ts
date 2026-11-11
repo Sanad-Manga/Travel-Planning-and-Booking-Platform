@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Put } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
@@ -21,6 +21,10 @@ import {
 import { AirlinesService } from './airlines.service';
 import { AirlineIdParamDto } from './dto/airline-id-param.dto';
 import { AirlineResponseDto } from './dto/airline-response.dto';
+import {
+  BaggagePolicyResponseDto,
+  SetBaggagePolicyDto,
+} from './dto/baggage-policy.dto';
 import { CreateAirlineDto } from './dto/create-airline.dto';
 import { UpdateAirlineDto } from './dto/update-airline.dto';
 
@@ -100,5 +104,35 @@ export class AirlinesController {
     @Body() dto: UpdateAirlineDto,
   ) {
     return this.airlines.update(user, params.id, dto);
+  }
+
+  @Put(':id/baggage-policy')
+  @Roles(Role.AIRLINE_MODERATOR)
+  @ApiOperation({
+    summary:
+      'Set the extra-baggage price and the max extra bags per passenger (moderator of that airline only) - FLT-08',
+    description:
+      'Replaces the whole policy. A max of 0 is allowed (no extra bags offered). Each extra bag has the same maximum weight as the free-baggage allowance of the passenger cabin.',
+  })
+  @ApiOkResponse({ type: BaggagePolicyResponseDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description:
+      'Invalid id, price not a whole number of cents > 0, max extra bags negative or not whole, missing or unknown field',
+  })
+  @ApiForbiddenResponse({
+    type: ErrorResponseDto,
+    description: 'Caller is not a moderator of this airline',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'No such airline',
+  })
+  setBaggagePolicy(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: AirlineIdParamDto,
+    @Body() dto: SetBaggagePolicyDto,
+  ) {
+    return this.airlines.setBaggagePolicy(user, params.id, dto);
   }
 }
