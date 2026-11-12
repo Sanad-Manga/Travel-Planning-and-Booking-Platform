@@ -174,6 +174,8 @@ describe('flight search (FLT-11) over HTTP (e2e)', () => {
         departureAirport: 'CAI',
         arrivalAirport: 'JFK',
         departureAt: '2090-12-01T12:30:00.000Z',
+        departureLocal: '2090-12-01T14:30:00+02:00',
+        arrivalLocal: '2090-12-01T19:45:00-05:00',
         departureTimeZone: 'Africa/Cairo',
         arrivalTimeZone: 'America/New_York',
       });
