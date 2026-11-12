@@ -7,16 +7,34 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { AuthenticatedUser, Role } from '../common';
+import { AuthenticatedUser, PLATFORM_CURRENCY, Role } from '../common';
+import {
+  BaggagePolicyResponseDto,
+  EXTRA_BAG_WEIGHT_RULE,
+  SetBaggagePolicyDto,
+} from './dto/baggage-policy.dto';
 import { CreateAirlineDto } from './dto/create-airline.dto';
 import {
   AirlineResponseDto,
   toAirlineResponse,
 } from './dto/airline-response.dto';
 import { UpdateAirlineDto } from './dto/update-airline.dto';
-import { Airline, AirlineLean } from './schemas/airline.schema';
+import { Airline, AirlineLean, BaggagePolicy } from './schemas/airline.schema';
 
 const MONGO_DUPLICATE_KEY = 11000;
+
+function toBaggagePolicyResponse(
+  policy: BaggagePolicy,
+  airlineId: Types.ObjectId,
+): BaggagePolicyResponseDto {
+  return {
+    airlineId: airlineId.toString(),
+    extraBagPriceCents: policy.extraBagPriceCents,
+    currency: PLATFORM_CURRENCY,
+    maxExtraBags: policy.maxExtraBags,
+    extraBagWeightRule: EXTRA_BAG_WEIGHT_RULE,
+  };
+}
 
 @Injectable()
 export class AirlinesService {
@@ -84,6 +102,49 @@ export class AirlinesService {
     } catch (error) {
       throw this.translateDuplicateCode(error);
     }
+  }
+
+  /**
+   * FLT-08: an airline moderator sets (replaces) the extra-baggage price and the per-passenger limit of THEIR
+   * airline. Same ownership rule as the profile edit: another airline's moderator gets 403.
+   */
+  async setBaggagePolicy(
+    user: AuthenticatedUser,
+    id: string,
+    dto: SetBaggagePolicyDto,
+  ): Promise<BaggagePolicyResponseDto> {
+    if (user.role !== Role.AIRLINE_MODERATOR || user.airlineId !== id) {
+      throw new ForbiddenException('You can only edit your own airline');
+    }
+    const updated = await this.model
+      .findByIdAndUpdate(
+        id,
+        {
+          $set: {
+            baggagePolicy: {
+              extraBagPriceCents: dto.extraBagPriceCents,
+              maxExtraBags: dto.maxExtraBags,
+            },
+          },
+        },
+        { new: true, runValidators: true },
+      )
+      .lean<AirlineLean>()
+      .exec();
+    if (!updated) throw new NotFoundException('Airline not found');
+    return toBaggagePolicyResponse(updated.baggagePolicy!, updated._id);
+  }
+
+  /**
+   * The airline's baggage policy, or null when it has not set one yet. For booking (FLT-19) and the
+   * policy shown before payment (PAY-02); they call this instead of reading the collection.
+   */
+  async getBaggagePolicy(
+    airlineId: string,
+  ): Promise<BaggagePolicyResponseDto | null> {
+    const airline = await this.findById(airlineId);
+    if (!airline?.baggagePolicy) return null;
+    return toBaggagePolicyResponse(airline.baggagePolicy, airline._id);
   }
 
   // ---- Used by other modules (Flights FLT-03, Admin ACC-13, flight search) ----
