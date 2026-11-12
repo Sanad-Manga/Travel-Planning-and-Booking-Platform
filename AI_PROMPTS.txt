@@ -1184,6 +1184,15 @@ Implement ONLY ticket HTL-03 (add rooms to a hotel) following docs/contracts.md 
 How the output was used:
 The assistant added the Room schema (unique index on hotelId + lower-cased name), CreateRoomDto and RoomResponseDto, RoomsService (ownership check in the service, 403 for another or unknown hotel as in HTL-01, duplicate settled by the unique index and returned as 409), RoomsController with Swagger decorators, module wiring and 10 e2e tests. I kept the free-text room type and the module-local upper limits (20 beds, 50 guests, 10,000,000 cents) as assumptions, to confirm with the lead and with Hessain. Build, lint, 637 unit tests and the hotels and rooms e2e suites pass locally.
 
+Student: Yusuf Eser
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: HTL-10 (SCRUM) Hotel cancellation tiers (days-before-check-in -> refund %)
+Prompt:
+Implement ONLY ticket HTL-10 following docs/contracts.md and the travel-platform skill: a hotel moderator defines cancellation tiers (unique days-before-check-in threshold >= 0, refund 0-100) with PUT /api/hotels/:id/policies, the tiers are stored with the hotel and exposed through an exported getter, the refund calculation stays in Payments' RefundCalculator, and a moderator can edit only their own hotel. List assumptions first, only touch backend/src/hotels and a new e2e test.
+How the output was used:
+The assistant first read the shared RefundCalculator on develop to reuse its CancellationTier shape (daysBeforeThreshold, refundPercent) and did not copy any calculation. Added: cancellationTiers embedded in the Hotel schema; UpdateHotelPoliciesDto (integer threshold 0-365, integer percent 0-100, max 20 tiers, unknown fields rejected); HotelsService.updatePolicies (403 for any other hotel like HTL-01, duplicate thresholds are a 400 checked in the service, one atomic $set of only cancellationTiers so a later HTL-09 field is not lost and parallel requests leave one complete list); the exported getter HotelsService.getCancellationTiers (largest threshold first, [] when none, 404 for an unknown id); and PUT /api/hotels/:id/policies with Swagger. 25 new e2e tests in hotel-cancellation-tiers.e2e-spec.ts, which also feed the getter output into RefundCalculator.compute. Build, lint, all 637 unit tests and the hotels e2e suites pass locally.
+================================================
+
 Date: 2026-11-08
 Student: Yusuf Eser
 Tool: Claude (Claude Code, Sonnet 5.5)
@@ -1201,3 +1210,27 @@ Prompt:
 Review comment on the HTL-04 PR: hotels/dto/is-date-only.decorator.ts duplicates itineraries/dto/is-calendar-date.decorator.ts. Move the date validator into backend/src/common (contracts keep shared code there) and flag the itineraries touch in the PR.
 How the output was used:
 Moved the itineraries decorator and its spec with git mv to common/validators (names unchanged: IsCalendarDate / isCalendarDate), exported it from common/index.ts, deleted the hotels copy and switched create-availability.dto.ts to it. The only edit in the itineraries module is the import line in create-itinerary.dto.ts. Re-ran build, lint, npm test and the e2e tests.
+Related Requirement: HTL-09 (SCRUM) Hotel check-in / check-out times
+Prompt:
+Implement ONLY ticket HTL-09 following docs/contracts.md and the travel-platform skill: a hotel moderator sets the hotel's standard check-in and check-out times with PUT /api/hotels/:id/policies, the times are part of the hotel details response, invalid formats are rejected, and saving the times must not wipe the cancellation tiers of HTL-10 (and vice versa). List assumptions first, only touch backend/src/hotels and a new e2e test. Afterwards: make the HTL-09 and HTL-10 branches connected so their PRs do not conflict.
+How the output was used:
+HTL-10 (same endpoint, same DTO, same service method) is already pushed, so this branch is stacked on feature/HTL-10-cancellation-tiers: HTL-10 merges first, and the HTL-09 PR shows only its own diff. Added: checkInTime / checkOutTime on the Hotel schema (24-hour "HH:mm" strings in the hotel's local time, null = not set); the two times next to cancellationTiers in UpdateHotelPoliciesDto and HotelPoliciesResponseDto (every field is validated only when sent, pattern 00:00 to 23:59 with two digits each, trimmed, null rejected, unknown fields rejected); HotelsService.updatePolicies now builds ONE atomic $set from only the fields that were sent (400 for an empty body), so saving the times never wipes the tiers and the other way round; the exported getter HotelsService.getPolicies (times + tiers) with getCancellationTiers reusing it; and the two times in HotelResponseDto so the create/PATCH answers (and later GET /hotels/:id) carry them. 27 new e2e tests in hotel-check-times.e2e-spec.ts (13 invalid formats, both-directions "does not wipe" test through the API, parallel requests); the HTL-10 test now also expects the two null times in the answer. Build, lint, all unit tests and the three hotel e2e suites pass locally.
+================================================
+================================================
+
+Date: 2026-11-13
+Student: Ahmed Sanad
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: Team workflow (no ticket)
+Prompt:
+Develop broke after two squash merges and nobody noticed until every PR failed CI. Add guards so it cannot happen again: a git pre-push hook, CI on pushes to develop, and require branches to be up to date before merging.
+How the output was used:
+Added .githooks/pre-push (backend build and lint before every push, tested on a healthy tree and on a broken one), enabled by the backend "prepare" script through scripts/setup-hooks.js (skipped in CI), a .gitattributes rule so the hook keeps LF line endings on Windows, and a push trigger on develop in ci.yml (runs on develop are never cancelled). The up-to-date requirement is a repository ruleset setting, changed separately.
+Date: 2026-11-11
+Student: Ahmed Sanad
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: ITN-08, ITN-09, ITN-10, ITN-16 (repair)
+Prompt:
+CI fails on every open PR. Find out why develop does not build, repair it, and check that every merged itinerary PR still has all of its tests.
+How the output was used:
+The #53 and #54 squash merges each kept only one side of a conflict (cityGroups and the activities wiring were lost), so develop did not compile. The repair is PR #61. A check of the tests of every merged PR then found that the 11 ITN-08 tests (reorder days) of PR #50 were lost too. They are restored here, and the reorder response now carries the activities and transport costs like a GET does, with a new e2e test for it.
