@@ -1,3 +1,6 @@
 # The hook runs in Git Bash on Windows: it must keep LF line endings.
 .githooks/* text eol=lf
 *.sh text eol=lf
+
+# Every PR appends its prompts at the end of this file: when two branches both do, keep both sides instead of a conflict.
+AI_PROMPTS.txt merge=union
