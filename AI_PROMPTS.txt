@@ -1185,14 +1185,18 @@ The assistant first read the shared RefundCalculator on develop to reuse its Can
 Date: 2026-11-11
 Student: Ahmed Sanad
 Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: FLT-04 (SCRUM-46) Cabin categories per flight (seats, price, baggage)
+Prompt:
+Implement ONLY FLT-04: POST /api/flights/:id/cabins and PATCH /api/flights/:id/cabins/:cabinId. A moderator defines cabin categories per flight from the fixed set (Economy, Premium Economy, Business, First), each once per flight, seats a whole number > 0, price > 0 in cents, free baggage (bag count and max kg per bag), and the cabin keeps the booked/held counters used by seat holds. Only the owning airline moderator can add or edit. Build on the cabin schema skeleton Abdulrahman added (FLT-11) and keep its field names.
+How the output was used:
+The assistant added CreateCabinDto, UpdateCabinDto (same rules, all optional, class cannot change), the response DTO (with availableSeats and currency), FlightCabinsService and FlightCabinsController, and 39 e2e tests. Decisions I accepted: another airline flight is 403; unknown flight or cabin 404; a CANCELLED or DEPARTED flight gives 409; a duplicate class is 409 from the existing unique index; PATCH lowers totalSeats only if it stays at or above booked + held, checked inside the same atomic update (409 otherwise); booked and held counters are never accepted from the client. I ran lint, prettier and the cabin, flight and airline tests, and read every file before committing.
 Related Requirement: FLT-08 (SCRUM-47) Extra-baggage price and max extra bags
 Prompt:
 Implement ONLY FLT-08: PUT /api/airlines/:id/baggage-policy. A moderator of that airline sets a price per extra bag (> 0, integer cents) and the maximum number of extra bags per passenger (>= 0, 0 accepted). Each extra bag has the same maximum weight as the cabin free baggage allowance. Only the own airline moderator can set it. Expose a getter other modules (FLT-19, PAY-02) can call.
 How the output was used:
 The assistant added an embedded baggagePolicy on the airline schema, SetBaggagePolicyDto and the response DTO, AirlinesService.setBaggagePolicy (ownership in the service, another airline gives 403) and AirlinesService.getBaggagePolicy (null until set), the PUT route, and 15 e2e tests. Decisions I accepted: PUT replaces the whole policy so both fields are required; no separate extra-bag weight is stored (it is the cabin maxBagWeightKg, stated in the response and Swagger); a cap of 10 extra bags; no new GET endpoint, the policy is read through the service. I ran lint, prettier and the airline unit and e2e tests and read every file before committing.
 ================================================
-=======
-================================================
+
 Date: 2026-11-08
 Student: Yusuf Eser
 Tool: Claude (Claude Code, Sonnet 5.5)
