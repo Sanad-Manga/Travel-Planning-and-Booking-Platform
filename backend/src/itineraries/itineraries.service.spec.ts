@@ -261,6 +261,7 @@ describe('ItinerariesService (ITN-01) with an isolated MongoDB', () => {
           title: 'Newer',
           countryCodes: ['EG', 'AE'],
           startDate: '2026-12-20',
+          dayCount: 0,
           updatedAt: '2026-11-02T10:00:00.000Z',
         },
         expect.objectContaining({ id: older, title: 'Older' }),
