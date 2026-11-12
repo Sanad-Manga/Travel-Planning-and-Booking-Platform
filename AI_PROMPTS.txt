@@ -1172,6 +1172,14 @@ Prompt:
 Implement ONLY ticket HTL-03 (add rooms to a hotel) following docs/contracts.md and the travel-platform skill: POST /api/hotels/:id/rooms, hotel moderator for their own hotel only; room number/name unique within the hotel; fields type, beds, maxOccupancy (>= 1), pricePerNightCents (> 0, integer cents). List assumptions first, only touch backend/src/hotels and a new e2e test.
 How the output was used:
 The assistant added the Room schema (unique index on hotelId + lower-cased name), CreateRoomDto and RoomResponseDto, RoomsService (ownership check in the service, 403 for another or unknown hotel as in HTL-01, duplicate settled by the unique index and returned as 409), RoomsController with Swagger decorators, module wiring and 10 e2e tests. I kept the free-text room type and the module-local upper limits (20 beds, 50 guests, 10,000,000 cents) as assumptions, to confirm with the lead and with Hessain. Build, lint, 637 unit tests and the hotels and rooms e2e suites pass locally.
+
+Student: Yusuf Eser
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: HTL-10 (SCRUM) Hotel cancellation tiers (days-before-check-in -> refund %)
+Prompt:
+Implement ONLY ticket HTL-10 following docs/contracts.md and the travel-platform skill: a hotel moderator defines cancellation tiers (unique days-before-check-in threshold >= 0, refund 0-100) with PUT /api/hotels/:id/policies, the tiers are stored with the hotel and exposed through an exported getter, the refund calculation stays in Payments' RefundCalculator, and a moderator can edit only their own hotel. List assumptions first, only touch backend/src/hotels and a new e2e test.
+How the output was used:
+The assistant first read the shared RefundCalculator on develop to reuse its CancellationTier shape (daysBeforeThreshold, refundPercent) and did not copy any calculation. Added: cancellationTiers embedded in the Hotel schema; UpdateHotelPoliciesDto (integer threshold 0-365, integer percent 0-100, max 20 tiers, unknown fields rejected); HotelsService.updatePolicies (403 for any other hotel like HTL-01, duplicate thresholds are a 400 checked in the service, one atomic $set of only cancellationTiers so a later HTL-09 field is not lost and parallel requests leave one complete list); the exported getter HotelsService.getCancellationTiers (largest threshold first, [] when none, 404 for an unknown id); and PUT /api/hotels/:id/policies with Swagger. 25 new e2e tests in hotel-cancellation-tiers.e2e-spec.ts, which also feed the getter output into RefundCalculator.compute. Build, lint, all 637 unit tests and the hotels e2e suites pass locally.
 ================================================
 
 ================================================
