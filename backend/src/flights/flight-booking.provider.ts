@@ -9,7 +9,10 @@ import {
   BookingStatusSnapshot,
 } from '../payments/booking-provider.interface';
 import { BookingProviderRegistry } from '../payments/booking-provider.registry';
-import { FlightBooking, FlightBookingLean } from './schemas/flight-booking.schema';
+import {
+  FlightBooking,
+  FlightBookingLean,
+} from './schemas/flight-booking.schema';
 
 /**
  * Flights B's side of the booking-provider contract (docs/contracts.md section 7): what BookingLifecycle,
@@ -19,7 +22,8 @@ import { FlightBooking, FlightBookingLean } from './schemas/flight-booking.schem
 @Injectable()
 export class FlightBookingProvider implements BookingProvider, OnModuleInit {
   constructor(
-    @InjectModel(FlightBooking.name) private readonly model: Model<FlightBooking>,
+    @InjectModel(FlightBooking.name)
+    private readonly model: Model<FlightBooking>,
     @InjectConnection() private readonly connection: Connection,
     private readonly inventory: FlightInventoryService,
     private readonly notifications: NotificationsService,
@@ -38,7 +42,10 @@ export class FlightBookingProvider implements BookingProvider, OnModuleInit {
       .lean<Pick<FlightBookingLean, 'status' | 'holdExpiresAt'>>()
       .exec();
     if (!booking) return null;
-    return { status: booking.status, holdExpiresAt: booking.holdExpiresAt ?? null };
+    return {
+      status: booking.status,
+      holdExpiresAt: booking.holdExpiresAt ?? null,
+    };
   }
 
   /**
@@ -147,7 +154,8 @@ export class FlightBookingProvider implements BookingProvider, OnModuleInit {
         userId: outcome.booking.userId.toString(),
         type: NotificationType.BOOKING_CONFIRMED,
         title: 'Flight booking confirmed',
-        message: 'Your payment was received and your flight booking is confirmed.',
+        message:
+          'Your payment was received and your flight booking is confirmed.',
         link: `/flight-bookings/${id}`,
       });
     }
