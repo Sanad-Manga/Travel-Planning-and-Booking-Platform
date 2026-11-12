@@ -2,10 +2,13 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { AuthenticatedUser, MAX_IMAGES_PER_ENTITY, Role } from '../common';
+import type { CancellationTier } from '../payments';
 import { ReferenceDataService } from '../reference-data/reference-data.service';
 import { CreateHotelDto } from './dto/create-hotel.dto';
+import { HotelPoliciesResponseDto } from './dto/hotel-policies-response.dto';
 import { HotelResponseDto } from './dto/hotel-response.dto';
 import { UpdateHotelDto } from './dto/update-hotel.dto';
+import { UpdateHotelPoliciesDto } from './dto/update-hotel-policies.dto';
 import { Hotel, HotelDocument } from './schemas/hotel.schema';
 
 @Injectable()
@@ -65,6 +68,63 @@ export class HotelsService {
     } catch (err) {
       this.rethrowDuplicate(err);
     }
+  }
+
+  /**
+   * HTL-10: a hotel moderator replaces the cancellation tiers of THEIR hotel. Any other hotel id (also an unknown
+   * or malformed one) answers 403, like HTL-01. Uniqueness of the thresholds is a business rule, so it is checked
+   * here. The write is one atomic `$set` of only `cancellationTiers`, so it cannot lose another policy field
+   * (HTL-09) and two parallel requests leave exactly one complete list, never a mix.
+   * The refund amount is NOT calculated here: Payments' RefundCalculator does that from `getCancellationTiers`.
+   */
+  async updatePolicies(id: string, dto: UpdateHotelPoliciesDto, actor: AuthenticatedUser): Promise<HotelPoliciesResponseDto> {
+    if (actor.role !== Role.HOTEL_MODERATOR) throw new ForbiddenException('Only a hotel moderator can edit hotel policies');
+    if (actor.hotelId !== id) throw new ForbiddenException('You can only edit the policies of your own hotel');
+
+    this.assertUniqueThresholds(dto.cancellationTiers);
+    const tiers = dto.cancellationTiers
+      .map((t) => ({ daysBeforeThreshold: t.daysBeforeThreshold, refundPercent: t.refundPercent }))
+      .sort((a, b) => b.daysBeforeThreshold - a.daysBeforeThreshold);
+
+    const updated = await this.hotels
+      .findOneAndUpdate({ _id: id }, { $set: { cancellationTiers: tiers } }, { new: true, runValidators: true })
+      .select('cancellationTiers')
+      .lean();
+    if (!updated) throw new NotFoundException('Hotel not found');
+    return { hotelId: id, cancellationTiers: this.toTiers(updated.cancellationTiers) };
+  }
+
+  /**
+   * HTL-10, exported for other modules: the cancellation tiers of a hotel, largest threshold first, in the shape
+   * `RefundCalculator.compute` expects. A hotel that never set tiers has none ([] = nothing is refunded).
+   * An unknown or malformed id is a 404, not []: silently refunding nothing would hide a bug in the caller.
+   */
+  async getCancellationTiers(hotelId: string): Promise<CancellationTier[]> {
+    if (!/^[0-9a-f]{24}$/i.test(hotelId)) throw new NotFoundException('Hotel not found');
+    const hotel = await this.hotels.findById(hotelId).select('cancellationTiers').lean();
+    if (!hotel) throw new NotFoundException('Hotel not found');
+    return this.toTiers(hotel.cancellationTiers);
+  }
+
+  private toTiers(stored: Array<{ daysBeforeThreshold: number; refundPercent: number }> | undefined): CancellationTier[] {
+    return (stored ?? [])
+      .map((t) => ({ daysBeforeThreshold: t.daysBeforeThreshold, refundPercent: t.refundPercent }))
+      .sort((a, b) => b.daysBeforeThreshold - a.daysBeforeThreshold);
+  }
+
+  private assertUniqueThresholds(tiers: Array<{ daysBeforeThreshold: number }>): void {
+    const seen = new Set<number>();
+    const details: Array<{ field: string; message: string }> = [];
+    tiers.forEach((tier, index) => {
+      if (seen.has(tier.daysBeforeThreshold)) {
+        details.push({
+          field: `cancellationTiers.${index}.daysBeforeThreshold`,
+          message: `daysBeforeThreshold ${tier.daysBeforeThreshold} is used by more than one tier`,
+        });
+      }
+      seen.add(tier.daysBeforeThreshold);
+    });
+    if (details.length > 0) throw new BadRequestException({ message: 'Validation failed', details });
   }
 
   /** The city must be one of the seeded ones; the hotel's country always comes from that city. */

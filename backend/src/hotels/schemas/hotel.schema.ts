@@ -8,6 +8,16 @@ export class HotelPhoto {
 }
 
 /**
+ * One cancellation tier (HTL-10): cancelling at least `daysBeforeThreshold` days before check-in refunds
+ * `refundPercent` percent. Same field names as `CancellationTier` in Payments, which reads them through
+ * `HotelsService.getCancellationTiers`.
+ */
+export class HotelCancellationTier {
+  daysBeforeThreshold: number;
+  refundPercent: number;
+}
+
+/**
  * Collection `hotels`. Rooms (HTL-03), policies (HTL-09/10) and bookings reference it by `_id`;
  * Hotels B search (HTL-11) and Admin (ACC-15) read `isActive`, `cityId`, `starRating` and `amenities`.
  * Do not rename these fields without telling those owners.
@@ -44,6 +54,20 @@ export class Hotel {
 
   @Prop({ type: [String], default: [] })
   amenities: string[];
+
+  // HTL-10: bounded child data (max HOTEL_MAX_CANCELLATION_TIERS), so embedded. Thresholds are unique and stored
+  // from the largest to the smallest. Empty = nothing is refunded. Written only by HotelsService.updatePolicies.
+  @Prop({
+    type: [
+      {
+        _id: false,
+        daysBeforeThreshold: { type: Number, required: true, min: 0 },
+        refundPercent: { type: Number, required: true, min: 0, max: 100 },
+      },
+    ],
+    default: [],
+  })
+  cancellationTiers: HotelCancellationTier[];
 
   // false = deactivated by Admin (ACC-15): hidden from search and not bookable. This ticket never changes it.
   @Prop({ default: true })
