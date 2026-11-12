@@ -13,6 +13,12 @@ GIU Software Project I (Winter 2026). NestJS backend, Next.js frontend, MongoDB 
 Branch from `develop`: `feature/<REQ-ID>-short-name`. PR into `develop`, reviewed by the team lead.
 `develop` merges into `main` at each milestone. Never commit `.env`.
 
+Keep `develop` green:
+- `npm ci` in `backend/` also turns on a `pre-push` hook (`.githooks/pre-push`): before every `git push` the backend must build and lint (about a minute). Skip once with `git push --no-verify`.
+- Always run `npm run build` after resolving merge conflicts, and never resolve conflicts in the GitHub web editor: it skips every local check (this is how `develop` broke after #53/#54).
+- After another PR merges, use "Update branch" (or `git merge origin/develop`) on yours and wait for CI again before merging.
+- CI also runs on every push to `develop`: a red run there means the last merge broke it, tell the lead at once.
+
 ## Setup (backend)
 Requires Node 22 or newer.
 

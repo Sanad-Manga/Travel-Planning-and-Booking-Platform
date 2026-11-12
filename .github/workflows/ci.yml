@@ -1,16 +1,19 @@
 name: CI
 
-# Runs on every pull request into develop. Same steps as the manual review:
-# clean install from the lock file, build, lint, unit tests, e2e tests.
+# Runs on every pull request into develop AND on every push to develop (a merge). Same steps as the manual
+# review: clean install from the lock file, build, lint, unit tests, e2e tests.
+# The push run is the alarm: a merge that breaks develop shows up as a red run on develop within minutes.
 # No secrets needed: the tests use an in-memory MongoDB (mongodb-memory-server).
 on:
   pull_request:
     branches: [develop]
+  push:
+    branches: [develop]
 
-# A newer push to the same PR cancels the older run.
+# A newer push to the same PR cancels the older run. Runs on develop are never cancelled: each merge is checked.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   backend:
