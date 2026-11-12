@@ -2,7 +2,9 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AirlinesModule } from '../airlines';
 import { ReferenceDataModule } from '../reference-data/reference-data.module';
+import { FlightCabinsController } from './flight-cabins.controller';
 import { FlightCabinsReader } from './flight-cabins.reader';
+import { FlightCabinsService } from './flight-cabins.service';
 import { FlightSearchController } from './flight-search.controller';
 import { FlightSearchService } from './flight-search.service';
 import { FlightsController } from './flights.controller';
@@ -20,8 +22,17 @@ import { Flight, FlightSchema } from './schemas/flight.schema';
     ReferenceDataModule,
   ],
   // FlightSearchController is listed first so GET /flights/search can never be captured by a future GET /flights/:id.
-  controllers: [FlightSearchController, FlightsController],
-  providers: [FlightsService, FlightSearchService, FlightCabinsReader],
+  controllers: [
+    FlightSearchController,
+    FlightsController,
+    FlightCabinsController,
+  ],
+  providers: [
+    FlightsService,
+    FlightSearchService,
+    FlightCabinsReader,
+    FlightCabinsService,
+  ],
   exports: [FlightsService],
 })
 export class FlightsModule {}
