@@ -1,4 +1,4 @@
-import { Body, Controller, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Param, Patch, Post, Put } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
@@ -13,8 +13,10 @@ import {
 } from '@nestjs/swagger';
 import { AuthenticatedUser, CurrentUser, ErrorResponseDto, Role, Roles } from '../common';
 import { CreateHotelDto } from './dto/create-hotel.dto';
+import { HotelPoliciesResponseDto } from './dto/hotel-policies-response.dto';
 import { HotelResponseDto } from './dto/hotel-response.dto';
 import { UpdateHotelDto } from './dto/update-hotel.dto';
+import { UpdateHotelPoliciesDto } from './dto/update-hotel-policies.dto';
 import { HotelsService } from './hotels.service';
 
 @ApiTags('hotels')
@@ -50,5 +52,27 @@ export class HotelsController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<HotelResponseDto> {
     return this.hotelsService.update(id, dto, user);
+  }
+
+  @Put(':id/policies')
+  @Roles(Role.HOTEL_MODERATOR)
+  @ApiOperation({
+    summary:
+      'Set the cancellation tiers of the hotel (hotel moderator, own hotel only). The list is replaced as a whole. A tier says: cancelling at least daysBeforeThreshold days before check-in refunds refundPercent %. Thresholds must be unique.',
+  })
+  @ApiOkResponse({ type: HotelPoliciesResponseDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: 'Missing or invalid list, threshold < 0 or not a whole number, percent outside 0-100, duplicate threshold, too many tiers, unknown field',
+  })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto, description: 'Not logged in' })
+  @ApiForbiddenResponse({ type: ErrorResponseDto, description: "Not a hotel moderator, or not the moderator's own hotel" })
+  @ApiNotFoundResponse({ type: ErrorResponseDto, description: "The moderator's own hotel no longer exists" })
+  updatePolicies(
+    @Param('id') id: string,
+    @Body() dto: UpdateHotelPoliciesDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<HotelPoliciesResponseDto> {
+    return this.hotelsService.updatePolicies(id, dto, user);
   }
 }
