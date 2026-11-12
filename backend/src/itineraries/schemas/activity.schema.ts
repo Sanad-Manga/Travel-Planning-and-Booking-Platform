@@ -6,6 +6,20 @@ export const ACTIVITY_NAME_MAX_LENGTH = 100;
 export const ACTIVITY_DESCRIPTION_MAX_LENGTH = 2000;
 
 /**
+ * One image attached to an activity (ITN-12): the reference the shared upload service (GEN-08) returned. `id` is the
+ * upload id (what `UploadService.remove` takes) and `url` is the public path of the stored file.
+ */
+@Schema({ _id: false })
+export class ActivityImage {
+  @Prop({ type: String, required: true })
+  id: string;
+
+  @Prop({ type: String, required: true })
+  url: string;
+}
+export const ActivityImageSchema = SchemaFactory.createForClass(ActivityImage);
+
+/**
  * One activity planned for a day of an itinerary (ITN-10), collection `activities`. It lives in its own
  * collection, not inside the day, because the API addresses it by its own id (PATCH/DELETE /api/activities/:id)
  * and because images (ITN-12) and the budget (ITN-14) read activities across days.
@@ -60,6 +74,13 @@ export class Activity {
     },
   })
   costCents?: number;
+
+  /**
+   * The images attached to the activity (ITN-12), at most 5 (the upload service enforces the limit). Only
+   * references are stored here; the files and their count live in the upload service.
+   */
+  @Prop({ type: [ActivityImageSchema], default: [] })
+  images: ActivityImage[];
 }
 
 export type ActivityDocument = HydratedDocument<Activity>;

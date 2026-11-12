@@ -5,12 +5,17 @@ import { Test } from '@nestjs/testing';
 import { hashSync } from 'bcryptjs';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { Connection, Types } from 'mongoose';
+import { promises as fs } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import sharp from 'sharp';
 import request from 'supertest';
 import { AuthModule } from '../src/auth/auth.module';
 import { Role } from '../src/common';
 import configuration from '../src/config/configuration';
 import { ItinerariesModule } from '../src/itineraries';
 import { setupApp, setupSwagger } from '../src/setup-app';
+import { UPLOAD_OPTIONS } from '../src/uploads/upload-options';
 import {
   TEST_ACCESS_SECRET,
   TEST_REFRESH_SECRET,
@@ -20,6 +25,8 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
   let app: INestApplication;
   let mongo: MongoMemoryServer;
   let connection: Connection;
+  let uploadRoot: string;
+  let png: Buffer;
 
   const PASSWORD = 'Passw0rdOK';
   const http = () => request(app.getHttpServer());
@@ -71,6 +78,12 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
     process.env.COOKIE_SECURE = 'false';
 
     mongo = await MongoMemoryServer.create();
+    uploadRoot = await fs.mkdtemp(join(tmpdir(), 'itn12-e2e-'));
+    png = await sharp({
+      create: { width: 4, height: 4, channels: 3, background: '#c00' },
+    })
+      .png()
+      .toBuffer();
     const moduleRef = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({
@@ -82,7 +95,15 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
         AuthModule,
         ItinerariesModule,
       ],
-    }).compile();
+    })
+      .overrideProvider(UPLOAD_OPTIONS)
+      .useValue({
+        root: uploadRoot,
+        leaseMs: 60_000,
+        recoveryIntervalMs: 3_600_000,
+        recoveryBatchSize: 50,
+      })
+      .compile();
     app = moduleRef.createNestApplication();
     setupApp(app);
     setupSwagger(app);
@@ -115,6 +136,7 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
   afterAll(async () => {
     await app?.close();
     await mongo?.stop();
+    await fs.rm(uploadRoot, { recursive: true, force: true });
   });
 
   describe('POST /api/itineraries', () => {
@@ -944,6 +966,7 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
         time: '08:30',
         costCents: 3500,
         currency: expect.any(String),
+        images: [],
       });
 
       const itinerary = await http()
@@ -1144,6 +1167,162 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
           dayId: new Types.ObjectId(second.body.id),
         }),
       ).toBe(1);
+    });
+  });
+
+  describe('activity images (ITN-12)', () => {
+    const attach = (cookie: string | undefined, activityId: string) => {
+      const req = http().post(`/api/activities/${activityId}/images`);
+      return cookie ? req.set('Cookie', cookie) : req;
+    };
+    const removeImage = (
+      cookie: string | undefined,
+      activityId: string,
+      imageId: string,
+    ) => {
+      const req = http().delete(
+        `/api/activities/${activityId}/images/${imageId}`,
+      );
+      return cookie ? req.set('Cookie', cookie) : req;
+    };
+    const withActivity = async () => {
+      const { id } = await createAs(alice);
+      const day = await http()
+        .post(`/api/itineraries/${id}/days`)
+        .set('Cookie', alice)
+        .send({ cityId: 'cairo' })
+        .expect(201);
+      const activity = await http()
+        .post(`/api/itineraries/${id}/days/${day.body.id}/activities`)
+        .set('Cookie', alice)
+        .send({ name: 'Pyramids' })
+        .expect(201);
+      return { itineraryId: id, activityId: activity.body.id as string };
+    };
+    const sendPng = (req: request.Test) =>
+      req.attach('image', png, {
+        filename: 'photo.png',
+        contentType: 'image/png',
+      });
+
+    it('attaches an image (201): the activity comes back with it and the itinerary shows it', async () => {
+      const { itineraryId, activityId } = await withActivity();
+
+      const res = await sendPng(attach(alice, activityId)).expect(201);
+
+      expect(res.body.images).toEqual([
+        {
+          id: expect.stringMatching(/^[0-9a-f]{24}$/),
+          url: expect.stringMatching(/^\/uploads\/[0-9a-f]{24}\.png$/),
+        },
+      ]);
+      const itinerary = await http()
+        .get(`/api/itineraries/${itineraryId}`)
+        .set('Cookie', alice)
+        .expect(200);
+      expect(itinerary.body.days[0].activities[0].images).toEqual(
+        res.body.images,
+      );
+    });
+
+    it('400 for a file that is not a JPG or PNG, a disguised file, no file, or a malformed activity id', async () => {
+      const { activityId } = await withActivity();
+      await attach(alice, activityId)
+        .attach('image', Buffer.from('hello'), {
+          filename: 'a.txt',
+          contentType: 'text/plain',
+        })
+        .expect(400);
+      await attach(alice, activityId)
+        .attach('image', Buffer.from('not a png'), {
+          filename: 'a.png',
+          contentType: 'image/png',
+        })
+        .expect(400);
+      await attach(alice, activityId).expect(400);
+      await sendPng(attach(alice, 'not-an-id')).expect(400);
+    });
+
+    it('413 for a file over 5 MB', async () => {
+      const { activityId } = await withActivity();
+      await attach(alice, activityId)
+        .attach('image', Buffer.alloc(5 * 1024 * 1024 + 1), {
+          filename: 'big.png',
+          contentType: 'image/png',
+        })
+        .expect(413);
+    });
+
+    it('409 for a 6th image; the five stay', async () => {
+      const { itineraryId, activityId } = await withActivity();
+      for (let i = 0; i < 5; i++) {
+        await sendPng(attach(alice, activityId)).expect(201);
+      }
+
+      await sendPng(attach(alice, activityId)).expect(409);
+
+      const itinerary = await http()
+        .get(`/api/itineraries/${itineraryId}`)
+        .set('Cookie', alice)
+        .expect(200);
+      expect(itinerary.body.days[0].activities[0].images).toHaveLength(5);
+    });
+
+    it('removes an image (204): the reference goes from the activity; a second remove is 404', async () => {
+      const { itineraryId, activityId } = await withActivity();
+      const res = await sendPng(attach(alice, activityId)).expect(201);
+      const [image] = res.body.images;
+
+      await removeImage(alice, activityId, image.id).expect(204);
+      await removeImage(alice, activityId, image.id).expect(404);
+
+      const itinerary = await http()
+        .get(`/api/itineraries/${itineraryId}`)
+        .set('Cookie', alice)
+        .expect(200);
+      expect(itinerary.body.days[0].activities[0].images).toEqual([]);
+    });
+
+    it('404 when someone else attaches or removes, or the image belongs to another activity; 400 for malformed ids', async () => {
+      const { activityId } = await withActivity();
+      const other = await withActivity();
+      const res = await sendPng(attach(alice, activityId)).expect(201);
+      const [image] = res.body.images;
+
+      await sendPng(attach(bob, activityId)).expect(404);
+      await removeImage(bob, activityId, image.id).expect(404);
+      await removeImage(alice, other.activityId, image.id).expect(404);
+      await removeImage(alice, activityId, '674a1b2c3d4e5f6a7b8c9d0e').expect(
+        404,
+      );
+      await sendPng(attach(alice, '674a1b2c3d4e5f6a7b8c9d0e')).expect(404);
+      await removeImage(alice, activityId, 'not-an-id').expect(400);
+      await removeImage(alice, 'not-an-id', image.id).expect(400);
+
+      // still there after all of that
+      await removeImage(alice, activityId, image.id).expect(204);
+    });
+
+    it('401 without a cookie, 403 for an admin or moderator', async () => {
+      const { activityId } = await withActivity();
+      const res = await sendPng(attach(alice, activityId)).expect(201);
+      const [image] = res.body.images;
+
+      await sendPng(attach(undefined, activityId)).expect(401);
+      await removeImage(undefined, activityId, image.id).expect(401);
+      for (const cookie of [admin, airlineMod]) {
+        await sendPng(attach(cookie, activityId)).expect(403);
+        await removeImage(cookie, activityId, image.id).expect(403);
+      }
+    });
+
+    it('Swagger documents both routes as multipart / delete', async () => {
+      const res = await http().get('/api/docs-json').expect(200);
+      const post = res.body.paths['/api/activities/{id}/images'].post;
+      expect(post.requestBody.content['multipart/form-data']).toBeDefined();
+      expect(
+        res.body.paths['/api/activities/{id}/images/{imageId}'].delete,
+      ).toBeDefined();
     });
   });
 

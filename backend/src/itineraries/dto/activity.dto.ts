@@ -2,6 +2,21 @@ import { ApiProperty } from '@nestjs/swagger';
 import { PLATFORM_CURRENCY } from '../../common';
 import { ActivityLean } from '../schemas/activity.schema';
 
+export class ActivityImageDto {
+  @ApiProperty({
+    example: '674a1b2c3d4e5f6a7b8c9d50',
+    description: 'The image id; use it to remove the image',
+  })
+  id: string;
+
+  @ApiProperty({
+    example: '/uploads/674a1b2c3d4e5f6a7b8c9d50.png',
+    description:
+      'Public path of the file on the backend origin (without /api), as the upload service returned it',
+  })
+  url: string;
+}
+
 export class ActivityDto {
   @ApiProperty({ example: '674a1b2c3d4e5f6a7b8c9d20' })
   id: string;
@@ -43,6 +58,13 @@ export class ActivityDto {
 
   @ApiProperty({ example: PLATFORM_CURRENCY })
   currency: string;
+
+  @ApiProperty({
+    type: [ActivityImageDto],
+    description:
+      'The images attached to the activity (ITN-12), at most 5, in the order they were attached',
+  })
+  images: ActivityImageDto[];
 }
 
 /** Response DTO, never the raw document: `_id` becomes `id`, ids are strings, missing time/cost become null. */
@@ -56,5 +78,6 @@ export function toActivityDto(doc: ActivityLean): ActivityDto {
     time: doc.time ?? null,
     costCents: doc.costCents ?? null,
     currency: PLATFORM_CURRENCY,
+    images: (doc.images ?? []).map(({ id, url }) => ({ id, url })),
   };
 }
