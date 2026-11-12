@@ -1201,3 +1201,13 @@ Prompt:
 Review comment on the HTL-04 PR: hotels/dto/is-date-only.decorator.ts duplicates itineraries/dto/is-calendar-date.decorator.ts. Move the date validator into backend/src/common (contracts keep shared code there) and flag the itineraries touch in the PR.
 How the output was used:
 Moved the itineraries decorator and its spec with git mv to common/validators (names unchanged: IsCalendarDate / isCalendarDate), exported it from common/index.ts, deleted the hotels copy and switched create-availability.dto.ts to it. The only edit in the itineraries module is the import line in create-itinerary.dto.ts. Re-ran build, lint, npm test and the e2e tests.
+================================================
+
+Date: 2026-11-11
+Student: Ahmed Sanad
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: ITN-08, ITN-09, ITN-10, ITN-16 (repair)
+Prompt:
+CI fails on every open PR. Find out why develop does not build, repair it, and check that every merged itinerary PR still has all of its tests.
+How the output was used:
+The #53 and #54 squash merges each kept only one side of a conflict (cityGroups and the activities wiring were lost), so develop did not compile. The repair is PR #61. A check of the tests of every merged PR then found that the 11 ITN-08 tests (reorder days) of PR #50 were lost too. They are restored here, and the reorder response now carries the activities and transport costs like a GET does, with a new e2e test for it.
