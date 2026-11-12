@@ -18,14 +18,20 @@ describe('booking price (FLT-22)', () => {
   });
 
   it('total = (adults + children) x fare + infants x infant fare, in integer cents', () => {
-    expect(bookingTotalCents(45000, { adults: 2, children: 1, infants: 1 })).toBe(
-      3 * 45000 + 4500,
-    );
-    expect(bookingTotalCents(45000, { adults: 1, children: 0, infants: 0 })).toBe(45000);
+    expect(
+      bookingTotalCents(45000, { adults: 2, children: 1, infants: 1 }),
+    ).toBe(3 * 45000 + 4500);
+    expect(
+      bookingTotalCents(45000, { adults: 1, children: 0, infants: 0 }),
+    ).toBe(45000);
   });
 
   it('always returns a whole number of cents', () => {
-    const total = bookingTotalCents(12345, { adults: 3, children: 2, infants: 3 });
+    const total = bookingTotalCents(12345, {
+      adults: 3,
+      children: 2,
+      infants: 3,
+    });
     expect(Number.isInteger(total)).toBe(true);
   });
 });

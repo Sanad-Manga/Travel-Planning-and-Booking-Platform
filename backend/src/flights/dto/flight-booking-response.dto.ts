@@ -11,9 +11,14 @@ export class PassengerCountsDto {
 export class FlightBookingResponseDto {
   @ApiProperty({ example: '674a1b2c3d4e5f6a7b8c9d0f' }) id: string;
   @ApiProperty({ example: '674a1b2c3d4e5f6a7b8c9d0e' }) flightId: string;
-  @ApiProperty({ enum: CabinClass, example: CabinClass.ECONOMY }) cabinClass: CabinClass;
-  @ApiProperty({ type: PassengerCountsDto }) passengerCounts: PassengerCountsDto;
-  @ApiProperty({ example: 3, description: 'Seats held: adults + children (infants take none)' })
+  @ApiProperty({ enum: CabinClass, example: CabinClass.ECONOMY })
+  cabinClass: CabinClass;
+  @ApiProperty({ type: PassengerCountsDto })
+  passengerCounts: PassengerCountsDto;
+  @ApiProperty({
+    example: 3,
+    description: 'Seats held: adults + children (infants take none)',
+  })
   seats: number;
   @ApiProperty({ example: 45000, description: 'Fare per adult/child in cents' })
   farePerPassengerCents: number;
@@ -27,14 +32,17 @@ export class FlightBookingResponseDto {
   @ApiProperty({
     example: '2026-11-07T12:10:00.000Z',
     nullable: true,
-    description: 'UTC. The seats are released if the booking is not paid by then.',
+    description:
+      'UTC. The seats are released if the booking is not paid by then.',
   })
   holdExpiresAt: string | null;
   @ApiProperty({ example: '2026-11-07T12:00:00.000Z' }) createdAt: string;
 }
 
 /** Response DTO, never the raw document: `_id` becomes `id`, ObjectIds become strings, `__v` is dropped. */
-export function toFlightBookingResponse(doc: FlightBookingLean): FlightBookingResponseDto {
+export function toFlightBookingResponse(
+  doc: FlightBookingLean,
+): FlightBookingResponseDto {
   return {
     id: doc._id.toString(),
     flightId: doc.flightId.toString(),

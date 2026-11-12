@@ -59,7 +59,10 @@ export class FlightBookingsController {
     description:
       'Not enough seats left, or the flight is cancelled, departed or its airline is deactivated',
   })
-  hold(@CurrentUser() user: AuthenticatedUser, @Body() dto: HoldFlightBookingDto) {
+  hold(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: HoldFlightBookingDto,
+  ) {
     return this.bookings.hold(user, dto);
   }
 }

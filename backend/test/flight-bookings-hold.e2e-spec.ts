@@ -172,15 +172,27 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
     await bookingModel.init();
 
     await connection.collection('airports').insertMany([
-      { iata_code: 'CAI', name: 'Cairo', city_id: 'c1', country_code: 'EG', time_zone: 'Africa/Cairo' },
-      { iata_code: 'JFK', name: 'John F. Kennedy', city_id: 'c2', country_code: 'US', time_zone: 'America/New_York' },
+      {
+        iata_code: 'CAI',
+        name: 'Cairo',
+        city_id: 'c1',
+        country_code: 'EG',
+        time_zone: 'Africa/Cairo',
+      },
+      {
+        iata_code: 'JFK',
+        name: 'John F. Kennedy',
+        city_id: 'c2',
+        country_code: 'US',
+        time_zone: 'America/New_York',
+      },
     ]);
 
     admin = await loginAs('admin@example.com', { role: Role.ADMIN });
     traveler = await loginAs('traveler@example.com');
-    travelerId = (
-      await connection.collection('users').findOne({ email: 'traveler@example.com' })
-    )!._id.toString();
+    travelerId = (await connection
+      .collection('users')
+      .findOne({ email: 'traveler@example.com' }))!._id.toString();
     airline = (
       await http()
         .post('/api/airlines')
@@ -208,7 +220,10 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
     );
     await connection
       .collection('airlines')
-      .updateOne({ _id: new Types.ObjectId(airline.id) }, { $set: { isActive: true } });
+      .updateOne(
+        { _id: new Types.ObjectId(airline.id) },
+        { $set: { isActive: true } },
+      );
   });
 
   describe('POST /api/flight-bookings/hold', () => {
@@ -242,7 +257,10 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       expect(expiresIn).toBeGreaterThan(9 * 60_000);
       expect(expiresIn).toBeLessThan(11 * 60_000);
 
-      expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 8, bookedSeats: 30 });
+      expect(await cabinOf(flightId)).toMatchObject({
+        heldSeats: 8,
+        bookedSeats: 30,
+      });
       const stored = await connection
         .collection('flightBookings')
         .findOne({ _id: new Types.ObjectId(res.body.id) });
@@ -268,8 +286,16 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
     it('a cabin with exactly the seats needed can be held; the next request gets 409', async () => {
       const flightId = await createFlight();
       await addCabin(flightId, 'ECONOMY', 1);
-      await http().post(HOLD).set('Cookie', traveler).send(body(flightId)).expect(201);
-      await http().post(HOLD).set('Cookie', traveler).send(body(flightId)).expect(409);
+      await http()
+        .post(HOLD)
+        .set('Cookie', traveler)
+        .send(body(flightId))
+        .expect(201);
+      await http()
+        .post(HOLD)
+        .set('Cookie', traveler)
+        .send(body(flightId))
+        .expect(409);
       expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 1 });
     });
 
@@ -290,12 +316,21 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
     });
 
     describe('validation (400, nothing is held)', () => {
-      const failsOn = async (payload: Record<string, unknown>, field: string) => {
-        const res = await http().post(HOLD).set('Cookie', traveler).send(payload).expect(400);
+      const failsOn = async (
+        payload: Record<string, unknown>,
+        field: string,
+      ) => {
+        const res = await http()
+          .post(HOLD)
+          .set('Cookie', traveler)
+          .send(payload)
+          .expect(400);
         expect(res.body.details).toEqual(
           expect.arrayContaining([expect.objectContaining({ field })]),
         );
-        expect(await connection.collection('flightBookings').countDocuments()).toBe(0);
+        expect(
+          await connection.collection('flightBookings').countDocuments(),
+        ).toBe(0);
       };
 
       it('no adult', async () => {
@@ -324,12 +359,19 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
         const flightId = await createFlight();
         await addCabin(flightId, 'ECONOMY', 10);
         await failsOn(body(flightId, { totalCents: 1 }), 'totalCents');
-        await failsOn(body(flightId, { userId: new Types.ObjectId().toString() }), 'userId');
+        await failsOn(
+          body(flightId, { userId: new Types.ObjectId().toString() }),
+          'userId',
+        );
         await failsOn(body(flightId, { status: 'CONFIRMED' }), 'status');
       });
 
       it('errors use the contract shape', async () => {
-        const res = await http().post(HOLD).set('Cookie', traveler).send({}).expect(400);
+        const res = await http()
+          .post(HOLD)
+          .set('Cookie', traveler)
+          .send({})
+          .expect(400);
         expect(res.body).toMatchObject({
           statusCode: 400,
           error: 'Bad Request',
@@ -366,19 +408,34 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
           .set('Cookie', traveler)
           .send(body(flightId, { adults: 3 }))
           .expect(409);
-        expect(await cabinOf(flightId)).toMatchObject({ bookedSeats: 2, heldSeats: 1 });
-        expect(await connection.collection('flightBookings').countDocuments()).toBe(0);
+        expect(await cabinOf(flightId)).toMatchObject({
+          bookedSeats: 2,
+          heldSeats: 1,
+        });
+        expect(
+          await connection.collection('flightBookings').countDocuments(),
+        ).toBe(0);
       });
 
-      it.each(['CANCELLED', 'DEPARTED'])('a %s flight cannot be held: 409', async (status) => {
-        const flightId = await createFlight();
-        await addCabin(flightId, 'ECONOMY', 10);
-        await connection
-          .collection('flights')
-          .updateOne({ _id: new Types.ObjectId(flightId) }, { $set: { status } });
-        await http().post(HOLD).set('Cookie', traveler).send(body(flightId)).expect(409);
-        expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0 });
-      });
+      it.each(['CANCELLED', 'DEPARTED'])(
+        'a %s flight cannot be held: 409',
+        async (status) => {
+          const flightId = await createFlight();
+          await addCabin(flightId, 'ECONOMY', 10);
+          await connection
+            .collection('flights')
+            .updateOne(
+              { _id: new Types.ObjectId(flightId) },
+              { $set: { status } },
+            );
+          await http()
+            .post(HOLD)
+            .set('Cookie', traveler)
+            .send(body(flightId))
+            .expect(409);
+          expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0 });
+        },
+      );
 
       it('a flight whose departure has passed cannot be held: 409', async () => {
         const flightId = await createFlight();
@@ -389,7 +446,11 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
             { _id: new Types.ObjectId(flightId) },
             { $set: { departureAt: new Date(Date.now() - 3_600_000) } },
           );
-        await http().post(HOLD).set('Cookie', traveler).send(body(flightId)).expect(409);
+        await http()
+          .post(HOLD)
+          .set('Cookie', traveler)
+          .send(body(flightId))
+          .expect(409);
       });
 
       it('a deactivated airline cannot be booked: 409', async () => {
@@ -397,14 +458,24 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
         await addCabin(flightId, 'ECONOMY', 10);
         await connection
           .collection('airlines')
-          .updateOne({ _id: new Types.ObjectId(airline.id) }, { $set: { isActive: false } });
-        await http().post(HOLD).set('Cookie', traveler).send(body(flightId)).expect(409);
+          .updateOne(
+            { _id: new Types.ObjectId(airline.id) },
+            { $set: { isActive: false } },
+          );
+        await http()
+          .post(HOLD)
+          .set('Cookie', traveler)
+          .send(body(flightId))
+          .expect(409);
       });
     });
 
     describe('who may call it', () => {
       it('a guest gets 401', async () => {
-        await http().post(HOLD).send(body(new Types.ObjectId().toString())).expect(401);
+        await http()
+          .post(HOLD)
+          .send(body(new Types.ObjectId().toString()))
+          .expect(401);
       });
 
       it.each([
@@ -434,7 +505,10 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
         expect(statuses.filter((s) => s === 201)).toHaveLength(5);
         expect(statuses.filter((s) => s === 409)).toHaveLength(15);
         expect(statuses.every((s) => s === 201 || s === 409)).toBe(true);
-        expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 5, bookedSeats: 0 });
+        expect(await cabinOf(flightId)).toMatchObject({
+          heldSeats: 5,
+          bookedSeats: 0,
+        });
         expect(
           await connection
             .collection('flightBookings')
@@ -448,12 +522,17 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
 
         const results = await Promise.all(
           Array.from({ length: 8 }, () =>
-            http().post(HOLD).set('Cookie', traveler).send(body(flightId, { adults: 2 })),
+            http()
+              .post(HOLD)
+              .set('Cookie', traveler)
+              .send(body(flightId, { adults: 2 })),
           ),
         );
 
         expect(results.filter((r) => r.status === 201)).toHaveLength(2);
-        expect(results.every((r) => r.status === 201 || r.status === 409)).toBe(true);
+        expect(results.every((r) => r.status === 201 || r.status === 409)).toBe(
+          true,
+        );
         expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 4 });
       }, 90_000);
     });
@@ -461,12 +540,20 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
     it('is atomic: if the booking cannot be saved, the seats are not held either (rollback)', async () => {
       const flightId = await createFlight();
       await addCabin(flightId, 'ECONOMY', 10);
-      jest.spyOn(bookingModel, 'create').mockRejectedValueOnce(new Error('boom') as never);
+      jest
+        .spyOn(bookingModel, 'create')
+        .mockRejectedValueOnce(new Error('boom') as never);
 
-      await http().post(HOLD).set('Cookie', traveler).send(body(flightId, { adults: 3 })).expect(500);
+      await http()
+        .post(HOLD)
+        .set('Cookie', traveler)
+        .send(body(flightId, { adults: 3 }))
+        .expect(500);
 
       expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0 });
-      expect(await connection.collection('flightBookings').countDocuments()).toBe(0);
+      expect(
+        await connection.collection('flightBookings').countDocuments(),
+      ).toBe(0);
     });
   });
 
@@ -478,7 +565,9 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 3 });
 
       await expireNow(id);
-      await expect(lifecycle.expireIfDue(BookingType.FLIGHT, id)).resolves.toBe(true);
+      await expect(lifecycle.expireIfDue(BookingType.FLIGHT, id)).resolves.toBe(
+        true,
+      );
 
       const stored = await connection
         .collection('flightBookings')
@@ -488,7 +577,9 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0 });
 
       // Running it again must not release the seats twice.
-      await expect(lifecycle.expireIfDue(BookingType.FLIGHT, id)).resolves.toBe(false);
+      await expect(lifecycle.expireIfDue(BookingType.FLIGHT, id)).resolves.toBe(
+        false,
+      );
       expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0 });
     });
 
@@ -496,7 +587,9 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       const flightId = await createFlight();
       await addCabin(flightId, 'ECONOMY', 10);
       const id = await hold(flightId);
-      await expect(lifecycle.expireIfDue(BookingType.FLIGHT, id)).resolves.toBe(false);
+      await expect(lifecycle.expireIfDue(BookingType.FLIGHT, id)).resolves.toBe(
+        false,
+      );
       expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 1 });
     });
 
@@ -513,8 +606,11 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
 
       expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 4 });
       const status = async (id: string) =>
-        (await connection.collection('flightBookings').findOne({ _id: new Types.ObjectId(id) }))
-          ?.status;
+        (
+          await connection
+            .collection('flightBookings')
+            .findOne({ _id: new Types.ObjectId(id) })
+        )?.status;
       expect(await status(due1)).toBe(BookingStatus.EXPIRED);
       expect(await status(due2)).toBe(BookingStatus.EXPIRED);
       expect(await status(fresh)).toBe(BookingStatus.PENDING_PAYMENT);
@@ -524,10 +620,18 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       const flightId = await createFlight();
       await addCabin(flightId, 'ECONOMY', 2);
       const id = await hold(flightId, { adults: 2 });
-      await http().post(HOLD).set('Cookie', traveler).send(body(flightId)).expect(409);
+      await http()
+        .post(HOLD)
+        .set('Cookie', traveler)
+        .send(body(flightId))
+        .expect(409);
       await expireNow(id);
       await lifecycle.sweepExpiredHolds();
-      await http().post(HOLD).set('Cookie', traveler).send(body(flightId)).expect(201);
+      await http()
+        .post(HOLD)
+        .set('Cookie', traveler)
+        .send(body(flightId))
+        .expect(201);
     });
 
     it('confirming a paid booking turns held seats into booked seats, once, and notifies the traveler', async () => {
@@ -540,20 +644,36 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       const stored = await connection
         .collection('flightBookings')
         .findOne({ _id: new Types.ObjectId(id) });
-      expect(stored).toMatchObject({ status: 'CONFIRMED', paymentRef: 'pi_test_1' });
+      expect(stored).toMatchObject({
+        status: 'CONFIRMED',
+        paymentRef: 'pi_test_1',
+      });
       expect(stored?.holdExpiresAt).toBeUndefined();
-      expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0, bookedSeats: 3 });
+      expect(await cabinOf(flightId)).toMatchObject({
+        heldSeats: 0,
+        bookedSeats: 3,
+      });
 
       const notifications = await connection
         .collection('notifications')
-        .find({ userId: new Types.ObjectId(travelerId), type: 'BOOKING_CONFIRMED' })
+        .find({
+          userId: new Types.ObjectId(travelerId),
+          type: 'BOOKING_CONFIRMED',
+        })
         .toArray();
       expect(notifications).toHaveLength(1);
 
       // The webhook and the late-paid path can both arrive: the second call changes and sends nothing.
       await lifecycle.confirmPaid(BookingType.FLIGHT, id, 'pi_test_1');
-      expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0, bookedSeats: 3 });
-      expect(await connection.collection('notifications').countDocuments({ type: 'BOOKING_CONFIRMED' })).toBe(1);
+      expect(await cabinOf(flightId)).toMatchObject({
+        heldSeats: 0,
+        bookedSeats: 3,
+      });
+      expect(
+        await connection
+          .collection('notifications')
+          .countDocuments({ type: 'BOOKING_CONFIRMED' }),
+      ).toBe(1);
     });
 
     it('a different payment reference cannot confirm an already confirmed booking', async () => {
@@ -561,8 +681,13 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       await addCabin(flightId, 'ECONOMY', 10);
       const id = await hold(flightId);
       await lifecycle.confirmPaid(BookingType.FLIGHT, id, 'pi_test_1');
-      await expect(lifecycle.confirmPaid(BookingType.FLIGHT, id, 'pi_other')).rejects.toThrow();
-      expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0, bookedSeats: 1 });
+      await expect(
+        lifecycle.confirmPaid(BookingType.FLIGHT, id, 'pi_other'),
+      ).rejects.toThrow();
+      expect(await cabinOf(flightId)).toMatchObject({
+        heldSeats: 0,
+        bookedSeats: 1,
+      });
     });
 
     it('an expired booking cannot be confirmed and its seats stay released', async () => {
@@ -571,8 +696,13 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       const id = await hold(flightId, { adults: 2 });
       await expireNow(id);
       await lifecycle.sweepExpiredHolds();
-      await expect(lifecycle.confirmPaid(BookingType.FLIGHT, id, 'pi_late')).rejects.toThrow();
-      expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0, bookedSeats: 0 });
+      await expect(
+        lifecycle.confirmPaid(BookingType.FLIGHT, id, 'pi_late'),
+      ).rejects.toThrow();
+      expect(await cabinOf(flightId)).toMatchObject({
+        heldSeats: 0,
+        bookedSeats: 0,
+      });
     });
 
     it('cancelling a confirmed booking gives its booked seats back', async () => {
@@ -582,12 +712,22 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       await lifecycle.confirmPaid(BookingType.FLIGHT, id, 'pi_test_1');
       expect(await cabinOf(flightId)).toMatchObject({ bookedSeats: 4 });
 
-      await lifecycle.transition(BookingType.FLIGHT, id, BookingStatus.CANCELLED);
+      await lifecycle.transition(
+        BookingType.FLIGHT,
+        id,
+        BookingStatus.CANCELLED,
+      );
 
-      expect(await cabinOf(flightId)).toMatchObject({ bookedSeats: 0, heldSeats: 0 });
+      expect(await cabinOf(flightId)).toMatchObject({
+        bookedSeats: 0,
+        heldSeats: 0,
+      });
       expect(
-        (await connection.collection('flightBookings').findOne({ _id: new Types.ObjectId(id) }))
-          ?.status,
+        (
+          await connection
+            .collection('flightBookings')
+            .findOne({ _id: new Types.ObjectId(id) })
+        )?.status,
       ).toBe(BookingStatus.CANCELLED);
     });
 
@@ -603,9 +743,15 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
 
     it('unknown booking ids are 404, never a crash', async () => {
       await expect(
-        lifecycle.confirmPaid(BookingType.FLIGHT, new Types.ObjectId().toString(), 'pi_x'),
+        lifecycle.confirmPaid(
+          BookingType.FLIGHT,
+          new Types.ObjectId().toString(),
+          'pi_x',
+        ),
       ).rejects.toThrow();
-      await expect(lifecycle.expireIfDue(BookingType.FLIGHT, 'not-an-id')).resolves.toBe(false);
+      await expect(
+        lifecycle.expireIfDue(BookingType.FLIGHT, 'not-an-id'),
+      ).resolves.toBe(false);
     });
   });
 });

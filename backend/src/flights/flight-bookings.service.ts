@@ -18,7 +18,10 @@ import {
   toFlightBookingResponse,
 } from './dto/flight-booking-response.dto';
 import { HoldFlightBookingDto } from './dto/hold-flight-booking.dto';
-import { FlightBooking, FlightBookingLean } from './schemas/flight-booking.schema';
+import {
+  FlightBooking,
+  FlightBookingLean,
+} from './schemas/flight-booking.schema';
 import {
   bookingTotalCents,
   infantFareCents,
@@ -28,7 +31,8 @@ import {
 @Injectable()
 export class FlightBookingsService {
   constructor(
-    @InjectModel(FlightBooking.name) private readonly model: Model<FlightBooking>,
+    @InjectModel(FlightBooking.name)
+    private readonly model: Model<FlightBooking>,
     @InjectConnection() private readonly connection: Connection,
     private readonly inventory: FlightInventoryService,
   ) {}
@@ -51,7 +55,8 @@ export class FlightBookingsService {
         details: [
           {
             field: 'infants',
-            message: 'infants must not be more than adults (at most one infant per adult)',
+            message:
+              'infants must not be more than adults (at most one infant per adult)',
           },
         ],
       });
@@ -72,7 +77,13 @@ export class FlightBookingsService {
         session,
       );
       if (!cabin) {
-        if (!(await this.inventory.cabinExists(flight._id, dto.cabinClass, session))) {
+        if (
+          !(await this.inventory.cabinExists(
+            flight._id,
+            dto.cabinClass,
+            session,
+          ))
+        ) {
           throw new NotFoundException('This flight has no such cabin');
         }
         throw new ConflictException('Not enough seats left in this cabin');
