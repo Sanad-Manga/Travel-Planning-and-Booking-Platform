@@ -1,6 +1,9 @@
 /**
- * Local wall-clock time in an IANA time zone -> UTC instant (FLT-03).
+ * Shared time-zone helper (GEN-06): local wall-clock time in an IANA zone <-> UTC instant.
+ * Everything is STORED in UTC; use these two functions at the edges (input in, response out).
  * Uses the built-in Intl database (no extra dependency), so it follows the same tz data as Node.
+ *
+ *   import { localToUtc, utcToLocal } from '../common';
  */
 
 const LOCAL_DATE_TIME =
@@ -87,4 +90,19 @@ export function localToUtc(local: string, timeZone: string): Date | null {
   }
   if (candidates.size === 0) return null;
   return new Date(Math.min(...candidates));
+}
+
+/**
+ * Shows a UTC instant as local time in `timeZone`: `2026-12-01T14:30:00+02:00` (local date-time plus the
+ * zone's UTC offset at that moment, so daylight saving is already reflected).
+ */
+export function utcToLocal(instant: Date, timeZone: string): string {
+  const ms = Math.floor(instant.getTime() / 1000) * 1000;
+  const wall = wallClockAsUtc(ms, timeZone);
+  const offsetMinutes = Math.round((wall - ms) / 60000);
+  const sign = offsetMinutes < 0 ? '-' : '+';
+  const abs = Math.abs(offsetMinutes);
+  const hh = String(Math.floor(abs / 60)).padStart(2, '0');
+  const mm = String(abs % 60).padStart(2, '0');
+  return `${new Date(wall).toISOString().slice(0, 19)}${sign}${hh}:${mm}`;
 }

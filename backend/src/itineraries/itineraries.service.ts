@@ -414,7 +414,7 @@ export class ItinerariesService {
         ],
       });
     }
-    return toItineraryResponse(updated);
+    return this.withActivities(updated);
   }
 
   /**

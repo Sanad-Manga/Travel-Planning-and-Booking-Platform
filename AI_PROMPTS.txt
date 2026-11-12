@@ -1172,9 +1172,36 @@ Prompt:
 Implement ONLY ticket HTL-03 (add rooms to a hotel) following docs/contracts.md and the travel-platform skill: POST /api/hotels/:id/rooms, hotel moderator for their own hotel only; room number/name unique within the hotel; fields type, beds, maxOccupancy (>= 1), pricePerNightCents (> 0, integer cents). List assumptions first, only touch backend/src/hotels and a new e2e test.
 How the output was used:
 The assistant added the Room schema (unique index on hotelId + lower-cased name), CreateRoomDto and RoomResponseDto, RoomsService (ownership check in the service, 403 for another or unknown hotel as in HTL-01, duplicate settled by the unique index and returned as 409), RoomsController with Swagger decorators, module wiring and 10 e2e tests. I kept the free-text room type and the module-local upper limits (20 beds, 50 guests, 10,000,000 cents) as assumptions, to confirm with the lead and with Hessain. Build, lint, 637 unit tests and the hotels and rooms e2e suites pass locally.
+
+Student: Yusuf Eser
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: HTL-10 (SCRUM) Hotel cancellation tiers (days-before-check-in -> refund %)
+Prompt:
+Implement ONLY ticket HTL-10 following docs/contracts.md and the travel-platform skill: a hotel moderator defines cancellation tiers (unique days-before-check-in threshold >= 0, refund 0-100) with PUT /api/hotels/:id/policies, the tiers are stored with the hotel and exposed through an exported getter, the refund calculation stays in Payments' RefundCalculator, and a moderator can edit only their own hotel. List assumptions first, only touch backend/src/hotels and a new e2e test.
+How the output was used:
+The assistant first read the shared RefundCalculator on develop to reuse its CancellationTier shape (daysBeforeThreshold, refundPercent) and did not copy any calculation. Added: cancellationTiers embedded in the Hotel schema; UpdateHotelPoliciesDto (integer threshold 0-365, integer percent 0-100, max 20 tiers, unknown fields rejected); HotelsService.updatePolicies (403 for any other hotel like HTL-01, duplicate thresholds are a 400 checked in the service, one atomic $set of only cancellationTiers so a later HTL-09 field is not lost and parallel requests leave one complete list); the exported getter HotelsService.getCancellationTiers (largest threshold first, [] when none, 404 for an unknown id); and PUT /api/hotels/:id/policies with Swagger. 25 new e2e tests in hotel-cancellation-tiers.e2e-spec.ts, which also feed the getter output into RefundCalculator.compute. Build, lint, all 637 unit tests and the hotels e2e suites pass locally.
 ================================================
 
+Date: 2026-11-11
+Student: Ahmed Sanad
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: GEN-06 (SCRUM-48) Flight times in each airport local time zone
+Prompt:
+Implement ONLY GEN-06: one shared helper in common/ that converts local <-> UTC, flight times stay UTC in storage, and flight responses also include departureLocal / arrivalLocal plus the IANA time zones. Others (search results, e-ticket, itineraries) should import the helper.
+How the output was used:
+The assistant moved my FLT-03 conversion helper from flights/utils to common/local-time.ts (exported from common, so `import { localToUtc, utcToLocal } from "../common"`), added utcToLocal (local date-time plus the UTC offset at that moment, e.g. 2026-12-01T14:30:00+02:00), and added departureLocal and arrivalLocal to the create-flight response and to the flight search result items. Tests cover two zones, half-hour offsets, day rollover, daylight-saving changes in New York and London, and a round trip with localToUtc. Decision I accepted: local times are shown as ISO text with offset, not a Date, so clients cannot mis-read them as UTC. I ran lint, prettier and the common, flights and e2e tests and read every file before committing.
+Related Requirement: FLT-04 (SCRUM-46) Cabin categories per flight (seats, price, baggage)
+Prompt:
+Implement ONLY FLT-04: POST /api/flights/:id/cabins and PATCH /api/flights/:id/cabins/:cabinId. A moderator defines cabin categories per flight from the fixed set (Economy, Premium Economy, Business, First), each once per flight, seats a whole number > 0, price > 0 in cents, free baggage (bag count and max kg per bag), and the cabin keeps the booked/held counters used by seat holds. Only the owning airline moderator can add or edit. Build on the cabin schema skeleton Abdulrahman added (FLT-11) and keep its field names.
+How the output was used:
+The assistant added CreateCabinDto, UpdateCabinDto (same rules, all optional, class cannot change), the response DTO (with availableSeats and currency), FlightCabinsService and FlightCabinsController, and 39 e2e tests. Decisions I accepted: another airline flight is 403; unknown flight or cabin 404; a CANCELLED or DEPARTED flight gives 409; a duplicate class is 409 from the existing unique index; PATCH lowers totalSeats only if it stays at or above booked + held, checked inside the same atomic update (409 otherwise); booked and held counters are never accepted from the client. I ran lint, prettier and the cabin, flight and airline tests, and read every file before committing.
+Related Requirement: FLT-08 (SCRUM-47) Extra-baggage price and max extra bags
+Prompt:
+Implement ONLY FLT-08: PUT /api/airlines/:id/baggage-policy. A moderator of that airline sets a price per extra bag (> 0, integer cents) and the maximum number of extra bags per passenger (>= 0, 0 accepted). Each extra bag has the same maximum weight as the cabin free baggage allowance. Only the own airline moderator can set it. Expose a getter other modules (FLT-19, PAY-02) can call.
+How the output was used:
+The assistant added an embedded baggagePolicy on the airline schema, SetBaggagePolicyDto and the response DTO, AirlinesService.setBaggagePolicy (ownership in the service, another airline gives 403) and AirlinesService.getBaggagePolicy (null until set), the PUT route, and 15 e2e tests. Decisions I accepted: PUT replaces the whole policy so both fields are required; no separate extra-bag weight is stored (it is the cabin maxBagWeightKg, stated in the response and Swagger); a cap of 10 extra bags; no new GET endpoint, the policy is read through the service. I ran lint, prettier and the airline unit and e2e tests and read every file before committing.
 ================================================
+
 Date: 2026-11-08
 Student: Yusuf Eser
 Tool: Claude (Claude Code, Sonnet 5.5)
@@ -1216,3 +1243,33 @@ Intercity transport is its own line next to the four categories, and entries who
 category and day totals always add up to the same grand total. City group subtotals now add up the platform-currency
 costs of their days. Budget entries are deleted with their day and with the itinerary. The service tests failed first
 (service missing) and pass now. Lint, build, 714 unit and 462 e2e tests pass.
+Date: 2026-11-08
+Student: Yusuf Eser
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: HTL-05 (SCRUM) Edit room (beds, occupancy, price, availability)
+Prompt:
+Implement ONLY ticket HTL-05 following docs/contracts.md and the travel-platform skill: PATCH /api/hotels/:id/rooms/:roomId (beds, maxOccupancy, price) and PATCH /api/hotels/:id/rooms/:roomId/availability. Own hotel moderator only; edits validate like HTL-03/HTL-04; a price change must not affect existing reservations; availability cannot be removed for dates that have confirmed reservations (query by room + date, stub until HTL-16). List assumptions first, only touch backend/src/hotels and a new e2e test.
+How the output was used:
+The assistant added UpdateRoomDto (PickType of CreateRoomDto, partial, so name/type are rejected), RoomsService.update (one atomic findOneAndUpdate on _id + hotelId, 404 for a room of another hotel) and RoomsService.updateAvailability. The availability PATCH has no range id in the URL, so I accepted the assumption that the body carries rangeId plus startDate and/or endDate and edits ONE range (shrink, extend, shift); the nights that stop being available (old range minus new range) are checked through a new RoomReservations abstract class (hasConfirmedReservation(roomId, startDate, endDate)) with a NoRoomReservations stub provider in HotelsModule that Hessain replaces. The write is one conditional updateOne with arrayFilters on the range id and its old dates plus a no-overlap filter against the other ranges. Known limit: the reservation check and the write are two operations, so a booking confirmed between them is not caught without a transaction. Price snapshot on bookings is Hessain's side (nothing here reads or rewrites bookings). 17 e2e tests (reservation conflict simulated with an overridden RoomReservations provider). Build, lint and the hotels, rooms, availability and edit-room e2e suites pass locally.
+Related Requirement: HTL-09 (SCRUM) Hotel check-in / check-out times
+Prompt:
+Implement ONLY ticket HTL-09 following docs/contracts.md and the travel-platform skill: a hotel moderator sets the hotel's standard check-in and check-out times with PUT /api/hotels/:id/policies, the times are part of the hotel details response, invalid formats are rejected, and saving the times must not wipe the cancellation tiers of HTL-10 (and vice versa). List assumptions first, only touch backend/src/hotels and a new e2e test. Afterwards: make the HTL-09 and HTL-10 branches connected so their PRs do not conflict.
+How the output was used:
+HTL-10 (same endpoint, same DTO, same service method) is already pushed, so this branch is stacked on feature/HTL-10-cancellation-tiers: HTL-10 merges first, and the HTL-09 PR shows only its own diff. Added: checkInTime / checkOutTime on the Hotel schema (24-hour "HH:mm" strings in the hotel's local time, null = not set); the two times next to cancellationTiers in UpdateHotelPoliciesDto and HotelPoliciesResponseDto (every field is validated only when sent, pattern 00:00 to 23:59 with two digits each, trimmed, null rejected, unknown fields rejected); HotelsService.updatePolicies now builds ONE atomic $set from only the fields that were sent (400 for an empty body), so saving the times never wipes the tiers and the other way round; the exported getter HotelsService.getPolicies (times + tiers) with getCancellationTiers reusing it; and the two times in HotelResponseDto so the create/PATCH answers (and later GET /hotels/:id) carry them. 27 new e2e tests in hotel-check-times.e2e-spec.ts (13 invalid formats, both-directions "does not wipe" test through the API, parallel requests); the HTL-10 test now also expects the two null times in the answer. Build, lint, all unit tests and the three hotel e2e suites pass locally.
+
+Date: 2026-11-13
+Student: Ahmed Sanad
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: Team workflow (no ticket)
+Prompt:
+Develop broke after two squash merges and nobody noticed until every PR failed CI. Add guards so it cannot happen again: a git pre-push hook, CI on pushes to develop, and require branches to be up to date before merging.
+How the output was used:
+Added .githooks/pre-push (backend build and lint before every push, tested on a healthy tree and on a broken one), enabled by the backend "prepare" script through scripts/setup-hooks.js (skipped in CI), a .gitattributes rule so the hook keeps LF line endings on Windows, and a push trigger on develop in ci.yml (runs on develop are never cancelled). The up-to-date requirement is a repository ruleset setting, changed separately.
+Date: 2026-11-11
+Student: Ahmed Sanad
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: ITN-08, ITN-09, ITN-10, ITN-16 (repair)
+Prompt:
+CI fails on every open PR. Find out why develop does not build, repair it, and check that every merged itinerary PR still has all of its tests.
+How the output was used:
+The #53 and #54 squash merges each kept only one side of a conflict (cityGroups and the activities wiring were lost), so develop did not compile. The repair is PR #61. A check of the tests of every merged PR then found that the 11 ITN-08 tests (reorder days) of PR #50 were lost too. They are restored here, and the reorder response now carries the activities and transport costs like a GET does, with a new e2e test for it.

@@ -30,6 +30,12 @@ export class HotelResponseDto {
   @ApiProperty({ type: [String] })
   amenities: string[];
 
+  @ApiProperty({ type: String, nullable: true, example: '14:00', description: 'Standard check-in time (24-hour HH:mm, hotel local time), set by HTL-09. null = not set yet.' })
+  checkInTime: string | null;
+
+  @ApiProperty({ type: String, nullable: true, example: '11:00', description: 'Standard check-out time (24-hour HH:mm, hotel local time), set by HTL-09. null = not set yet.' })
+  checkOutTime: string | null;
+
   @ApiProperty({ description: 'false = deactivated by an admin.' })
   isActive: boolean;
 
@@ -50,6 +56,8 @@ export class HotelResponseDto {
       photos: (hotel.photos ?? []).map((p) => ({ id: p.id, url: p.url })),
       starRating: hotel.starRating,
       amenities: [...(hotel.amenities ?? [])],
+      checkInTime: hotel.checkInTime ?? null,
+      checkOutTime: hotel.checkOutTime ?? null,
       isActive: hotel.isActive,
       createdAt: (hotel.createdAt ?? new Date(0)).toISOString(),
       updatedAt: (hotel.updatedAt ?? new Date(0)).toISOString(),

@@ -8,12 +8,11 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { AirlinesService } from '../airlines';
-import { AuthenticatedUser, Role } from '../common';
+import { AuthenticatedUser, localToUtc, Role } from '../common';
 import { ReferenceDataService } from '../reference-data/reference-data.service';
 import { CreateFlightDto } from './dto/create-flight.dto';
 import { FlightResponseDto, toFlightResponse } from './dto/flight-response.dto';
 import { Flight, FlightLean } from './schemas/flight.schema';
-import { localToUtc } from './utils/local-time';
 
 const MONGO_DUPLICATE_KEY = 11000;
 
