@@ -1182,6 +1182,16 @@ How the output was used:
 The assistant first read the shared RefundCalculator on develop to reuse its CancellationTier shape (daysBeforeThreshold, refundPercent) and did not copy any calculation. Added: cancellationTiers embedded in the Hotel schema; UpdateHotelPoliciesDto (integer threshold 0-365, integer percent 0-100, max 20 tiers, unknown fields rejected); HotelsService.updatePolicies (403 for any other hotel like HTL-01, duplicate thresholds are a 400 checked in the service, one atomic $set of only cancellationTiers so a later HTL-09 field is not lost and parallel requests leave one complete list); the exported getter HotelsService.getCancellationTiers (largest threshold first, [] when none, 404 for an unknown id); and PUT /api/hotels/:id/policies with Swagger. 25 new e2e tests in hotel-cancellation-tiers.e2e-spec.ts, which also feed the getter output into RefundCalculator.compute. Build, lint, all 637 unit tests and the hotels e2e suites pass locally.
 ================================================
 
+Date: 2026-11-11
+Student: Ahmed Sanad
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: FLT-08 (SCRUM-47) Extra-baggage price and max extra bags
+Prompt:
+Implement ONLY FLT-08: PUT /api/airlines/:id/baggage-policy. A moderator of that airline sets a price per extra bag (> 0, integer cents) and the maximum number of extra bags per passenger (>= 0, 0 accepted). Each extra bag has the same maximum weight as the cabin free baggage allowance. Only the own airline moderator can set it. Expose a getter other modules (FLT-19, PAY-02) can call.
+How the output was used:
+The assistant added an embedded baggagePolicy on the airline schema, SetBaggagePolicyDto and the response DTO, AirlinesService.setBaggagePolicy (ownership in the service, another airline gives 403) and AirlinesService.getBaggagePolicy (null until set), the PUT route, and 15 e2e tests. Decisions I accepted: PUT replaces the whole policy so both fields are required; no separate extra-bag weight is stored (it is the cabin maxBagWeightKg, stated in the response and Swagger); a cap of 10 extra bags; no new GET endpoint, the policy is read through the service. I ran lint, prettier and the airline unit and e2e tests and read every file before committing.
+================================================
+=======
 ================================================
 Date: 2026-11-08
 Student: Yusuf Eser
