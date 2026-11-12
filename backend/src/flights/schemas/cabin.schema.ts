@@ -15,7 +15,7 @@ const greaterThanZero = {
  * One cabin category of one flight (collection `cabins`), FLT-04.
  * Kept separate from the flight so the seat counters can be changed with a single atomic update
  * (see utils/seat-availability.ts; the FLT-22 hold relies on it).
- * SKELETON: DTOs, endpoints, ownership checks and the FLT-05 edit rules come in the next sprint.
+ * Created and edited by the flights-A moderator endpoints (flight-cabins.controller.ts); the FLT-05 edit rules come later.
  */
 @Schema({ timestamps: true, collection: 'cabins' })
 export class Cabin {
