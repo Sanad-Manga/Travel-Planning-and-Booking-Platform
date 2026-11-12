@@ -9,13 +9,12 @@ import {
   IsNotEmpty,
   IsNumber,
   IsString,
-  Matches,
   MaxLength,
   Min,
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
-import { CabinClass } from '../../common';
+import { CabinClass, IsCalendarDate } from '../../common';
 
 const trim = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;
@@ -47,9 +46,7 @@ export class BookingPassengerDto {
     example: '2010-05-21',
     description: 'Date of birth in YYYY-MM-DD format',
   })
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
-    message: 'dateOfBirth must be a valid YYYY-MM-DD date',
-  })
+  @IsCalendarDate()
   dateOfBirth: string;
 
   @ApiProperty({

@@ -12,6 +12,7 @@ import {
   BookingStatus,
   BookingType,
   HOLD_MINUTES,
+  isCalendarDate,
   PassengerType,
   PLATFORM_CURRENCY,
 } from '../common';
@@ -20,6 +21,7 @@ import { BookingLifecycle } from '../payments';
 import { FlightInventoryService } from './flight-inventory.service';
 import {
   FlightBookingResponseDto,
+  toBookingPassengerResponse,
   toFlightBookingResponse,
 } from './dto/flight-booking-response.dto';
 import { CreateFlightBookingDto } from './dto/create-flight-booking.dto';
@@ -45,15 +47,6 @@ function inputError(field: string, message: string): BadRequestException {
     message: 'Validation failed',
     details: [{ field, message }],
   });
-}
-
-function isCalendarDate(value: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const parsed = new Date(`${value}T00:00:00.000Z`);
-  return (
-    !Number.isNaN(parsed.getTime()) &&
-    parsed.toISOString().slice(0, 10) === value
-  );
 }
 
 function passengerTypeFor(
@@ -225,11 +218,6 @@ export class FlightBookingsService {
         'A summary is available only while the booking is pending payment',
       );
     }
-    if (booking.totalCents !== payable.amountCents) {
-      throw new InternalServerErrorException(
-        'The booking total does not match its payable amount',
-      );
-    }
 
     const flight = await this.flights
       .findById(booking.flightId)
@@ -246,17 +234,7 @@ export class FlightBookingsService {
         children: booking.passengerCounts.children,
         infants: booking.passengerCounts.infants,
       },
-      passengers: booking.passengers
-        ? booking.passengers.map((passenger) => ({
-            fullName: passenger.fullName,
-            dateOfBirth: passenger.dateOfBirth,
-            passengerType: passenger.passengerType,
-            extraBags: passenger.extraBags.map((bag) => ({
-              weightKg: bag.weightKg,
-            })),
-            baggageFeeCents: passenger.baggageFeeCents,
-          }))
-        : [],
+      passengers: (booking.passengers ?? []).map(toBookingPassengerResponse),
       baggageFeeCents: booking.baggageFeeCents ?? 0,
       totalCents: payable.amountCents,
       currency: payable.currency,
