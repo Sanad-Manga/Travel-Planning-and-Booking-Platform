@@ -9,6 +9,8 @@ import { FlightBookingsController } from './flight-bookings.controller';
 import { FlightBookingsService } from './flight-bookings.service';
 import { FlightCabinsReader } from './flight-cabins.reader';
 import { FlightInventoryService } from './flight-inventory.service';
+import { FlightCabinsController } from './flight-cabins.controller';
+import { FlightCabinsService } from './flight-cabins.service';
 import { FlightSearchController } from './flight-search.controller';
 import { FlightSearchService } from './flight-search.service';
 import { FlightsController } from './flights.controller';
@@ -37,6 +39,7 @@ import { Flight, FlightSchema } from './schemas/flight.schema';
     FlightSearchController,
     FlightsController,
     FlightBookingsController,
+    FlightCabinsController,
   ],
   providers: [
     FlightsService,
@@ -45,6 +48,7 @@ import { Flight, FlightSchema } from './schemas/flight.schema';
     FlightInventoryService,
     FlightBookingsService,
     FlightBookingProvider,
+    FlightCabinsService,
   ],
   exports: [FlightsService],
 })
