@@ -1,4 +1,4 @@
-import { Body, Controller, Param, Post } from '@nestjs/common';
+import { Body, Controller, Param, Patch, Post } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
@@ -6,6 +6,7 @@ import {
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
+  ApiOkResponse,
   ApiOperation,
   ApiTags,
   ApiUnauthorizedResponse,
@@ -14,6 +15,8 @@ import { AuthenticatedUser, CurrentUser, ErrorResponseDto, Role, Roles } from '.
 import { AvailabilityResponseDto } from './dto/availability-response.dto';
 import { CreateAvailabilityDto } from './dto/create-availability.dto';
 import { CreateRoomDto } from './dto/create-room.dto';
+import { UpdateAvailabilityDto } from './dto/update-availability.dto';
+import { UpdateRoomDto } from './dto/update-room.dto';
 import { RoomResponseDto } from './dto/room-response.dto';
 import { RoomsService } from './rooms.service';
 
@@ -58,5 +61,46 @@ export class RoomsController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<AvailabilityResponseDto> {
     return this.roomsService.addAvailability(id, roomId, dto, user);
+  }
+
+  @Patch(':id/rooms/:roomId')
+  @Roles(Role.HOTEL_MODERATOR)
+  @ApiOperation({
+    summary:
+      'Edit a room: any subset of beds, maxOccupancy and pricePerNightCents (hotel moderator, own hotel only). Existing reservations keep the price they were made with.',
+  })
+  @ApiOkResponse({ type: RoomResponseDto })
+  @ApiBadRequestResponse({ type: ErrorResponseDto, description: 'Empty body, invalid value (maxOccupancy < 1, price <= 0 or not an integer), or an unknown field' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto, description: 'Not logged in' })
+  @ApiForbiddenResponse({ type: ErrorResponseDto, description: "Not a hotel moderator, or not the moderator's own hotel" })
+  @ApiNotFoundResponse({ type: ErrorResponseDto, description: 'The room does not exist in the moderator’s hotel' })
+  update(
+    @Param('id') id: string,
+    @Param('roomId') roomId: string,
+    @Body() dto: UpdateRoomDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<RoomResponseDto> {
+    return this.roomsService.update(id, roomId, dto, user);
+  }
+
+  @Patch(':id/rooms/:roomId/availability')
+  @Roles(Role.HOTEL_MODERATOR)
+  @ApiOperation({
+    summary:
+      'Change the dates of one availability range of a room (hotel moderator, own hotel only). Send rangeId plus startDate and/or endDate. Dates that stop being available must have no confirmed reservation.',
+  })
+  @ApiOkResponse({ type: AvailabilityResponseDto })
+  @ApiBadRequestResponse({ type: ErrorResponseDto, description: 'Invalid or missing rangeId/date, endDate not after startDate, no date sent, unknown field' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto, description: 'Not logged in' })
+  @ApiForbiddenResponse({ type: ErrorResponseDto, description: "Not a hotel moderator, or not the moderator's own hotel" })
+  @ApiNotFoundResponse({ type: ErrorResponseDto, description: 'The room or the range does not exist in the moderator’s hotel' })
+  @ApiConflictResponse({ type: ErrorResponseDto, description: 'The new dates overlap another range of the room, or remove dates that have a confirmed reservation' })
+  updateAvailability(
+    @Param('id') id: string,
+    @Param('roomId') roomId: string,
+    @Body() dto: UpdateAvailabilityDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<AvailabilityResponseDto> {
+    return this.roomsService.updateAvailability(id, roomId, dto, user);
   }
 }
