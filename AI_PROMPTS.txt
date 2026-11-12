@@ -1193,3 +1193,13 @@ Prompt:
 Review comment on the HTL-04 PR: hotels/dto/is-date-only.decorator.ts duplicates itineraries/dto/is-calendar-date.decorator.ts. Move the date validator into backend/src/common (contracts keep shared code there) and flag the itineraries touch in the PR.
 How the output was used:
 Moved the itineraries decorator and its spec with git mv to common/validators (names unchanged: IsCalendarDate / isCalendarDate), exported it from common/index.ts, deleted the hotels copy and switched create-availability.dto.ts to it. The only edit in the itineraries module is the import line in create-itinerary.dto.ts. Re-ran build, lint, npm test and the e2e tests.
+================================================
+
+Date: 2026-11-13
+Student: Ahmed Sanad
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: Team workflow (no ticket)
+Prompt:
+Develop broke after two squash merges and nobody noticed until every PR failed CI. Add guards so it cannot happen again: a git pre-push hook, CI on pushes to develop, and require branches to be up to date before merging.
+How the output was used:
+Added .githooks/pre-push (backend build and lint before every push, tested on a healthy tree and on a broken one), enabled by the backend "prepare" script through scripts/setup-hooks.js (skipped in CI), a .gitattributes rule so the hook keeps LF line endings on Windows, and a push trigger on develop in ci.yml (runs on develop are never cancelled). The up-to-date requirement is a repository ruleset setting, changed separately.
