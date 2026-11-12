@@ -1,0 +1,20 @@
+#!/bin/sh
+# Runs before every `git push`: the backend must build and lint, so a broken merge or conflict fix
+# never leaves your machine. Takes about a minute. Skip once with: git push --no-verify
+# (CI still checks everything on the pull request.)
+
+root="$(git rev-parse --show-toplevel)"
+cd "$root/backend" || exit 0
+
+if [ ! -d node_modules ]; then
+  echo "pre-push: backend/node_modules is missing, run 'npm ci' in backend first (or push with --no-verify)."
+  exit 1
+fi
+
+echo "pre-push: npm run build"
+npm run build --silent || { echo "pre-push: the build fails, push stopped. Fix it (or push with --no-verify)."; exit 1; }
+
+echo "pre-push: npm run lint"
+npm run lint --silent || { echo "pre-push: lint fails, push stopped. Fix it (or push with --no-verify)."; exit 1; }
+
+echo "pre-push: ok"

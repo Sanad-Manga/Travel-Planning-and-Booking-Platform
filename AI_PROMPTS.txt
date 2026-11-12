@@ -1207,3 +1207,21 @@ Implement ONLY ticket HTL-09 following docs/contracts.md and the travel-platform
 How the output was used:
 HTL-10 (same endpoint, same DTO, same service method) is already pushed, so this branch is stacked on feature/HTL-10-cancellation-tiers: HTL-10 merges first, and the HTL-09 PR shows only its own diff. Added: checkInTime / checkOutTime on the Hotel schema (24-hour "HH:mm" strings in the hotel's local time, null = not set); the two times next to cancellationTiers in UpdateHotelPoliciesDto and HotelPoliciesResponseDto (every field is validated only when sent, pattern 00:00 to 23:59 with two digits each, trimmed, null rejected, unknown fields rejected); HotelsService.updatePolicies now builds ONE atomic $set from only the fields that were sent (400 for an empty body), so saving the times never wipes the tiers and the other way round; the exported getter HotelsService.getPolicies (times + tiers) with getCancellationTiers reusing it; and the two times in HotelResponseDto so the create/PATCH answers (and later GET /hotels/:id) carry them. 27 new e2e tests in hotel-check-times.e2e-spec.ts (13 invalid formats, both-directions "does not wipe" test through the API, parallel requests); the HTL-10 test now also expects the two null times in the answer. Build, lint, all unit tests and the three hotel e2e suites pass locally.
 ================================================
+================================================
+
+Date: 2026-11-13
+Student: Ahmed Sanad
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: Team workflow (no ticket)
+Prompt:
+Develop broke after two squash merges and nobody noticed until every PR failed CI. Add guards so it cannot happen again: a git pre-push hook, CI on pushes to develop, and require branches to be up to date before merging.
+How the output was used:
+Added .githooks/pre-push (backend build and lint before every push, tested on a healthy tree and on a broken one), enabled by the backend "prepare" script through scripts/setup-hooks.js (skipped in CI), a .gitattributes rule so the hook keeps LF line endings on Windows, and a push trigger on develop in ci.yml (runs on develop are never cancelled). The up-to-date requirement is a repository ruleset setting, changed separately.
+Date: 2026-11-11
+Student: Ahmed Sanad
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: ITN-08, ITN-09, ITN-10, ITN-16 (repair)
+Prompt:
+CI fails on every open PR. Find out why develop does not build, repair it, and check that every merged itinerary PR still has all of its tests.
+How the output was used:
+The #53 and #54 squash merges each kept only one side of a conflict (cityGroups and the activities wiring were lost), so develop did not compile. The repair is PR #61. A check of the tests of every merged PR then found that the 11 ITN-08 tests (reorder days) of PR #50 were lost too. They are restored here, and the reorder response now carries the activities and transport costs like a GET does, with a new e2e test for it.
