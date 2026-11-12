@@ -1193,3 +1193,26 @@ Prompt:
 Review comment on the HTL-04 PR: hotels/dto/is-date-only.decorator.ts duplicates itineraries/dto/is-calendar-date.decorator.ts. Move the date validator into backend/src/common (contracts keep shared code there) and flag the itineraries touch in the PR.
 How the output was used:
 Moved the itineraries decorator and its spec with git mv to common/validators (names unchanged: IsCalendarDate / isCalendarDate), exported it from common/index.ts, deleted the hotels copy and switched create-availability.dto.ts to it. The only edit in the itineraries module is the import line in create-itinerary.dto.ts. Re-ran build, lint, npm test and the e2e tests.
+
+================================================
+
+================================================
+Date: 2026-11-12
+Student: Yassin Yahya
+Tool: Claude (Claude Code)
+Related Requirement: ITN-14 (SCRUM-93)
+Prompt:
+Implement all my itinerary tickets that are not blocked, one ticket per branch and PR. For ITN-14, following
+docs/contracts.md and the Jira checklist: a user adds, edits and deletes non-negative daily budget entries in four
+categories (POST /api/itineraries/:id/days/:dayId/budgets, PATCH/DELETE /api/budgets/:id) and reads the total
+budget by category and by day (GET /api/itineraries/:id/budget-summary), including activity costs and intercity
+transport, owner only. Write the tests first, then the code, then open the PR and update Jira.
+How the output was used:
+Used a separate budgets collection with the author copied as ownerId, so edit and delete check ownership in one
+atomic query. Used the same amount and currency rules as ITN-16 and an optional currency that defaults to the
+platform currency. The summary is calculated on every read, never stored, and gives one block per currency, because
+amounts in different currencies cannot be added without ITN-18 (raw totals and currency are exposed for FxService).
+Intercity transport is its own line next to the four categories, and entries whose day is gone are ignored so the
+category and day totals always add up to the same grand total. City group subtotals now add up the platform-currency
+costs of their days. Budget entries are deleted with their day and with the itinerary. The service tests failed first
+(service missing) and pass now. Lint, build, 714 unit and 462 e2e tests pass.

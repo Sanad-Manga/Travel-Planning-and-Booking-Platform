@@ -2,6 +2,8 @@ import { ApiProperty } from '@nestjs/swagger';
 import { Visibility } from '../../common';
 import { ItineraryLean } from '../schemas/itinerary.schema';
 import { ActivityDto } from './activity.dto';
+import { BudgetDto } from './budget.dto';
+import { buildBudgetSummary, platformTotalsByDay } from './budget-summary.dto';
 import { CityGroupDto, groupDaysByCity } from './city-group.dto';
 import { ItineraryDayDto, toItineraryDay } from './itinerary-day.dto';
 import { TransportCostDto } from './transport-cost.dto';
@@ -54,6 +56,13 @@ export class ItineraryResponseDto {
   })
   transportCosts: TransportCostDto[];
 
+  @ApiProperty({
+    type: [BudgetDto],
+    description:
+      'The daily budget entries (ITN-14), oldest first. Each belongs to one day (dayId). The totals are in GET /api/itineraries/:id/budget-summary.',
+  })
+  budgets: BudgetDto[];
+
   @ApiProperty({ example: '2026-11-04T10:00:00.000Z' })
   createdAt: string;
 
@@ -66,6 +75,7 @@ export function toItineraryResponse(
   doc: ItineraryLean,
   activities: ActivityDto[] = [],
   transportCosts: TransportCostDto[] = [],
+  budgets: BudgetDto[] = [],
 ): ItineraryResponseDto {
   const days = (doc.days ?? []).map((day, index) =>
     toItineraryDay(day, index, doc.startDate, activities),
@@ -79,8 +89,20 @@ export function toItineraryResponse(
     visibility: doc.visibility,
     isHidden: doc.isHidden,
     days,
-    cityGroups: groupDaysByCity(days),
+    cityGroups: groupDaysByCity(
+      days,
+      platformTotalsByDay(
+        buildBudgetSummary(
+          doc._id.toString(),
+          days,
+          activities,
+          transportCosts,
+          budgets,
+        ),
+      ),
+    ),
     transportCosts,
+    budgets,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
   };
