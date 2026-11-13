@@ -8,11 +8,16 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { AuthenticatedUser, PLATFORM_CURRENCY, Role } from '../common';
+import type { CancellationTier } from '../payments';
 import {
   BaggagePolicyResponseDto,
   EXTRA_BAG_WEIGHT_RULE,
   SetBaggagePolicyDto,
 } from './dto/baggage-policy.dto';
+import {
+  CancellationPolicyResponseDto,
+  SetCancellationPolicyDto,
+} from './dto/cancellation-policy.dto';
 import { CreateAirlineDto } from './dto/create-airline.dto';
 import {
   AirlineResponseDto,
@@ -22,6 +27,15 @@ import { UpdateAirlineDto } from './dto/update-airline.dto';
 import { Airline, AirlineLean, BaggagePolicy } from './schemas/airline.schema';
 
 const MONGO_DUPLICATE_KEY = 11000;
+
+function sortTiers(tiers: ReadonlyArray<CancellationTier>): CancellationTier[] {
+  return tiers
+    .map((t) => ({
+      daysBeforeThreshold: t.daysBeforeThreshold,
+      refundPercent: t.refundPercent,
+    }))
+    .sort((a, b) => b.daysBeforeThreshold - a.daysBeforeThreshold);
+}
 
 function toBaggagePolicyResponse(
   policy: BaggagePolicy,
@@ -145,6 +159,69 @@ export class AirlinesService {
     const airline = await this.findById(airlineId);
     if (!airline?.baggagePolicy) return null;
     return toBaggagePolicyResponse(airline.baggagePolicy, airline._id);
+  }
+
+  /**
+   * FLT-09: an airline moderator sets (replaces) the cancellation tiers of THEIR airline. Another airline's id
+   * (also an unknown one) is a 403, like the profile edit. Unique thresholds are a business rule, checked here.
+   * One atomic `$set` of the whole list. The refund amount is NOT calculated here: Payments' RefundCalculator does
+   * that from `getCancellationTiers`.
+   */
+  async setCancellationPolicy(
+    user: AuthenticatedUser,
+    id: string,
+    dto: SetCancellationPolicyDto,
+  ): Promise<CancellationPolicyResponseDto> {
+    if (user.role !== Role.AIRLINE_MODERATOR || user.airlineId !== id) {
+      throw new ForbiddenException('You can only edit your own airline');
+    }
+    this.assertUniqueThresholds(dto.cancellationTiers);
+    const tiers = sortTiers(dto.cancellationTiers);
+    const updated = await this.model
+      .findByIdAndUpdate(
+        id,
+        { $set: { cancellationTiers: tiers } },
+        { new: true, runValidators: true },
+      )
+      .select('cancellationTiers')
+      .lean<Pick<AirlineLean, '_id' | 'cancellationTiers'>>()
+      .exec();
+    if (!updated) throw new NotFoundException('Airline not found');
+    return {
+      airlineId: updated._id.toString(),
+      cancellationTiers: sortTiers(updated.cancellationTiers ?? []),
+    };
+  }
+
+  /**
+   * Exported for other modules (FLT-26 cancel, PAY-02/PAY-03 policies, FLT-17): the airline's cancellation tiers,
+   * largest threshold first, in the shape `RefundCalculator.compute` expects. An airline that never set tiers has
+   * none ([] = nothing is refunded). An unknown or malformed id is a 404, not []: silently refunding nothing
+   * would hide a bug in the caller.
+   */
+  async getCancellationTiers(airlineId: string): Promise<CancellationTier[]> {
+    const airline = await this.findById(airlineId);
+    if (!airline) throw new NotFoundException('Airline not found');
+    return sortTiers(airline.cancellationTiers ?? []);
+  }
+
+  private assertUniqueThresholds(
+    tiers: Array<{ daysBeforeThreshold: number }>,
+  ): void {
+    const seen = new Set<number>();
+    const details: Array<{ field: string; message: string }> = [];
+    tiers.forEach((tier, index) => {
+      if (seen.has(tier.daysBeforeThreshold)) {
+        details.push({
+          field: `cancellationTiers.${index}.daysBeforeThreshold`,
+          message: `daysBeforeThreshold ${tier.daysBeforeThreshold} is used by more than one tier`,
+        });
+      }
+      seen.add(tier.daysBeforeThreshold);
+    });
+    if (details.length > 0) {
+      throw new BadRequestException({ message: 'Validation failed', details });
+    }
   }
 
   // ---- Used by other modules (Flights FLT-03, Admin ACC-13, flight search) ----
