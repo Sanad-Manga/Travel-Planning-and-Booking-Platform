@@ -4,10 +4,13 @@ import { ReferenceDataModule } from '../reference-data/reference-data.module';
 import { UsersModule } from '../users/users.module';
 import { ActivitiesController } from './activities.controller';
 import { ActivitiesService } from './activities.service';
+import { BudgetsController } from './budgets.controller';
+import { BudgetsService } from './budgets.service';
 import { ItinerariesPublicController } from './itineraries-public.controller';
 import { ItinerariesController } from './itineraries.controller';
 import { ItinerariesService } from './itineraries.service';
 import { Activity, ActivitySchema } from './schemas/activity.schema';
+import { Budget, BudgetSchema } from './schemas/budget.schema';
 import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema';
 import {
   TransportCost,
@@ -22,6 +25,7 @@ import { TransportCostsService } from './transport-costs.service';
       { name: Itinerary.name, schema: ItinerarySchema },
       { name: Activity.name, schema: ActivitySchema },
       { name: TransportCost.name, schema: TransportCostSchema },
+      { name: Budget.name, schema: BudgetSchema },
     ]),
     // Countries are validated through ReferenceDataService, never by reading the collection directly.
     ReferenceDataModule,
@@ -34,8 +38,14 @@ import { TransportCostsService } from './transport-costs.service';
     ItinerariesController,
     ActivitiesController,
     TransportCostsController,
+    BudgetsController,
   ],
-  providers: [ItinerariesService, ActivitiesService, TransportCostsService],
+  providers: [
+    ItinerariesService,
+    ActivitiesService,
+    TransportCostsService,
+    BudgetsService,
+  ],
   // Blog (author page) and Reports (hide/delete) look itineraries up through the service, never the model.
   exports: [ItinerariesService],
 })

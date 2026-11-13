@@ -80,3 +80,24 @@ describe('groupDaysByCity (ITN-09)', () => {
     });
   });
 });
+
+describe('groupDaysByCity subtotals (ITN-14)', () => {
+  it('adds the platform-currency cost of each day to the subtotal of its group', () => {
+    const totals = new Map([
+      ['day1', 1000],
+      ['day2', 250],
+      ['day4', 70],
+    ]);
+
+    const groups = groupDaysByCity(
+      daysIn('cairo', 'cairo', 'luxor', 'cairo'),
+      totals,
+    );
+
+    expect(groups.map((g) => [g.cityId, g.subtotalCents])).toEqual([
+      ['cairo', 1250],
+      ['luxor', 0],
+      ['cairo', 70],
+    ]);
+  });
+});

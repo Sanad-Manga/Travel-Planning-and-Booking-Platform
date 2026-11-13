@@ -33,6 +33,10 @@ import {
 } from '../common';
 import { ActivitiesService } from './activities.service';
 import { ActivityDto } from './dto/activity.dto';
+import { BudgetsService } from './budgets.service';
+import { BudgetSummaryDto } from './dto/budget-summary.dto';
+import { BudgetDto } from './dto/budget.dto';
+import { CreateBudgetDto } from './dto/create-budget.dto';
 import { CreateActivityDto } from './dto/create-activity.dto';
 import { CreateItineraryDayDto } from './dto/create-itinerary-day.dto';
 import { CreateTransportCostDto } from './dto/create-transport-cost.dto';
@@ -68,6 +72,7 @@ export class ItinerariesController {
     private readonly itineraries: ItinerariesService,
     private readonly activities: ActivitiesService,
     private readonly transportCosts: TransportCostsService,
+    private readonly budgets: BudgetsService,
   ) {}
 
   @Post()
@@ -260,6 +265,51 @@ export class ItinerariesController {
     @Body() dto: CreateActivityDto,
   ) {
     return this.activities.create(user, params.id, params.dayId, dto);
+  }
+
+  @Post(':id/days/:dayId/budgets')
+  @ApiOperation({
+    summary:
+      'Add a daily budget entry to a day of my itinerary: category (food, accommodation, in-city transport, activities), amount in cents and currency - ITN-14',
+  })
+  @ApiCreatedResponse({ type: BudgetDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description:
+      'Invalid id or dayId, a missing or unknown category, a negative, fractional or missing amount, an unsupported currency, or an unknown field',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description:
+      'No such itinerary or day (or the itinerary belongs to someone else)',
+  })
+  addBudget(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: ItineraryDayParamDto,
+    @Body() dto: CreateBudgetDto,
+  ) {
+    return this.budgets.create(user, params.id, params.dayId, dto);
+  }
+
+  @Get(':id/budget-summary')
+  @ApiOperation({
+    summary:
+      'Total budget of my itinerary by category and by day, per currency: budget entries, activity costs and intercity transport - ITN-14',
+  })
+  @ApiOkResponse({ type: BudgetSummaryDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: 'id is not a valid id',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'No such itinerary (or it belongs to someone else)',
+  })
+  budgetSummary(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: ItineraryIdParamDto,
+  ) {
+    return this.budgets.summary(user, params.id);
   }
 
   @Post(':id/transport-costs')

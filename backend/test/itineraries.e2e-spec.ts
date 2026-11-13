@@ -1534,6 +1534,289 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
     });
   });
 
+  describe('budgets (ITN-14)', () => {
+    const addDay = (cookie: string, id: string, body: object) =>
+      http()
+        .post(`/api/itineraries/${id}/days`)
+        .set('Cookie', cookie)
+        .send(body);
+    const add = (cookie: string, id: string, dayId: string, body: object) =>
+      http()
+        .post(`/api/itineraries/${id}/days/${dayId}/budgets`)
+        .set('Cookie', cookie)
+        .send(body);
+    const edit = (cookie: string, entryId: string, body: object) =>
+      http().patch(`/api/budgets/${entryId}`).set('Cookie', cookie).send(body);
+    const remove = (cookie: string, entryId: string) =>
+      http().delete(`/api/budgets/${entryId}`).set('Cookie', cookie);
+    const summaryOf = (cookie: string, id: string) =>
+      http().get(`/api/itineraries/${id}/budget-summary`).set('Cookie', cookie);
+    const entry = { category: 'FOOD', amountCents: 2500, currency: 'EGP' };
+    const withDay = async () => {
+      const { id } = await createAs(alice);
+      const day = await addDay(alice, id, { cityId: 'cairo' }).expect(201);
+      return { id, dayId: day.body.id as string };
+    };
+
+    it('adds an entry (201) that shows up on the itinerary', async () => {
+      const { id, dayId } = await withDay();
+
+      const created = await add(alice, id, dayId, entry).expect(201);
+
+      expect(created.body).toEqual({
+        id: expect.stringMatching(/^[0-9a-f]{24}$/),
+        itineraryId: id,
+        dayId,
+        category: 'FOOD',
+        amountCents: 2500,
+        currency: 'EGP',
+      });
+      const itinerary = await http()
+        .get(`/api/itineraries/${id}`)
+        .set('Cookie', alice)
+        .expect(200);
+      expect(itinerary.body.budgets).toEqual([created.body]);
+    });
+
+    it('accepts an amount of 0, a lower-case currency code, and no currency (platform currency)', async () => {
+      const { id, dayId } = await withDay();
+      const zero = await add(alice, id, dayId, {
+        ...entry,
+        amountCents: 0,
+        currency: ' egp ',
+      }).expect(201);
+      expect(zero.body).toMatchObject({ amountCents: 0, currency: 'EGP' });
+      const noCurrency = await add(alice, id, dayId, {
+        category: 'ACTIVITIES',
+        amountCents: 5,
+      }).expect(201);
+      expect(noCurrency.body.currency).toMatch(/^[A-Z]{3}$/);
+    });
+
+    it('400 for a missing or unknown category, a negative, fractional, text or missing amount, an unsupported currency, or an unknown field', async () => {
+      const { id, dayId } = await withDay();
+      for (const [payload, field] of [
+        [{ ...entry, category: undefined }, 'category'],
+        [{ ...entry, category: 'TRANSPORT' }, 'category'],
+        [{ ...entry, category: 'food' }, 'category'],
+        [{ ...entry, amountCents: undefined }, 'amountCents'],
+        [{ ...entry, amountCents: -1 }, 'amountCents'],
+        [{ ...entry, amountCents: 10.5 }, 'amountCents'],
+        [{ ...entry, amountCents: '100' }, 'amountCents'],
+        [{ ...entry, currency: 'XXX' }, 'currency'],
+        [{ ...entry, currency: 'EURO' }, 'currency'],
+        [{ ...entry, itineraryId: id }, 'itineraryId'],
+        [{ ...entry, dayId }, 'dayId'],
+        [{ ...entry, ownerId: id }, 'ownerId'],
+      ] as const) {
+        const res = await add(alice, id, dayId, payload).expect(400);
+        expect(res.body.details).toEqual(
+          expect.arrayContaining([expect.objectContaining({ field })]),
+        );
+      }
+      const itinerary = await http()
+        .get(`/api/itineraries/${id}`)
+        .set('Cookie', alice)
+        .expect(200);
+      expect(itinerary.body.budgets).toEqual([]);
+    });
+
+    it('404 for a day of another itinerary or an unknown day; 400 for malformed ids', async () => {
+      const { id } = await withDay();
+      const other = await withDay();
+      await add(alice, id, other.dayId, entry).expect(404);
+      await add(alice, id, '674a1b2c3d4e5f6a7b8c9d0e', entry).expect(404);
+      await add(alice, 'not-an-id', other.dayId, entry).expect(400);
+      await add(alice, id, 'not-an-id', entry).expect(400);
+    });
+
+    it('edits an entry (200): only the sent fields change', async () => {
+      const { id, dayId } = await withDay();
+      const created = await add(alice, id, dayId, entry).expect(201);
+
+      const edited = await edit(alice, created.body.id, {
+        category: 'ACCOMMODATION',
+        amountCents: 9000,
+      }).expect(200);
+
+      expect(edited.body).toEqual({
+        ...created.body,
+        category: 'ACCOMMODATION',
+        amountCents: 9000,
+      });
+    });
+
+    it('400 for an empty edit, a bad category, a negative amount, an unsupported currency, a null field, an unknown field or a malformed id', async () => {
+      const { id, dayId } = await withDay();
+      const created = await add(alice, id, dayId, entry).expect(201);
+      await edit(alice, created.body.id, {}).expect(400);
+      await edit(alice, created.body.id, { category: 'TAXI' }).expect(400);
+      await edit(alice, created.body.id, { amountCents: -5 }).expect(400);
+      await edit(alice, created.body.id, { currency: 'XXX' }).expect(400);
+      await edit(alice, created.body.id, { category: null }).expect(400);
+      await edit(alice, created.body.id, { amountCents: null }).expect(400);
+      await edit(alice, created.body.id, { dayId }).expect(400);
+      await edit(alice, 'not-an-id', { amountCents: 1 }).expect(400);
+    });
+
+    it('deletes an entry (204); a second delete is 404', async () => {
+      const { id, dayId } = await withDay();
+      const created = await add(alice, id, dayId, entry).expect(201);
+
+      await remove(alice, created.body.id).expect(204);
+      await remove(alice, created.body.id).expect(404);
+
+      const itinerary = await http()
+        .get(`/api/itineraries/${id}`)
+        .set('Cookie', alice)
+        .expect(200);
+      expect(itinerary.body.budgets).toEqual([]);
+    });
+
+    it('404 when someone else adds, edits, deletes or reads the summary; the entry is unchanged', async () => {
+      const { id, dayId } = await withDay();
+      const created = await add(alice, id, dayId, entry).expect(201);
+
+      await add(bob, id, dayId, entry).expect(404);
+      await edit(bob, created.body.id, { amountCents: 1 }).expect(404);
+      await remove(bob, created.body.id).expect(404);
+      await summaryOf(bob, id).expect(404);
+      await edit(alice, '674a1b2c3d4e5f6a7b8c9d0e', { amountCents: 1 }).expect(
+        404,
+      );
+
+      const itinerary = await http()
+        .get(`/api/itineraries/${id}`)
+        .set('Cookie', alice)
+        .expect(200);
+      expect(itinerary.body.budgets).toEqual([created.body]);
+    });
+
+    it('401 without a cookie on every route, 403 for an admin or moderator', async () => {
+      const { id, dayId } = await withDay();
+      const created = await add(alice, id, dayId, entry).expect(201);
+
+      await http()
+        .post(`/api/itineraries/${id}/days/${dayId}/budgets`)
+        .send(entry)
+        .expect(401);
+      await http()
+        .patch(`/api/budgets/${created.body.id}`)
+        .send({ amountCents: 1 })
+        .expect(401);
+      await http().delete(`/api/budgets/${created.body.id}`).expect(401);
+      await http().get(`/api/itineraries/${id}/budget-summary`).expect(401);
+      for (const cookie of [admin, airlineMod]) {
+        await add(cookie, id, dayId, entry).expect(403);
+        await edit(cookie, created.body.id, { amountCents: 1 }).expect(403);
+        await remove(cookie, created.body.id).expect(403);
+        await summaryOf(cookie, id).expect(403);
+      }
+    });
+
+    it('summary: totals by category and by day add up to the same grand total and include activities and intercity transport', async () => {
+      const { id, dayId } = await withDay();
+      const second = await addDay(alice, id, { cityId: 'dubai' }).expect(201);
+      await add(alice, id, dayId, {
+        category: 'FOOD',
+        amountCents: 2500,
+        currency: 'EGP',
+      }).expect(201);
+      await add(alice, id, second.body.id, {
+        category: 'ACCOMMODATION',
+        amountCents: 9000,
+        currency: 'EGP',
+      }).expect(201);
+      await http()
+        .post(`/api/itineraries/${id}/days/${dayId}/activities`)
+        .set('Cookie', alice)
+        .send({ name: 'Pyramids', costCents: 3500 })
+        .expect(201);
+      await http()
+        .post(`/api/itineraries/${id}/transport-costs`)
+        .set('Cookie', alice)
+        .send({
+          mode: 'FLIGHT',
+          fromCityId: 'cairo',
+          toCityId: 'dubai',
+          amountCents: 25000,
+          currency: 'EGP',
+          dayId,
+        })
+        .expect(201);
+
+      const res = await summaryOf(alice, id).expect(200);
+
+      expect(res.body.itineraryId).toBe(id);
+      const egp = res.body.totals.find(
+        (t: { currency: string }) => t.currency === 'EGP',
+      );
+      // 2500 food + 9000 hotel + 25000 flight (EGP); the 3500 activity is in the platform currency
+      expect(egp.totalCents).toBe(36500);
+      expect(egp.byCategory).toEqual([
+        { category: 'FOOD', totalCents: 2500 },
+        { category: 'ACCOMMODATION', totalCents: 9000 },
+        { category: 'IN_CITY_TRANSPORT', totalCents: 0 },
+        { category: 'ACTIVITIES', totalCents: 0 },
+        { category: 'INTERCITY_TRANSPORT', totalCents: 25000 },
+      ]);
+      expect(
+        egp.byDay.map((d: { totalCents: number }) => d.totalCents),
+      ).toEqual([27500, 9000]);
+      for (const total of res.body.totals) {
+        const byCategory = total.byCategory.reduce(
+          (sum: number, c: { totalCents: number }) => sum + c.totalCents,
+          0,
+        );
+        const byDay = total.byDay.reduce(
+          (sum: number, d: { totalCents: number }) => sum + d.totalCents,
+          0,
+        );
+        expect(byCategory).toBe(total.totalCents);
+        expect(byDay).toBe(total.totalCents);
+      }
+      const platform = res.body.totals.find(
+        (t: { currency: string }) => t.currency === res.body.platformCurrency,
+      );
+      expect(platform.byCategory).toContainEqual({
+        category: 'ACTIVITIES',
+        totalCents: 3500,
+      });
+    });
+
+    it('summary: no totals for an itinerary without costs; 400 for a malformed id', async () => {
+      const { id } = await withDay();
+      const res = await summaryOf(alice, id).expect(200);
+      expect(res.body.totals).toEqual([]);
+      await summaryOf(alice, 'not-an-id').expect(400);
+    });
+
+    it('deleting the day or the itinerary deletes its entries and they stop counting', async () => {
+      const { id, dayId } = await withDay();
+      await add(alice, id, dayId, entry).expect(201);
+
+      await http()
+        .delete(`/api/itineraries/${id}/days/${dayId}`)
+        .set('Cookie', alice)
+        .expect(204);
+
+      const itinerary = await http()
+        .get(`/api/itineraries/${id}`)
+        .set('Cookie', alice)
+        .expect(200);
+      expect(itinerary.body.budgets).toEqual([]);
+      expect((await summaryOf(alice, id).expect(200)).body.totals).toEqual([]);
+
+      const other = await withDay();
+      await add(alice, other.id, other.dayId, entry).expect(201);
+      await http()
+        .delete(`/api/itineraries/${other.id}`)
+        .set('Cookie', alice)
+        .expect(204);
+      await summaryOf(alice, other.id).expect(404);
+    });
+  });
+
   describe('DELETE /api/itineraries/:id/days/:dayId (ITN-07)', () => {
     const addDay = (cookie: string, id: string, body: object) =>
       http()
@@ -1658,6 +1941,14 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
       expect(
         res.body.paths['/api/itineraries/public/search'].get.tags,
       ).toContain('itineraries');
+      expect(
+        res.body.paths['/api/itineraries/{id}/days/{dayId}/budgets'].post.tags,
+      ).toContain('itineraries');
+      expect(
+        res.body.paths['/api/itineraries/{id}/budget-summary'].get,
+      ).toBeDefined();
+      expect(res.body.paths['/api/budgets/{id}'].patch).toBeDefined();
+      expect(res.body.paths['/api/budgets/{id}'].delete).toBeDefined();
     });
   });
 });

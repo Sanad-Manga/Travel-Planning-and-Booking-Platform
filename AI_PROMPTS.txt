@@ -1237,7 +1237,27 @@ Prompt:
 Review comment on the HTL-04 PR: hotels/dto/is-date-only.decorator.ts duplicates itineraries/dto/is-calendar-date.decorator.ts. Move the date validator into backend/src/common (contracts keep shared code there) and flag the itineraries touch in the PR.
 How the output was used:
 Moved the itineraries decorator and its spec with git mv to common/validators (names unchanged: IsCalendarDate / isCalendarDate), exported it from common/index.ts, deleted the hotels copy and switched create-availability.dto.ts to it. The only edit in the itineraries module is the import line in create-itinerary.dto.ts. Re-ran build, lint, npm test and the e2e tests.
-================================================
+
+
+Date: 2026-11-12
+Student: Yassin Yahya
+Tool: Claude (Claude Code)
+Related Requirement: ITN-14 (SCRUM-93)
+Prompt:
+Implement all my itinerary tickets that are not blocked, one ticket per branch and PR. For ITN-14, following
+docs/contracts.md and the Jira checklist: a user adds, edits and deletes non-negative daily budget entries in four
+categories (POST /api/itineraries/:id/days/:dayId/budgets, PATCH/DELETE /api/budgets/:id) and reads the total
+budget by category and by day (GET /api/itineraries/:id/budget-summary), including activity costs and intercity
+transport, owner only. Write the tests first, then the code, then open the PR and update Jira.
+How the output was used:
+Used a separate budgets collection with the author copied as ownerId, so edit and delete check ownership in one
+atomic query. Used the same amount and currency rules as ITN-16 and an optional currency that defaults to the
+platform currency. The summary is calculated on every read, never stored, and gives one block per currency, because
+amounts in different currencies cannot be added without ITN-18 (raw totals and currency are exposed for FxService).
+Intercity transport is its own line next to the four categories, and entries whose day is gone are ignored so the
+category and day totals always add up to the same grand total. City group subtotals now add up the platform-currency
+costs of their days. Budget entries are deleted with their day and with the itinerary. The service tests failed first
+(service missing) and pass now. Lint, build, 714 unit and 462 e2e tests pass.
 Date: 2026-11-11
 Student: Abdulrahman Mohamad Hosny
 Tool: Copilot SDK in VS Code
@@ -1246,7 +1266,6 @@ Prompt:
 Implement FLT-19 using the existing FLT-22 booking hold and FLT-08 baggage policy where appropriate. Add passenger name, date of birth and passport/ID details; derive adult, child or infant type from date of birth; support optional per-passenger extra bags subject to airline and cabin limits; include baggage fees in the booking total in cents. Update Swagger and the relevant flight-booking E2E tests.
 How the output was used:
 Added POST /api/flight-bookings to create a pending booking with passenger details, deriving passenger types from the flight's local departure date and reusing the atomic seat-hold flow. Reused the airline baggage-policy getter; validated per-passenger bag counts and cabin weight limits, and included the baggage fee in totalCents. Passport/ID numbers are stored but excluded from the response. The flight-booking E2E suite passed (43 tests), the booking-price unit suite passed (4 tests), and the backend build, lint and formatting checks passed.
-================================================
 Date: 2026-11-11
 Student: Abdulrahman Mohamad Hosny
 Tool: Copilot SDK in VS Code
@@ -1255,7 +1274,6 @@ Prompt:
 Branch from FLT-19 and implement FLT-21: GET /api/flight-bookings/:id returns the pending booking owner's flight, passenger, baggage and total summary; make sure its cents total equals the flight provider's getPayable amount. Update Swagger and E2E tests, verify them, and record the prompt.
 How the output was used:
 Added the owner-only pending summary endpoint, flight and passenger/baggage response details, and a Flights-side getPayable implementation that reads the stored booking total. The endpoint resolves overdue holds through BookingLifecycle before returning the summary. E2E coverage verifies owner authorization, pending status, expiry, payable-total equality and the Swagger document; all 49 flight-booking E2E tests pass. The current Payments BookingProvider interface still lacks the getPayable signature described in docs/contracts.md; flagged this for the lead/Payments owner rather than editing another module.
-================================================
 Date: 2026-11-08
 Student: Yusuf Eser
 Tool: Claude (Claude Code, Sonnet 5.5)
