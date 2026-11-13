@@ -1326,3 +1326,18 @@ that activity's images, removes the file (safe to repeat) and then pulls the ref
 be retried. Deleting an activity, a day or an itinerary now also removes its stored files, as the upload README asks
 of consumers. Used the multipart field "image" with a 5 MB multer limit (413 above it). The tests were written
 before the code. Merged the latest develop (#63 and others) with one conflict, in this file only. Lint, build, 727 unit and 639 e2e tests pass.
+================================================
+
+Date: 2026-11-13
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: GEN-02 (SCRUM-124)
+Prompt:
+Build GEN-02, field-level validation messages on every endpoint, following docs/contracts.md section 3 (error shape with
+details[{field,message}]). Do not edit other owners' modules; prove it across the whole app, including modules added later.
+How the output was used:
+The global ValidationPipe already produces one details entry per broken field, so no controller was changed. Added one
+whole-app e2e spec that reads every route of the running AppModule, sends a bad body to each route that takes a body DTO
+(as the role the route needs) and checks the 400 shape, that the unknown field and every required field of the DTO each
+have a message. Added a small Swagger post-processor (common/swagger) that documents the 400 with a field-level example on
+every operation that takes input and has no 400 of its own, and a new box in the PR template so every later PR confirms it.
