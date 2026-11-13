@@ -80,6 +80,7 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
   const NOT_LISTS = ['/api/posts/{id}'];
 
   const ROUTES: ListRoute[] = [
+    { swagger: '/api/admin/accounts', url: '/api/admin/accounts', auth: 'admin', total: 2 },
     // 25 plain posts + the one post that carries the comments below
     { swagger: '/api/posts', url: '/api/posts', auth: 'none', total: 26 },
     {
