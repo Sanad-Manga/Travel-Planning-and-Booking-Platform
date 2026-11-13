@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { FlightStatus, utcToLocal } from '../../common';
 import { FlightLean } from '../schemas/flight.schema';
+import { effectiveFlightStatus } from '../utils/flight-status';
 
 export class FlightResponseDto {
   @ApiProperty({ example: '674a1b2c3d4e5f6a7b8c9d0e' })
@@ -47,7 +48,12 @@ export class FlightResponseDto {
   @ApiProperty({ example: 'America/New_York' })
   arrivalTimeZone: string;
 
-  @ApiProperty({ enum: FlightStatus, example: FlightStatus.SCHEDULED })
+  @ApiProperty({
+    enum: FlightStatus,
+    example: FlightStatus.SCHEDULED,
+    description:
+      'SCHEDULED, CANCELLED or DEPARTED. A SCHEDULED flight whose departure time has passed is reported as DEPARTED. Only SCHEDULED flights are searchable, editable or bookable.',
+  })
   status: FlightStatus;
 
   @ApiProperty({ example: '2026-11-05T10:00:00.000Z' })
@@ -58,7 +64,10 @@ export class FlightResponseDto {
 }
 
 /** Response DTO, never the raw document: `_id` becomes `id`, ObjectIds become strings, `__v` is dropped. */
-export function toFlightResponse(doc: FlightLean): FlightResponseDto {
+export function toFlightResponse(
+  doc: FlightLean,
+  now: Date = new Date(),
+): FlightResponseDto {
   return {
     id: doc._id.toString(),
     airlineId: doc.airlineId.toString(),
@@ -71,7 +80,7 @@ export function toFlightResponse(doc: FlightLean): FlightResponseDto {
     arrivalLocal: utcToLocal(doc.arrivalAt, doc.arrivalTimeZone),
     departureTimeZone: doc.departureTimeZone,
     arrivalTimeZone: doc.arrivalTimeZone,
-    status: doc.status,
+    status: effectiveFlightStatus(doc, now),
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
   };

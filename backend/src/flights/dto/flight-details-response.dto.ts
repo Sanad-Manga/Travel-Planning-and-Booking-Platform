@@ -123,7 +123,12 @@ export class FlightDetailsResponseDto {
   @ApiProperty({ example: 'USD' })
   currency: string;
 
-  @ApiProperty({ enum: FlightStatus, example: FlightStatus.SCHEDULED })
+  @ApiProperty({
+    enum: FlightStatus,
+    example: FlightStatus.SCHEDULED,
+    description:
+      'SCHEDULED, CANCELLED or DEPARTED. A SCHEDULED flight whose departure time has passed is reported as DEPARTED. Only SCHEDULED flights are searchable, editable or bookable.',
+  })
   status: FlightStatus;
 
   @ApiProperty({ type: [FlightDetailsCabinDto] })

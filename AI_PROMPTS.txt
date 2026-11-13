@@ -1444,3 +1444,12 @@ register a checker with (documented in docs/api/account-deactivation.md); nothin
 proven only with a test double. 20 e2e tests on mongodb-memory-server (two files, COOKIE_SECURE true and false) plus unit tests; they show comments already read
 'Deleted user' and public itineraries are already hidden, and a read-only probe showed a deactivated author's posts are still
 visible (reported to the blog owner, not changed). I read every file before committing.
+
+Date: 2026-11-13
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: FLT-30 (SCRUM-74)
+Prompt:
+Do FLT-30, flight status SCHEDULED / CANCELLED / DEPARTED: a flight whose departure time has passed reads as DEPARTED even before a scheduled job runs, the job stores the status, and only SCHEDULED flights are searchable, editable or bookable, following docs/contracts.md.
+How the output was used:
+The assistant added the pure effectiveFlightStatus rule, a FlightStatusJob (every minute, one idempotent updateMany) in the flights module, applied the rule to the flight responses and the cabin edit guard, added a departureAt > now filter to search, plus unit tests, five e2e tests on an in-memory MongoDB and Swagger descriptions. I read every file and ran lint, build and the tests.

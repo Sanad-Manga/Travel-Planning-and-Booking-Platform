@@ -50,14 +50,20 @@ export class FlightSearchService {
    * FLT-15: optional inclusive price range (applied per cabin fare, in cents, together with the seat
    * check) and sorting by price, duration or departure time. All other criteria still apply.
    */
-  async search(query: FlightSearchQueryDto): Promise<FlightSearchPageDto> {
-    const { departureAirport, arrivalAirport, departureDate, passengers } = query;
+  async search(
+    query: FlightSearchQueryDto,
+    now: Date = new Date(),
+  ): Promise<FlightSearchPageDto> {
+    const { departureAirport, arrivalAirport, departureDate, passengers } =
+      query;
     const { page, limit } = query;
     await this.validate(query);
 
     const flights = await this.model
       .find({
         status: FlightStatus.SCHEDULED,
+        // FLT-30: a flight that has left is not searchable even before the status job has stored DEPARTED.
+        departureAt: { $gt: now },
         departureAirport,
         arrivalAirport,
         departureLocalDate: departureDate,
@@ -159,7 +165,9 @@ export class FlightSearchService {
     flights: FlightLean[],
   ): Promise<Map<string, SearchAirlineDto>> {
     const ids = [...new Set(flights.map((f) => f.airlineId.toString()))];
-    const found = await Promise.all(ids.map((id) => this.airlines.findById(id)));
+    const found = await Promise.all(
+      ids.map((id) => this.airlines.findById(id)),
+    );
     const active = new Map<string, SearchAirlineDto>();
     for (const airline of found) {
       if (airline && airline.isActive) {
@@ -211,7 +219,10 @@ export class FlightSearchService {
       });
     }
     if (errors.length > 0) {
-      throw new BadRequestException({ message: 'Validation failed', details: errors });
+      throw new BadRequestException({
+        message: 'Validation failed',
+        details: errors,
+      });
     }
   }
 }
