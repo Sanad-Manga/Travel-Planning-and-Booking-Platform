@@ -37,6 +37,7 @@ import { BrowsePostsQueryDto } from './dto/browse-posts-query.dto';
 import { CreatePostDto } from './dto/create-post.dto';
 import { MyPostRowDto } from './dto/my-post-row.dto';
 import { PostDetailDto } from './dto/post-detail.dto';
+import { PostLikeResponseDto } from './dto/post-like-response.dto';
 import { PostListRowDto } from './dto/post-list-row.dto';
 import { PostResponseDto } from './dto/post-response.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
@@ -132,6 +133,44 @@ export class BlogController {
     @Req() request: AuthenticatedRequest,
   ): Promise<PostDetailDto> {
     return this.blogService.findOne(id, request.user, query);
+  }
+
+  @Post(':id/like')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Like a published post (BLG-06)' })
+  @ApiOkResponse({ type: PostLikeResponseDto })
+  @ApiUnauthorizedResponse({
+    type: ErrorResponseDto,
+    description: 'Not logged in',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'Unknown, unpublished, or hidden post',
+  })
+  like(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<PostLikeResponseDto> {
+    return this.blogService.like(id, user);
+  }
+
+  @Delete(':id/like')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Remove your like from a post (BLG-06)' })
+  @ApiOkResponse({ type: PostLikeResponseDto })
+  @ApiUnauthorizedResponse({
+    type: ErrorResponseDto,
+    description: 'Not logged in',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'Post not found',
+  })
+  unlike(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<PostLikeResponseDto> {
+    return this.blogService.unlike(id, user);
   }
 
   @Patch(':id')
