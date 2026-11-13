@@ -1359,3 +1359,19 @@ Prompt:
 Implement ONLY FLT-09: PUT /api/airlines/:id/cancellation-policy. An airline moderator defines cancellation tiers (unique days-before-departure threshold, integer >= 0; refund percent 0-100), stored with the airline and exposed through an exported getter in the airlines module. The refund calculation is Payments RefundCalculator.compute (do not copy it). A moderator edits only their own airline. Follow the shape HTL-10 and RefundCalculator already use.
 How the output was used:
 The assistant added an embedded cancellationTiers list on the airline schema, SetCancellationPolicyDto and response DTO, AirlinesService.setCancellationPolicy (ownership in the service, another airline gives 403; unique thresholds checked in the service with a field-level detail naming the repeated tier; one atomic $set of the whole list, stored and returned largest threshold first) and AirlinesService.getCancellationTiers (exported, [] when none, 404 for an unknown id), the PUT route and 23 e2e tests, including one that feeds the getter output into the real RefundCalculator. Decisions I accepted: the body field is cancellationTiers (same as hotels), at most 20 tiers and thresholds up to 365 days, [] allowed to mean no refunds. I ran lint, prettier and the airline e2e tests and read every file before committing.
+================================================
+================================================
+
+Date: 2026-11-13
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: GEN-05 (SCRUM-125)
+Prompt:
+Do GEN-05, the shared pagination helper with page size 10: the helper already exists in common/pagination, so verify that
+every list ticket merged so far uses it, and that the limits and out-of-range behaviour hold, following docs/contracts.md section 3.
+How the output was used:
+Checked every list endpoint on develop: all query DTOs extend PaginationDto and all lists use paginate() except flight search,
+which slices in memory and builds the same envelope by hand (reported to its owner, not changed). Added one whole-app e2e
+spec that reads the Swagger document, so a new list endpoint must be added to its table or the test fails, and a GET that returns
+a bare array fails too. For each list it checks defaults, limit 1/50 accepted, limit 51/0 and bad page rejected per field, a page
+past the end is an empty list, and 25 seeded rows split into pages with no row twice. No source code changed.
