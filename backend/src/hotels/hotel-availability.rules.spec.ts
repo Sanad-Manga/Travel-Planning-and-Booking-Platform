@@ -1,4 +1,4 @@
-import { cheapestNightlyCombination, coversStay, nightsBetween, todayUtc } from './hotel-availability.rules';
+import { cheapestNightlyCombination, coversStay, nightsBetween, stayTotalCents, todayUtc } from './hotel-availability.rules';
 
 describe('hotel search rules (HTL-11)', () => {
   describe('nightsBetween', () => {
@@ -71,5 +71,20 @@ describe('hotel search rules (HTL-11)', () => {
       // One room of 10 would already fit 4 guests, but 2 rooms were asked for.
       expect(cheapestNightlyCombination([room(10, 100), room(1, 50)], 2, 4)).toBe(150);
     });
+  });
+});
+
+describe('stayTotalCents (HTL-15)', () => {
+  it('is nights x price per night, in integer cents', () => {
+    expect(stayTotalCents(8_500, 3)).toBe(25_500);
+    expect(stayTotalCents(8_500, 1)).toBe(8_500);
+  });
+  it('stays an integer for a long stay at an odd price', () => {
+    const total = stayTotalCents(9_999, 60);
+    expect(Number.isInteger(total)).toBe(true);
+    expect(total).toBe(599_940);
+  });
+  it('matches the nights counted from the dates', () => {
+    expect(stayTotalCents(10_000, nightsBetween('2027-03-10', '2027-03-14'))).toBe(40_000);
   });
 });
