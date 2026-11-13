@@ -4,7 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 import { compare, hash, hashSync } from 'bcryptjs';
 import { Types } from 'mongoose';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { AccessTokenPayload, AccountStatus, LOGIN_LOCK_MINUTES, LOGIN_MAX_FAILED_ATTEMPTS } from '../common';
+import { AccessTokenPayload, AccountStatus, LOGIN_LOCK_MINUTES, LOGIN_MAX_FAILED_ATTEMPTS, readTokenVersion } from '../common';
 import { UserDocument } from '../users/schemas/user.schema';
 import { UsersService } from '../users/users.service';
 import { REFRESH_TOKEN_TTL_SECONDS } from './auth-cookies';
@@ -94,6 +94,14 @@ export class AuthService {
       throw this.invalidCredentials();
     }
 
+    if (user.mustChangePassword) {
+      if (!(await this.usersService.consumeTemporaryPassword(user.id, user.passwordHash, user.tokenVersion ?? 0))) {
+        throw this.invalidCredentials();
+      }
+      // Consumption precedes token issuance: a lost response/session requires another admin reset.
+      return this.startSession(user);
+    }
+
     // Successful login: reset the counter (skip the write when there is nothing to reset).
     if (user.failedAttempts > 0 || user.lockedUntil) {
       await this.usersService.resetFailedLogins(user.id);
@@ -113,7 +121,7 @@ export class AuthService {
     }
 
     const user = await this.usersService.findById(payload.sub);
-    if (!user || user.status !== AccountStatus.ACTIVE) {
+    if (!user || user.status !== AccountStatus.ACTIVE || payload.tokenVersion !== (user.tokenVersion ?? 0) || user.mustChangePassword) {
       throw this.invalidSession();
     }
     return this.startSession(user);
@@ -132,10 +140,10 @@ export class AuthService {
   }
 
   /** The claims of a genuine, unexpired refresh token, or null. Only the REFRESH secret verifies, so an access token fails. */
-  private async verifyRefreshToken(token: unknown): Promise<{ sub: string; jti: string; exp: number } | null> {
+  private async verifyRefreshToken(token: unknown): Promise<{ sub: string; jti: string; exp: number; tokenVersion: number } | null> {
     if (typeof token !== 'string' || token === '') return null;
     try {
-      const payload = await this.jwtService.verifyAsync<{ sub?: unknown; jti?: unknown; exp?: unknown }>(token, {
+      const payload = await this.jwtService.verifyAsync<{ sub?: unknown; jti?: unknown; exp?: unknown; tokenVersion?: unknown }>(token, {
         secret: readJwtSecrets(this.config).refresh,
         algorithms: ['HS256'],
       });
@@ -143,7 +151,9 @@ export class AuthService {
       if (typeof sub !== 'string' || typeof jti !== 'string' || typeof exp !== 'number' || !Types.ObjectId.isValid(sub)) {
         return null;
       }
-      return { sub, jti, exp };
+      const tokenVersion = readTokenVersion(payload.tokenVersion);
+      if (tokenVersion === null) return null;
+      return { sub, jti, exp, tokenVersion };
     } catch {
       return null;
     }
@@ -159,9 +169,9 @@ export class AuthService {
    * rule that lives here: the current password must be right.
    * A wrong current password is a field-level 400, not a 401: the user IS logged in (401 would look like a dead session).
    */
-  async changePassword(userId: string, dto: ChangePasswordDto): Promise<void> {
+  async changePassword(userId: string, dto: ChangePasswordDto, sessionVersion = 0): Promise<boolean> {
     const user = await this.usersService.findByIdWithPassword(userId);
-    if (!user || user.status !== AccountStatus.ACTIVE) {
+    if (!user || user.status !== AccountStatus.ACTIVE || (user.tokenVersion ?? 0) !== sessionVersion) {
       throw new UnauthorizedException('Authentication required');
     }
 
@@ -169,12 +179,21 @@ export class AuthService {
       throw this.fieldError('currentPassword', 'current password is incorrect');
     }
 
+    if (user.mustChangePassword && dto.newPassword === dto.currentPassword) {
+      throw this.fieldError('newPassword', 'new password must differ from the temporary password');
+    }
+
     // bcrypt adds a fresh random salt, stored inside the hash string. Plaintext is never stored or logged.
     const newHash = await hash(dto.newPassword, BCRYPT_SALT_ROUNDS);
     // Compare-and-set on the old hash: if another request changed the password meanwhile, nothing is overwritten.
-    if (!(await this.usersService.replacePasswordHash(user.id, user.passwordHash, newHash))) {
+    const forced = user.mustChangePassword === true;
+    const changed = forced
+      ? await this.usersService.completeForcedPasswordChange(user.id, user.passwordHash, newHash, sessionVersion)
+      : await this.usersService.replacePasswordHash(user.id, user.passwordHash, newHash, sessionVersion);
+    if (!changed) {
       throw new ConflictException('Password was changed by another request. Please try again.');
     }
+    return forced;
   }
 
   /** The user behind a valid token, for GET /auth/me. The token alone is not enough: the account must still be ACTIVE. */
@@ -190,6 +209,7 @@ export class AuthService {
   private signAccessToken(user: UserDocument): Promise<string> {
     const payload: AccessTokenPayload = {
       sub: user.id,
+      tokenVersion: user.tokenVersion ?? 0,
       role: user.role,
       ...(user.airlineId ? { airlineId: user.airlineId.toString() } : {}),
       ...(user.hotelId ? { hotelId: user.hotelId.toString() } : {}),
@@ -198,12 +218,11 @@ export class AuthService {
   }
 
   // Signed with a DIFFERENT secret than the access token, so a refresh token can never pass as an access token.
-  // It only carries the user id; role and ids are re-read from the database when it is exchanged (Sprint 2).
+  // Carries user id and credential version; role/provider ids are re-read on exchange.
   private signRefreshToken(user: UserDocument): Promise<string> {
     return this.jwtService.signAsync(
-      { sub: user.id },
-      // jwtid = random `jti` claim, unique per token. Nothing stores it yet; SCRUM-38 can use it to revoke
-      // a single token without changing the token shape.
+      { sub: user.id, tokenVersion: user.tokenVersion ?? 0 },
+      // Unique per-token jti supports the existing logout revocation list.
       { secret: readJwtSecrets(this.config).refresh, expiresIn: REFRESH_TOKEN_TTL_SECONDS, jwtid: randomUUID() },
     );
   }

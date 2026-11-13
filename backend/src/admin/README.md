@@ -337,3 +337,303 @@ access, dependency edits, console logs or unrelated changes were added. The AI
 prompt log records the request and follow-up authorizations. The student can use
 `feat(admin): list accounts with search and filters (ACC-14)` as the eventual PR
 title after independent review; PR descriptions/checklists were not edited here.
+
+## ACC-07a / SCRUM-45 — Preparation history (superseded by integration below)
+
+<details>
+<summary>Earlier preparation and approval status; retained as history</summary>
+
+**Coordination update, 2026-11-13:** Ahmed has approved the complete feature,
+including User/auth/common changes; Ziad will review the authentication changes.
+Mohamed confirmed that Ziad's explicit no-competing-work confirmation is still
+pending. The historical approval checklist below now describes the integration
+scope, not a request to repeat Ahmed's approval. Protected edits and endpoint
+registration remain deferred until the task's ownership coordination condition
+is satisfied.
+
+**Not a working password-reset endpoint.** No reset controller/provider has been
+registered, no account password is changed by this work, and forced-change
+enforcement has not been implemented. The existing AdminModule/ACC-14 behavior,
+ACC-18 seeding and protected authentication/User/common sources remain unchanged.
+This branch does not depend on unmerged ACC-16 PR #83.
+
+### Confirmed policy decisions
+
+Mohamed selected the following during implementation:
+
+- Only ACTIVE USER, AIRLINE_MODERATOR and HOTEL_MODERATOR targets may receive a
+  reset; inactive and ADMIN targets are rejected, never reactivated or relinked.
+- The temporary credential permits **strictly one successful login**. Loss of
+  the restricted session or login response may require another administrator
+  reset. A boolean forced-change flag alone cannot enforce this policy.
+- Proposed delivery is a single ADMIN-only response with `Cache-Control:
+  no-store` (and no-cache handling), never email, notification, audit or logs.
+  No HTTP disclosure exists until the protected integration is approved and
+  implemented. Operator/browser handling is still a secret-handling responsibility.
+- Protected integration was initially pending owner approval. Ahmed's subsequent
+  approval is recorded above; Ziad's coordination confirmation remains pending.
+
+### Independent components completed
+
+`TemporaryPasswordService.generate()` creates 24 cryptographically random bytes
+(192 random bits), encodes them as base64url and adds a fixed letter/digit prefix.
+The result is 34 ASCII characters; the prefix contributes no entropy. The shared
+`IsValidPassword` decorator validates the candidate, and bcrypt uses the existing
+`BCRYPT_SALT_ROUNDS` constant and a fresh salt. The service does no persistence or
+delivery. Its internal result contains ephemeral plaintext for future approved
+handoff and the salted hash; neither is logged. Crypto/hash/validation failures
+are replaced with a fixed 500 message without values or raw causes.
+
+`PasswordResetTargetService.getEligibleTarget()` is read-only preflight. It checks
+ADMIN authorization in the service, validates the ID, selects only ID/role/status
+from the existing User model, and enforces the chosen ACTIVE-only policy.
+Missing authentication is 401, non-admin callers 403, malformed ID 400, missing
+account 404, and unsupported target role/status 409. It returns no password/hash.
+This read is not a concurrency-safe reset: the eventual atomic update must
+recheck eligibility and expected credential state after generation.
+
+`AdminPasswordResetParamsDto` and the deliberately empty body DTO prepare route
+validation. Administrators will not submit a password, role, status or replacement
+target in the body. These classes do not publish a route or claim Swagger/API
+integration. Only a hash may eventually be stored in MongoDB; current tests verify
+generation/hashing, not database reset persistence.
+
+### Owner approval checklist — proposed design, not an implemented contract
+
+| Owner / files | Required coordinated change and test |
+| --- | --- |
+| Ziad: `users/schemas/user.schema.ts` | Add forced-change state, credential version and single-use temporary-login consumption state. Defaults must preserve existing accounts; reset sets the new hash/flag/version/unused state together |
+| Ziad: `users/users.service.ts` | Atomic reset/temporary-login claim; compare-and-set replacement tied to expected hash/version, clearing forced state and advancing the forced session version. Test reset/change and simultaneous-login races |
+| Ziad: `auth/auth.service.ts` | Permit exactly one valid temporary login through an atomic claim; issue only restricted access; check credential versions on login/session creation and refresh; complete forced change without overwriting a newer reset |
+| Ziad: `auth/auth.controller.ts`, `auth/dto/user-response.dto.ts` | Signal forced-change state; permit compliant replacement through the existing password endpoint; clear forced-session cookies after completion and require fresh normal login. Preserve ordinary change-password behavior |
+| Ahmed/Ziad: `common/guards/jwt-auth.guard.ts`, `common/guards/account-status.ts`, access/principal interfaces and narrowly scoped route metadata | Read current forced/version state on every protected request, invalidate pre-reset sessions and permit only approved password-change/minimal-session handlers while forced. No frontend-only restriction or broad URL exception |
+| Ahmed/Ziad: `auth/auth.module.ts`, related tests and `docs/contracts.md` | Wire/publish the agreed session-check contract and JWT version semantics; preserve normal registration/login/refresh/logout, lockout, moderator and ACC-14 behavior |
+
+Recommended version policy: legacy tokens without a version are version zero only
+for unchanged accounts; an administrative reset advances the stored version so
+old access and refresh tokens fail. Forced completion advances it again, so a
+temporary-login session cannot become an unrestricted session merely because
+another request cleared the flag. Existing per-JTI logout revocation stays intact.
+Ordinary password-change session behavior should remain unchanged. These choices
+are now covered by Ahmed's implementation approval, subject to Ziad's pending
+no-competing-work confirmation before protected files are edited.
+
+Strict single-use requires atomically consuming the temporary-login capability
+after password verification and before issuing a restricted session. If that
+claim succeeds but session issuance/delivery fails, the credential remains used;
+the selected recovery is another administrator reset, not silently making it
+reusable. Refresh and restricted-handler policies must also be enforced by the
+backend. No such claims/state/guard exceptions have been introduced in this phase.
+
+### Focused verification
+
+The tests exercise actual crypto/bcrypt, shared password/input validators, fresh
+salts, random/hash failure redaction and role/status/ID policy with mocked reads.
+No generated plaintext is included in snapshots, assertions that print its value,
+logs, notifications or database records. No database or real account was used.
+Full auth/account E2E and regression verification is deferred until owner-approved
+integration is complete. SCRUM-45 remains incomplete, including its one-use,
+forced-change, persistence, HTTP authorization and Swagger checklist items.
+
+Verification on 2026-11-13: the two focused unit suites passed all 19 tests;
+the backend TypeScript build and ESLint for the five new TypeScript files passed.
+Checks ran in an environment-free temporary copy using existing dependencies,
+without loading the real `.env` or connecting to a database. Full Jest/E2E and
+full-repository lint were not run for this independent preparation phase.
+
+### Approved completion requirements and safe preparation follow-up
+
+The new task requires `tokenVersion`-based access **and** refresh invalidation,
+24-hour expiration, atomic one-use consumption, and a conditional forced change
+that clears temporary state, advances the version and requires fresh login.
+`@AllowWhenMustChange()` must restrict forced sessions by default, with only
+change-password, me and logout allowed. Public behavior and ordinary account
+password changes must retain their existing behavior. These are requirements,
+not implemented guarantees on this branch.
+
+The existing generator now returns `expiresAt`, exactly 24 hours after generation
+begins (hashing time does not extend it). The prepared
+`AdminPasswordResetResponseDto` describes ID, one-time plaintext and UTC expiration;
+it is not exposed through any route yet. Expiration is not persisted or enforced
+until the coordinated integration is implemented.
+
+The final reset must await the existing AuditService with actor/target/action;
+plaintext, hashes, cookies and JWTs must never enter its input. An audit failure
+after the atomic reset must return an error explaining that credentials may
+already have changed, without unsafe rollback. No reset audit is emitted by
+these independent preparation helpers.
+
+Read-only GitHub checks on 2026-11-13 found open PRs #82 and #83. Their changed
+file lists contain no `auth/`, `users/`, or global auth-guard changes. PR #83
+overlaps AdminModule, this README, the prompt log and `docs/contracts.md`; resolve
+those overlaps during eventual integration/review without stacking on it or
+altering Git history here. Open-PR inspection cannot establish the absence of
+Ziad's unpublished work and does not replace his explicit confirmation.
+
+Follow-up verification: both focused suites passed **20/20** tests; backend build
+and ESLint for all six prepared Admin TypeScript files passed. These checks used
+the environment-free temporary copy and existing dependencies. Full Jest/E2E
+and full lint remain deferred because the approved integration is not yet done.
+
+</details>
+
+## ACC-07a / SCRUM-45 — Integrated administrator-assisted password reset
+
+Ahmed explicitly approved implementation across Admin, User, auth, shared guards
+and authentication contracts. Mohamed subsequently clarified that Ziad's pending
+no-competing-work confirmation is final coordination rather than a prohibition on
+isolated local implementation. Ziad reviews these authentication changes.
+The previous preparation-only statements above describe the earlier phase.
+
+### Endpoint and target policy
+
+`POST /api/admin/users/:id/reset-password` is registered by the existing
+`AdminModule`, already imported by production `AppModule`. No AppModule edit or
+dependency on unmerged ACC-16 code was needed. ACC-18 seeding and ACC-14 account
+listing remain intact.
+
+- The existing global guards enforce authentication and ADMIN role; the service
+  also authorizes through the existing target-eligibility helper.
+- The target must be ACTIVE and USER, AIRLINE_MODERATOR or HOTEL_MODERATOR.
+  ADMIN/inactive targets return 409; missing targets 404, malformed IDs and
+  unsupported body fields 400, non-admin callers 403, missing/invalid auth 401.
+- Send `{}`; the administrator does not choose the password or alter account
+  role/status/provider associations. Success is 200 with `id`, `temporaryPassword`
+  and UTC `expiresAt`, plus `Cache-Control: no-store` and `Pragma: no-cache`.
+  Plaintext is disclosed in that response only; there is no recovery/read-secret
+  endpoint, email, notification or stored plaintext copy.
+- Generation reuses the prepared crypto/bcrypt/password-validator implementation.
+  Expiration is exactly 24 hours after generation starts. The conditional update
+  rechecks allowed role, ACTIVE status and the observed version, sets the salted
+  hash/forced/expiration/unused state, increments `tokenVersion`, and clears login
+  failure/lockout state. It changes no bookings or content. Competing reset or
+  forced-completion updates based on an older version return 409.
+
+### Authentication lifecycle
+
+1. Reset atomically invalidates every older access and refresh credential by
+   advancing `tokenVersion`. Both newly signed JWT kinds include that version.
+2. The global guard reads current status/version/forced state from MongoDB on
+   each protected request. Missing version on legacy accounts/tokens means zero;
+   it never means the latest database version. Malformed/stale versions fail 401.
+3. Correct temporary login conditionally consumes the credential in one update
+   matching hash/version/ACTIVE/unused/unexpired/unlocked state. Incorrect
+   passwords do not consume it. Exactly one concurrent login can win. A consumed
+   or expired credential returns generic 401 and issues no usable new session.
+4. The returned user DTO includes `mustChangePassword: true` for forced accounts.
+   `@AllowWhenMustChange()` marks only PATCH `/api/auth/change-password`, GET
+   `/api/auth/me` and logout. All other protected routes default to 403 while
+   forced. RolesGuard still runs. Public routes retain their behavior; logout
+   remains public/idempotent. Refresh rejects forced accounts with 401 and clears
+   cookies instead of extending the restricted session.
+5. Forced replacement uses the existing min-8/letter/digit/max-72-UTF8-byte
+   validator and requires a different password. It matches the authenticated
+   version, expected hash, ACTIVE/forced/consumed state, stores a fresh salted
+   hash, clears the flag and temporary markers, and increments the version again.
+   Both cookies are cleared; login with the new password restores normal access.
+   An old in-flight change cannot overwrite a more recent reset. Ordinary
+   password changes retain their current-session behavior and also match version.
+
+New User defaults are `mustChangePassword: false` and `tokenVersion: 0`; temporary
+markers are optional and excluded from default Mongoose selection. Only code
+verifying credentials explicitly loads them. Public/profile/account DTOs exclude
+hashes, temporary markers and versions. The authenticated principal carries the
+verified version internally so password replacement cannot trust a later read
+alone. `isActive()` remains available for existing consumers; the guard now uses
+`getAuthenticationState()` for one indexed read of status/version/forced state.
+
+### Audit, recovery and limitations
+
+After persistence the endpoint awaits the unchanged `AuditService.log()` contract
+with administrator ID, `ADMIN_PASSWORD_RESET`, target type `USER`, target ID and
+service-generated timestamps. There are no secrets, hashes, cookies or JWTs in
+audit input. Credential-update driver errors are replaced with fixed errors so
+the exception logger cannot print update documents or credential hashes.
+
+Audit failure after reset returns 500 explicitly saying credentials changed;
+the response does not disclose the secret and there is no unsafe rollback.
+Credential update and audit persistence are not transactionally atomic. A crash
+between them may leave an unaudited reset. Another ADMIN reset recovers a lost
+secret; successful reset requests are intentionally not idempotent. Concurrent
+requests that read the same version have one winner; later requests may perform
+a fresh reset and invalidate a previously disclosed temporary credential.
+
+Temporary consumption precedes session issuance. A signing/delivery failure or
+lost session leaves it consumed; another admin reset may be required. Restricted
+sessions have the existing access-token lifetime and cannot refresh. Expiration
+limits temporary **login**, not an already authenticated password-change request.
+Version invalidation applies at subsequent authorization/refresh checks; it does
+not cancel requests already authorized or reverse completed business actions.
+
+Read-only open-PR checks found no auth/User/global-guard overlap in #82/#83.
+PR #83 overlaps AdminModule/documentation/contracts, so final coordination must
+preserve both tickets when it merges. No ACC-16 implementation was copied here.
+Ziad's confirmation/review remains outstanding; no Git history or PR was changed.
+
+### Evidence and SCRUM-45 checklist
+
+`test/admin-password-reset.e2e-spec.ts` uses actual production AppModule, its
+global guards, real HTTP/cookies/bcrypt and disposable MongoDB. A test-only
+protected controller proves newly added routes deny forced sessions by default;
+no auth guard or authentication service is replaced. Controlled spies only force
+failure/race timing. Synthetic raw inserts also test pre-version legacy accounts.
+
+The 28 AppModule cases cover supported roles, rejected callers/targets/input,
+salted hash and expiration persistence, old-password rejection, wrong/expired/
+consumed/concurrent temporary login, session-issuance failure after consumption,
+legacy/current access and refresh invalidation, allow-list/default denial, public
+routes, replacement validation and completion, ordinary login/change/refresh/
+logout and suspension checks, moderator provider IDs, unchanged booking/content
+rows, ACC-14 safe listing, audit success/failure, credential-log redaction, three
+reset/change race directions, concurrent resets and generated Swagger.
+
+| Ticket checklist | Evidence |
+| --- | --- |
+| ADMIN-only reset; non-admin 403 | Global roles plus service authorization; HTTP and helper tests |
+| Generated temporary password stored only as salted hash; works once | Actual crypto/bcrypt unit tests, stored hash/expiry assertions and concurrent MongoDB claim test |
+| mustChangePassword forces compliant replacement next login | Real guard allow-list, validator errors, atomic completion, token/cookie invalidation and fresh-login tests |
+| User and both moderator targets supported | HTTP cases for all three roles with provider association preservation |
+| Swagger, ACC-07a PR and shared checklist | Actual Swagger assertions pass; PR publication is intentionally not performed. Scope/ownership approval is documented here and in contracts; tests validate authorization, inputs, concurrency, response safety and regressions |
+
+Focused verification: **101/101 unit tests** across five suites and **28/28
+AppModule E2E tests** passed. Tests run in an environment-free temporary copy
+with existing dependencies, temporary storage and disposable MongoDB only.
+
+Final sequential verification on 2026-11-13:
+
+| Check | Result |
+| --- | --- |
+| Focused Blog test-adapter regression | 24/24 tests, 2 suites passed |
+| Full Jest: `npm test -- --runInBand` | 869/869 tests, 55 suites passed |
+| Full E2E: `npm run test:e2e -- --runInBand` | 1,032/1,032 tests, 39 suites passed |
+| TypeScript: `npm run build` | Passed |
+| Full ESLint: `npm run lint` | Passed |
+
+The first full Jest run exposed two existing Blog test doubles implementing only
+the old status-checker method. Adding the new checker method preserved their
+status policy and all assertions; the focused adapter suites and full Jest rerun
+passed. No production fallback bypass was introduced. Full E2E emitted listener
+warnings; they were not suppressed or addressed through unrelated changes.
+Final Git whitespace and tested-source identity checks passed; no unresolved
+conflicts or unrelated changes were found. No dependency installation or shared
+Atlas access was performed.
+
+### Changed-file map for independent review
+
+All paths below are relative to the repository root; the pre-existing preparation
+is included in this uncommitted feature diff.
+
+| Area | Files |
+| --- | --- |
+| Admin implementation | `backend/src/admin/admin.module.ts`, `admin-password-reset.controller.ts`, `admin-password-reset.service.ts`, `password-reset-target.service.ts`, `temporary-password.service.ts` (the last four share the same Admin directory) |
+| Admin DTOs/tests/docs | `backend/src/admin/dto/admin-password-reset.dto.ts`, `backend/src/admin/dto/admin-password-reset-response.dto.ts`, `backend/src/admin/password-reset-target.service.spec.ts`, `backend/src/admin/temporary-password.service.spec.ts`, `backend/src/admin/README.md` |
+| Auth integration/tests | `backend/src/auth/auth.controller.ts`, `backend/src/auth/auth.module.ts`, `backend/src/auth/auth.service.ts`, `backend/src/auth/auth.service.spec.ts`, `backend/src/auth/dto/user-response.dto.ts` |
+| User integration/tests | `backend/src/users/schemas/user.schema.ts`, `backend/src/users/users.service.ts`, `backend/src/users/users.service.spec.ts` |
+| Shared guard contract | `backend/src/common/decorators/allow-when-must-change.decorator.ts`, `backend/src/common/decorators/index.ts`, `backend/src/common/guards/account-status.ts`, `backend/src/common/guards/jwt-auth.guard.ts`, `backend/src/common/guards/guards.spec.ts`, `backend/src/common/interfaces/access-token-payload.ts`, `backend/src/common/interfaces/authenticated-user.ts` |
+| Necessary existing test adapters | `backend/src/blog/comments.integration.spec.ts`, `backend/src/blog/likes.integration.spec.ts` (only add the new checker method to the existing test doubles; preserve assertions), `backend/test/auth.e2e-spec.ts` (expect verified tokenVersion on the test-only principal response) |
+| Application E2E and records | `backend/test/admin-password-reset.e2e-spec.ts`, `docs/contracts.md`, `AI_PROMPTS.txt` |
+
+No production Blog code, dependencies, global test configuration/scripts,
+AppModule, shared AuditService, CSV data or other developers' feature behavior
+was changed. These minimal existing test adapters are required by the explicitly
+approved authentication-checker/principal contract extension.

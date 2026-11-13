@@ -7,6 +7,9 @@ export class UserResponseDto {
   @ApiProperty({ example: '6730a1f2c3d4e5f607182930' })
   id: string;
 
+  @ApiPropertyOptional({ description: 'True only for a restricted session requiring password replacement. Only me, change-password and logout are permitted; refresh is rejected.' })
+  mustChangePassword?: boolean;
+
   @ApiProperty({ example: 'Ali Hassan' })
   name: string;
 
@@ -40,6 +43,7 @@ export class UserResponseDto {
   static from(user: UserDocument): UserResponseDto {
     return {
       id: user.id,
+      ...(user.mustChangePassword ? { mustChangePassword: true } : {}),
       name: user.name,
       email: user.email,
       role: user.role,

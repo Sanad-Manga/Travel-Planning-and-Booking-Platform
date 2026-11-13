@@ -159,7 +159,7 @@ describe('login, /me and the global guards (e2e)', () => {
     it('@CurrentUser returns { userId, role } and moderators carry their airlineId', async () => {
       const mod = await login('mod@example.com').expect(200);
       const res = await http().get('/api/probe/any-user').set('Cookie', tokenFrom(mod)).expect(200);
-      expect(res.body).toEqual({ userId: mod.body.id, role: 'AIRLINE_MODERATOR', airlineId: mod.body.airlineId });
+      expect(res.body).toEqual({ userId: mod.body.id, role: 'AIRLINE_MODERATOR', airlineId: mod.body.airlineId, tokenVersion: 0 });
     });
 
     it('@Roles(ADMIN): a USER gets 403', async () => {

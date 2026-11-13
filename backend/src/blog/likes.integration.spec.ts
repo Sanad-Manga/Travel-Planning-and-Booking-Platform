@@ -77,6 +77,7 @@ describe('BLG-06 post likes integration', () => {
         {
           provide: ACCOUNT_STATUS_CHECKER,
           useValue: {
+            getAuthenticationState: async (id: string) => ({ active: accounts.get(id) === AccountStatus.ACTIVE, tokenVersion: 0, mustChangePassword: false }),
             isActive: async (id: string) =>
               accounts.get(id) === AccountStatus.ACTIVE,
           },
