@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ReferenceDataModule } from '../reference-data/reference-data.module';
+import { UploadsModule } from '../uploads';
 import { UsersModule } from '../users/users.module';
 import { ActivitiesController } from './activities.controller';
 import { ActivitiesService } from './activities.service';
@@ -31,6 +32,8 @@ import { TransportCostsService } from './transport-costs.service';
     ReferenceDataModule,
     // ITN-20: public search shows an itinerary only while its author's account is ACTIVE (ACC-12).
     UsersModule,
+    // ITN-12: activity images are stored through the shared UploadService (GEN-08).
+    UploadsModule,
   ],
   // The public controller comes first so its static paths win over ItinerariesController's /:id.
   controllers: [

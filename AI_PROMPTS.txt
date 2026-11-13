@@ -1239,6 +1239,7 @@ How the output was used:
 Moved the itineraries decorator and its spec with git mv to common/validators (names unchanged: IsCalendarDate / isCalendarDate), exported it from common/index.ts, deleted the hotels copy and switched create-availability.dto.ts to it. The only edit in the itineraries module is the import line in create-itinerary.dto.ts. Re-ran build, lint, npm test and the e2e tests.
 
 
+
 Date: 2026-11-12
 Student: Yassin Yahya
 Tool: Claude (Claude Code)
@@ -1304,3 +1305,24 @@ Prompt:
 CI fails on every open PR. Find out why develop does not build, repair it, and check that every merged itinerary PR still has all of its tests.
 How the output was used:
 The #53 and #54 squash merges each kept only one side of a conflict (cityGroups and the activities wiring were lost), so develop did not compile. The repair is PR #61. A check of the tests of every merged PR then found that the 11 ITN-08 tests (reorder days) of PR #50 were lost too. They are restored here, and the reorder response now carries the activities and transport costs like a GET does, with a new e2e test for it.
+================================================
+
+Date: 2026-11-12
+Student: Yassin Yahya
+Tool: Claude (Claude Code)
+Related Requirement: ITN-12 (SCRUM-107)
+Prompt:
+Implement all my itinerary tickets that are not blocked, one ticket per branch and PR. For ITN-12, following
+docs/contracts.md and the Jira checklist: a user attaches images to and removes them from an activity
+(POST /api/activities/:id/images, DELETE /api/activities/:id/images/:imageId) using the shared UploadService
+(JPG/PNG, 5 MB, max 5 per activity), owner only, and removing an image removes the reference. Write the tests first,
+then the code, then open the PR and update Jira.
+How the output was used:
+Used UploadService for every check and for the files (no upload code of my own): validation, the 5 MB limit and the
+5-per-activity limit (409 on the 6th, atomic in the upload service, tested with 8 simultaneous uploads). Stored only
+the { id, url } reference on the activity, looked up with the owner in the filter first, and removed the stored file
+again if saving the reference fails or the activity was deleted in between. Removing checks the image id is one of
+that activity's images, removes the file (safe to repeat) and then pulls the reference, so a failure in between can
+be retried. Deleting an activity, a day or an itinerary now also removes its stored files, as the upload README asks
+of consumers. Used the multipart field "image" with a 5 MB multer limit (413 above it). The tests were written
+before the code. Merged the latest develop (#63 and others) with one conflict, in this file only. Lint, build, 727 unit and 639 e2e tests pass.
