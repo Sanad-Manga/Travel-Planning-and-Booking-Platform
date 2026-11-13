@@ -22,6 +22,10 @@ import { AirlinesService } from './airlines.service';
 import { AirlineIdParamDto } from './dto/airline-id-param.dto';
 import { AirlineResponseDto } from './dto/airline-response.dto';
 import {
+  CancellationPolicyResponseDto,
+  SetCancellationPolicyDto,
+} from './dto/cancellation-policy.dto';
+import {
   BaggagePolicyResponseDto,
   SetBaggagePolicyDto,
 } from './dto/baggage-policy.dto';
@@ -134,5 +138,35 @@ export class AirlinesController {
     @Body() dto: SetBaggagePolicyDto,
   ) {
     return this.airlines.setBaggagePolicy(user, params.id, dto);
+  }
+
+  @Put(':id/cancellation-policy')
+  @Roles(Role.AIRLINE_MODERATOR)
+  @ApiOperation({
+    summary:
+      'Set the cancellation tiers (days before departure -> refund %) of my airline (moderator of that airline only) - FLT-09',
+    description:
+      'Replaces the whole list. [] means no refunds. Thresholds must be unique. The refund amount itself is calculated by Payments from these tiers.',
+  })
+  @ApiOkResponse({ type: CancellationPolicyResponseDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description:
+      'Invalid id, missing or non-array tiers, a negative or fractional threshold, a refund outside 0-100, a duplicate threshold, more than 20 tiers, or an unknown field',
+  })
+  @ApiForbiddenResponse({
+    type: ErrorResponseDto,
+    description: 'Caller is not a moderator of this airline',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'No such airline',
+  })
+  setCancellationPolicy(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: AirlineIdParamDto,
+    @Body() dto: SetCancellationPolicyDto,
+  ) {
+    return this.airlines.setCancellationPolicy(user, params.id, dto);
   }
 }
