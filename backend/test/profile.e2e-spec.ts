@@ -221,7 +221,7 @@ describe('GET/PATCH /api/users/me (e2e)', () => {
   it('Swagger documents GET and PATCH /api/users/me with cookie auth, 200, 400 and 401', async () => {
     const res = await http().get('/api/docs-json').expect(200);
     const path = res.body.paths['/api/users/me'];
-    expect(Object.keys(path).sort()).toEqual(['get', 'patch']);
+    expect(Object.keys(path).sort()).toEqual(['delete', 'get', 'patch']);
     expect(Object.keys(path.get.responses)).toEqual(expect.arrayContaining(['200', '401']));
     expect(Object.keys(path.patch.responses)).toEqual(expect.arrayContaining(['200', '400', '401']));
     expect(path.get.security).toBeDefined();
