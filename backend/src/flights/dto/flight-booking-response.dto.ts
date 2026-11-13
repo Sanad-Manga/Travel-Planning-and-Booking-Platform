@@ -75,6 +75,21 @@ export class FlightBookingResponseDto {
 }
 
 /** Response DTO, never the raw document: `_id` becomes `id`, ObjectIds become strings, `__v` is dropped. */
+/** One passenger as shown to the traveler. The passport/ID number is never part of it. Shared by every booking response. */
+export function toBookingPassengerResponse(
+  passenger: NonNullable<FlightBookingLean['passengers']>[number],
+): BookingPassengerResponseDto {
+  return {
+    fullName: passenger.fullName,
+    dateOfBirth: passenger.dateOfBirth,
+    passengerType: passenger.passengerType,
+    extraBags: passenger.extraBags.map((bag) => ({
+      weightKg: bag.weightKg,
+    })),
+    baggageFeeCents: passenger.baggageFeeCents,
+  };
+}
+
 export function toFlightBookingResponse(
   doc: FlightBookingLean,
 ): FlightBookingResponseDto {
@@ -88,17 +103,7 @@ export function toFlightBookingResponse(
       infants: doc.passengerCounts.infants,
     },
     ...(doc.passengers
-      ? {
-          passengers: doc.passengers.map((passenger) => ({
-            fullName: passenger.fullName,
-            dateOfBirth: passenger.dateOfBirth,
-            passengerType: passenger.passengerType,
-            extraBags: passenger.extraBags.map((bag) => ({
-              weightKg: bag.weightKg,
-            })),
-            baggageFeeCents: passenger.baggageFeeCents,
-          })),
-        }
+      ? { passengers: doc.passengers.map(toBookingPassengerResponse) }
       : {}),
     seats: doc.seats,
     farePerPassengerCents: doc.farePerPassengerCents,

@@ -14,6 +14,13 @@ import {
   FlightBookingLean,
 } from './schemas/flight-booking.schema';
 
+export interface FlightPayable {
+  amountCents: number;
+  currency: string;
+  status: BookingStatus;
+  holdExpiresAt: Date | null;
+}
+
 /**
  * Flights B's side of the booking-provider contract (docs/contracts.md section 7): what BookingLifecycle,
  * the hold-expiry sweep and Payments call. Every seat change happens in the same MongoDB transaction as
@@ -32,6 +39,33 @@ export class FlightBookingProvider implements BookingProvider, OnModuleInit {
 
   onModuleInit(): void {
     this.registry.register(BookingType.FLIGHT, this);
+  }
+
+  /** FLT-21/PAY-01: expose the stored booking total through the documented payable shape. */
+  async getPayable(id: string, userId: string): Promise<FlightPayable | null> {
+    if (!Types.ObjectId.isValid(id) || !Types.ObjectId.isValid(userId)) {
+      return null;
+    }
+    const booking = await this.model
+      .findOne({
+        _id: new Types.ObjectId(id),
+        userId: new Types.ObjectId(userId),
+      })
+      .select('totalCents currency status holdExpiresAt')
+      .lean<
+        Pick<
+          FlightBookingLean,
+          'totalCents' | 'currency' | 'status' | 'holdExpiresAt'
+        >
+      >()
+      .exec();
+    if (!booking) return null;
+    return {
+      amountCents: booking.totalCents,
+      currency: booking.currency,
+      status: booking.status,
+      holdExpiresAt: booking.holdExpiresAt ?? null,
+    };
   }
 
   async getStatus(id: string): Promise<BookingStatusSnapshot | null> {

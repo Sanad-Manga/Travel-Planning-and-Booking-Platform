@@ -10,24 +10,31 @@ import { Connection, Model, Types } from 'mongoose';
 import {
   AuthenticatedUser,
   BookingStatus,
+  BookingType,
   HOLD_MINUTES,
   isCalendarDate,
   PassengerType,
   PLATFORM_CURRENCY,
 } from '../common';
 import { AirlinesService } from '../airlines';
+import { BookingLifecycle } from '../payments';
 import { FlightInventoryService } from './flight-inventory.service';
 import {
   FlightBookingResponseDto,
+  toBookingPassengerResponse,
   toFlightBookingResponse,
 } from './dto/flight-booking-response.dto';
 import { CreateFlightBookingDto } from './dto/create-flight-booking.dto';
+import { FlightBookingSummaryResponseDto } from './dto/flight-booking-summary-response.dto';
 import { HoldFlightBookingDto } from './dto/hold-flight-booking.dto';
+import { FlightBookingProvider } from './flight-booking.provider';
 import {
   BookingPassenger,
   FlightBooking,
   FlightBookingLean,
 } from './schemas/flight-booking.schema';
+import { Flight, FlightLean } from './schemas/flight.schema';
+import { toFlightResponse } from './dto/flight-response.dto';
 import {
   bookingTotalCents,
   infantFareCents,
@@ -82,9 +89,13 @@ export class FlightBookingsService {
   constructor(
     @InjectModel(FlightBooking.name)
     private readonly model: Model<FlightBooking>,
+    @InjectModel(Flight.name)
+    private readonly flights: Model<Flight>,
     @InjectConnection() private readonly connection: Connection,
     private readonly inventory: FlightInventoryService,
     private readonly airlines: AirlinesService,
+    private readonly bookingProvider: FlightBookingProvider,
+    private readonly bookingLifecycle: BookingLifecycle,
   ) {}
 
   /** FLT-19: derive passenger types from date of birth and create the pending booking with baggage details. */
@@ -171,6 +182,65 @@ export class FlightBookingsService {
       baggageFeeCents,
       now,
     );
+  }
+
+  /** FLT-21: show the pending summary only to its owner, resolving an overdue hold before returning it. */
+  async getSummary(
+    user: AuthenticatedUser,
+    id: string,
+    now: Date = new Date(),
+  ): Promise<FlightBookingSummaryResponseDto> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new NotFoundException('Flight booking not found');
+    }
+    const userId = new Types.ObjectId(user.userId);
+    const ownerFilter = { _id: new Types.ObjectId(id), userId };
+    const owned = await this.model
+      .findOne(ownerFilter)
+      .lean<FlightBookingLean>()
+      .exec();
+    if (!owned) throw new NotFoundException('Flight booking not found');
+
+    await this.bookingLifecycle.expireIfDue(BookingType.FLIGHT, id, now);
+
+    const booking = await this.model
+      .findOne(ownerFilter)
+      .lean<FlightBookingLean>()
+      .exec();
+    if (!booking) throw new NotFoundException('Flight booking not found');
+    const payable = await this.bookingProvider.getPayable(id, user.userId);
+    if (!payable) throw new NotFoundException('Flight booking not found');
+    if (
+      booking.status !== BookingStatus.PENDING_PAYMENT ||
+      payable.status !== BookingStatus.PENDING_PAYMENT
+    ) {
+      throw new ConflictException(
+        'A summary is available only while the booking is pending payment',
+      );
+    }
+
+    const flight = await this.flights
+      .findById(booking.flightId)
+      .lean<FlightLean>()
+      .exec();
+    if (!flight) throw new NotFoundException('Flight not found');
+
+    return {
+      id: booking._id.toString(),
+      flight: toFlightResponse(flight),
+      cabinClass: booking.cabinClass,
+      passengerCounts: {
+        adults: booking.passengerCounts.adults,
+        children: booking.passengerCounts.children,
+        infants: booking.passengerCounts.infants,
+      },
+      passengers: (booking.passengers ?? []).map(toBookingPassengerResponse),
+      baggageFeeCents: booking.baggageFeeCents ?? 0,
+      totalCents: payable.amountCents,
+      currency: payable.currency,
+      status: payable.status,
+      holdExpiresAt: payable.holdExpiresAt?.toISOString() ?? null,
+    };
   }
 
   /**

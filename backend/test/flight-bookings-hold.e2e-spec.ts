@@ -15,6 +15,7 @@ import { AuthModule } from '../src/auth/auth.module';
 import { BookingStatus, BookingType, Role } from '../src/common';
 import configuration from '../src/config/configuration';
 import { FlightsModule } from '../src/flights';
+import { FlightBookingProvider } from '../src/flights/flight-booking.provider';
 import { FlightBooking } from '../src/flights/schemas/flight-booking.schema';
 import { NotificationsModule } from '../src/notifications';
 import { BookingLifecycle, PaymentsModule } from '../src/payments';
@@ -35,6 +36,7 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
   let connection: Connection;
   let lifecycle: BookingLifecycle;
   let bookingModel: Model<FlightBooking>;
+  let bookingProvider: FlightBookingProvider;
 
   const PASSWORD = 'Passw0rdOK';
   const HOLD = '/api/flight-bookings/hold';
@@ -64,6 +66,7 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
 
   let admin: string;
   let traveler: string;
+  let otherTraveler: string;
   let moderator: string;
   let airline: { id: string };
   let travelerId: string;
@@ -175,6 +178,7 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
     bookingModel = app.get<Model<FlightBooking>>(
       getModelToken(FlightBooking.name),
     );
+    bookingProvider = app.get(FlightBookingProvider);
     await connection.model('User').init();
     await connection.model('Airline').init();
     await connection.model('Flight').init();
@@ -202,6 +206,7 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
     travelerId = (await connection
       .collection('users')
       .findOne({ email: 'traveler@example.com' }))!._id.toString();
+    otherTraveler = await loginAs('other-traveler@example.com');
     airline = (
       await http()
         .post('/api/airlines')
@@ -850,6 +855,150 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       };
       await http().post(BOOKING).send(payload).expect(401);
       await http().post(BOOKING).set('Cookie', admin).send(payload).expect(403);
+    });
+  });
+
+  describe('GET /api/flight-bookings/:id (FLT-21)', () => {
+    it('returns the flight, passenger and baggage summary with the payable total', async () => {
+      await setBaggagePolicy(3000, 2);
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10, 0, 0, 45000);
+      const created = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          flightId,
+          cabinClass: 'ECONOMY',
+          passengers: [
+            {
+              fullName: 'Adult Passenger',
+              dateOfBirth: '2078-12-01',
+              passportOrIdNumber: 'P1234567',
+              extraBags: [{ weightKg: 20 }],
+            },
+          ],
+        })
+        .expect(201);
+
+      const summary = await http()
+        .get(`${BOOKING}/${created.body.id}`)
+        .set('Cookie', traveler)
+        .expect(200);
+      const payable = await bookingProvider.getPayable(
+        created.body.id as string,
+        travelerId,
+      );
+
+      expect(payable).not.toBeNull();
+      expect(summary.body).toMatchObject({
+        id: created.body.id,
+        flight: {
+          id: flightId,
+          flightNumber: 'MS777',
+          departureAirport: 'CAI',
+          arrivalAirport: 'JFK',
+        },
+        cabinClass: 'ECONOMY',
+        passengerCounts: { adults: 1, children: 0, infants: 0 },
+        passengers: [
+          {
+            fullName: 'Adult Passenger',
+            dateOfBirth: '2078-12-01',
+            passengerType: 'ADULT',
+            extraBags: [{ weightKg: 20 }],
+            baggageFeeCents: 3000,
+          },
+        ],
+        baggageFeeCents: 3000,
+        totalCents: 48000,
+        currency: 'USD',
+        status: 'PENDING_PAYMENT',
+      });
+      expect(summary.body.totalCents).toBe(payable?.amountCents);
+      expect(summary.body.passengers[0]).not.toHaveProperty(
+        'passportOrIdNumber',
+      );
+    });
+
+    it('allows only the booking owner to view the summary', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+      const bookingId = await hold(flightId);
+
+      await http()
+        .get(`${BOOKING}/${bookingId}`)
+        .set('Cookie', otherTraveler)
+        .expect(404);
+      await http().get(`${BOOKING}/${bookingId}`).expect(401);
+      await http()
+        .get(`${BOOKING}/${bookingId}`)
+        .set('Cookie', admin)
+        .expect(403);
+    });
+
+    it('returns 404 for malformed or unknown booking ids', async () => {
+      await http()
+        .get(`${BOOKING}/not-an-id`)
+        .set('Cookie', traveler)
+        .expect(404);
+      await http()
+        .get(`${BOOKING}/${new Types.ObjectId().toString()}`)
+        .set('Cookie', traveler)
+        .expect(404);
+    });
+
+    it('does not return a summary after the booking is no longer pending', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+      const bookingId = await hold(flightId);
+      await lifecycle.confirmPaid(BookingType.FLIGHT, bookingId, 'pi_summary');
+
+      await http()
+        .get(`${BOOKING}/${bookingId}`)
+        .set('Cookie', traveler)
+        .expect(409);
+    });
+
+    it('lazily expires an overdue hold before returning the summary', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+      const created = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          flightId,
+          cabinClass: 'ECONOMY',
+          passengers: [
+            {
+              fullName: 'Adult Passenger',
+              dateOfBirth: '2078-12-01',
+              passportOrIdNumber: 'P1234567',
+            },
+          ],
+        })
+        .expect(201);
+      await expireNow(created.body.id);
+
+      await http()
+        .get(`${BOOKING}/${created.body.id}`)
+        .set('Cookie', traveler)
+        .expect(409);
+
+      const stored = await connection
+        .collection('flightBookings')
+        .findOne({ _id: new Types.ObjectId(created.body.id) });
+      expect(stored?.status).toBe(BookingStatus.EXPIRED);
+      expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0 });
+    });
+
+    it('publishes the summary route and response schema in Swagger', async () => {
+      const docs = await http().get('/api/docs-json').expect(200);
+      expect(
+        docs.body.paths['/api/flight-bookings/{id}'].get.responses['200'],
+      ).toBeDefined();
+      expect(docs.body.paths['/api/flight-bookings/{id}'].get.operationId).toBe(
+        'FlightBookingsController_getSummary',
+      );
     });
   });
 
