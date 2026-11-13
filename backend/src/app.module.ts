@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AdminModule } from './admin/admin.module';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AirlinesModule } from './airlines';
@@ -41,6 +42,7 @@ import { UploadsModule } from './uploads';
     AuditModule,
     UploadsModule,
     ReportsModule,
+    AdminModule,
   ],
 })
 export class AppModule {}

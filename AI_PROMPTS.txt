@@ -1416,6 +1416,13 @@ the cancellation policy and empty-policy behavior, missing/inactive flights, and
 flight-search E2E suite passed (41 tests).
 
 Date: 2026-11-13
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: ACC-14 (SCRUM-43)
+Prompt:
+Implement GET /api/admin/accounts using the existing global cookie authentication, ADMIN role, shared User schema and pagination. Support trimmed case-insensitive literal search over name OR email, combined role/status filters, strict validation, safe six-field response DTOs and Swagger. Add meaningful disposable-MongoDB tests, run focused/full checks, preserve administrator seeding, and leave changes uncommitted. Follow-up authorization permitted only the necessary account-list entry in the shared pagination E2E table while preserving all assertions. When a newer remote baseline was detected, stop without Git mutations; resume after the student synchronized the branch and restored the changes.
+How the output was used:
+Added AdminModule/controller/service, list query and response DTOs, eight service tests and 42 real-AppModule HTTP/database tests. Registered AdminModule minimally in AppModule; added only the authorized pagination test-table entry using existing synthetic accounts. Appended ACC-14 documentation without changing prior seeding instructions. After the student synchronized to cd9d6ef, the full Jest suite passed 796/796 tests (49 suites), standard full E2E passed 913/913 (34 suites), build and ESLint passed; tracked/new-file whitespace checks passed. Focused ACC-14 commands passed during implementation, and all 50 ACC-14 cases passed in the synchronized full runs. Verified literal regex escaping, database filtering before pagination, all roles/statuses, sensitive-field exclusion, unchanged account records and generated Swagger. Tests used an environment-free copy, temporary storage and disposable MongoDB with synthetic accounts. Existing E2E listener warnings were observed without suppressing them. No real .env or Atlas access, dependency installs/changes, schema/auth/common edits, ACC-16/password-reset work, commits, pushes, merges, PR creation or Jira changes were performed by the assistant. Existing prompt entries were preserved.
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
 Related Requirement: HTL-15 (SCRUM-62) List free rooms for the searched dates and select rooms

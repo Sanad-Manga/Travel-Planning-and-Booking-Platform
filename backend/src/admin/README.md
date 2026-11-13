@@ -199,3 +199,141 @@ existing Swagger/HTTP pagination remain unmodified and regression-tested; all
 checks pass; no real credentials, card data, console.log or dead code were added;
 the AI log records the work. Actual production provisioning and PR publication
 remain deliberate later operator/student actions after review.
+
+## Administrator account list — ACC-14 / SCRUM-43
+
+The runtime `AdminModule` adds `GET /api/admin/accounts`. The ACC-18 command
+documented above remains standalone and is not invoked by module registration
+or application startup. No seeding implementation or existing User schema was
+changed for ACC-14.
+
+This endpoint requires the existing authenticated ADMIN principal. The global
+JWT/status guard rejects missing, invalid or inactive authentication with 401;
+the existing RolesGuard rejects authenticated USER, AIRLINE_MODERATOR and
+HOTEL_MODERATOR callers with 403. `AdminService.listAccounts()` repeats the
+principal/role checks for direct service calls.
+
+| Query | Behavior |
+| --- | --- |
+| `page` | Shared PaginationDto; default 1, positive integer |
+| `limit` | Default 10, positive integer, maximum 50 |
+| `search` | Optional case-insensitive literal substring of name OR email; trimmed, maximum 100 characters after trimming; blank means no search |
+| `role` | Optional exact shared Role enum value |
+| `status` | Optional exact shared AccountStatus enum value |
+
+Search, role and status combine in the MongoDB filter before shared `paginate()`
+runs. Search metacharacters are escaped, never interpreted as caller-supplied
+regex syntax. Arrays, invalid enums, oversized search and unsupported query
+parameters return the standard field-level 400 response. DTO validation is also
+applied inside the service for internal callers. No arbitrary MongoDB filter,
+sort, projection or operator is accepted.
+
+Example request:
+
+```http
+GET /api/admin/accounts?search=example&role=USER&status=ACTIVE&page=1&limit=10
+```
+
+Example response (synthetic account):
+
+```json
+{
+  "items": [
+    {
+      "id": "673000000000000000000001",
+      "name": "Example Account",
+      "email": "example@example.test",
+      "role": "USER",
+      "status": "ACTIVE",
+      "createdAt": "2026-11-01T09:00:00.000Z"
+    }
+  ],
+  "page": 1,
+  "limit": 10,
+  "total": 1,
+  "totalPages": 1
+}
+```
+
+No matches return `{ items: [], page: 1, limit: 10, total: 0, totalPages: 0 }`.
+Pages beyond the end return empty items while retaining the actual filtered
+total/totalPages. All roles and statuses, including inactive target accounts,
+can appear in this administrator-only list. The caller must still be active.
+
+Ordering is ascending `_id`, matching the shared default and remaining
+deterministic when registration timestamps are equal. Offset pagination is not
+a transactional snapshot across concurrent account insertions/deletions.
+Case-insensitive substring search can scan the users collection; the existing
+email index is not a general substring-search index. A future search/index
+redesign would require coordination with the User schema owner.
+
+An explicit inclusion projection loads only `_id`, name, email, role, status and
+createdAt. A separate response mapper returns exactly the six public fields
+above, converting the ID and UTC timestamp to strings. Password hashes, tokens,
+login counters, lockout/consent information, phone, provider links and MongoDB
+metadata are excluded. Listing uses read operations only. Database failures
+produce a sanitized 500 without attaching raw driver messages or causes.
+
+Swagger documents cookie auth, all five query parameters, the paginated response
+DTO and 200/400/401/403/500 responses. No account update, suspension or password
+reset endpoint is introduced. ACC-16 and ACC-07a remain separate tickets.
+
+### ACC-14 tests and ownership
+
+- `admin.service.spec.ts`: direct authorization, literal filter construction,
+  inclusion projection, strict output mapping, internal validation and failures.
+- `backend/test/admin-accounts.e2e-spec.ts`: real AppModule and disposable MongoDB;
+  all caller roles, defaults/boundaries, 27 equal-timestamp rows, name/email
+  searches, regex metacharacters, every role/status, combined filters, empty
+  results, unchanged stored accounts, secret exclusion and generated Swagger.
+- `backend/test/pagination.e2e-spec.ts`: the authorized route-table entry adds
+  this list using its two existing synthetic accounts; all pre-existing
+  assertions remain unchanged. This is a shared-test integration change.
+
+Tests use synthetic users/JWT keys, disposable MongoDB and a temporary upload
+directory. They mock dotenv and disable environment-file loading before
+importing AppModule. Verification runs in a copy excluding environment files;
+do not point tests at the shared Atlas database or real accounts.
+
+```powershell
+npm test -- --runInBand src/admin/admin.service.spec.ts
+npm run test:e2e -- --runInBand admin-accounts.e2e-spec.ts
+npm test -- --runInBand
+npm run test:e2e -- --runInBand
+npm run build
+npm run lint
+```
+
+ACC-14 reads Ziad's existing User schema without modifying it. Other production
+modules are untouched except the authorized minimal AppModule registration.
+No dependencies, scripts, shared pagination or authentication code changed.
+
+Verification on 2026-11-13, after synchronization to `cd9d6ef`: full Jest
+796/796 (49 suites), full standard E2E 913/913 (34 suites), build and ESLint
+passed. ACC-14 contributes eight service tests and 42 database-backed HTTP/E2E
+tests, all passing. Focused commands also passed during implementation. Tracked
+and new-file whitespace checks passed. No packages were installed and no shared
+database was accessed. The full E2E run emitted EventEmitter listener warnings
+without test failures; shared test infrastructure was not changed to suppress them.
+
+Live SCRUM-43 checklist evidence:
+
+| Jira item | Evidence / status |
+| --- | --- |
+| Non-admin gets 403 | PASS: all three non-admin roles tested through real global guards; missing/invalid auth gets 401 |
+| Pagination works, page size 10 | PASS: defaults, custom/max limits, invalid values, equal-time stable ordering, out-of-range pages and shared whole-app pagination suite |
+| Search matches name/email; role and status combine | PASS: actual MongoDB queries test both OR branches, case/whitespace, literal regex characters, every enum and combined filters before totals/pagination |
+| Password hash never returned | PASS: inclusion projection plus six-field mapping; HTTP assertions exclude secrets and compare persisted documents before/after requests |
+| Swagger updated; PR names ACC-14; shared PR checklist | Swagger PASS. Technical shared-checklist evidence is below. Actual PR title/publication remains pending student approval; no PR was created |
+
+Shared PR-template evidence: scope is ACC-14 only; User schema, enums, guards,
+errors and pagination are reused; service authorization and query validation are
+covered; there is no request body or state-changing/concurrency-sensitive write;
+all six response fields are explicit; the only cross-module production change
+is authorized AppModule registration, and the shared pagination-table edit was
+separately authorized. Swagger and real HTTP tests cover success, invalid input,
+unauthenticated and wrong-role calls. Full checks pass; no credentials, .env
+access, dependency edits, console logs or unrelated changes were added. The AI
+prompt log records the request and follow-up authorizations. The student can use
+`feat(admin): list accounts with search and filters (ACC-14)` as the eventual PR
+title after independent review; PR descriptions/checklists were not edited here.
