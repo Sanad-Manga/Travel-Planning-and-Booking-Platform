@@ -134,6 +134,13 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
         'departureAirport=CAI&arrivalAirport=JFK&departureDate=2026-12-01&passengers=1',
       // flights need airlines + cabins; their paging is proven with data in flights-search.e2e-spec.ts
     },
+    {
+      swagger: '/api/hotels/search',
+      url: '/api/hotels/search',
+      auth: 'none',
+      // check-in far in the future: past dates are rejected. Hotels need rooms + availability; paging is proven with data in hotel-search.e2e-spec.ts
+      query: 'cityId=city-0&checkIn=2099-01-01&checkOut=2099-01-03&guests=1',
+    },
   ];
 
   const get = (route: ListRoute, params: string) => {
