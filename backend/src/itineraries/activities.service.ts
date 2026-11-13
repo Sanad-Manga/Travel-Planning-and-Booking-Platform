@@ -6,6 +6,7 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { AuthenticatedUser } from '../common';
+import { UploadFile, UploadService } from '../uploads';
 import { ActivityDto, toActivityDto } from './dto/activity.dto';
 import { CreateActivityDto } from './dto/create-activity.dto';
 import { UpdateActivityDto } from './dto/update-activity.dto';
@@ -24,6 +25,7 @@ export class ActivitiesService {
     private readonly model: Model<Activity>,
     @InjectModel(Itinerary.name)
     private readonly itineraries: Model<Itinerary>,
+    private readonly uploads: UploadService,
   ) {}
 
   /**
@@ -104,14 +106,88 @@ export class ActivitiesService {
     return toActivityDto(updated);
   }
 
-  /** The owner deletes an activity. Someone else's, an unknown one and one already deleted all answer 404. */
+  /**
+   * The owner deletes an activity. Someone else's, an unknown one and one already deleted all answer 404. The
+   * images of the activity (ITN-12) are deleted from the upload service right after.
+   */
   async remove(user: AuthenticatedUser, id: string): Promise<void> {
-    const result = await this.model
-      .deleteOne({ _id: id, ownerId: new Types.ObjectId(user.userId) })
+    const deleted = await this.model
+      .findOneAndDelete({ _id: id, ownerId: new Types.ObjectId(user.userId) })
+      .select('images')
+      .lean<{ images?: { id: string }[] }>()
       .exec();
-    if (result.deletedCount === 0) {
+    if (!deleted) throw new NotFoundException('Activity not found');
+    await this.removeStoredImages(deleted.images ?? []);
+  }
+
+  /**
+   * ITN-12: the owner attaches one image to their activity. The activity is looked up with the owner in the filter
+   * first (404), then the shared UploadService validates and stores the file: JPG/PNG, 5 MB, at most 5 per
+   * activity (400 for a bad file, 409 when the 5 places are taken). Only then is the reference saved on the
+   * activity; if that fails, or the activity was deleted in between, the stored file is removed again.
+   */
+  async attachImage(
+    user: AuthenticatedUser,
+    id: string,
+    file: UploadFile,
+  ): Promise<ActivityDto> {
+    const ownerFilter = { _id: id, ownerId: new Types.ObjectId(user.userId) };
+    if (!(await this.model.exists(ownerFilter))) {
       throw new NotFoundException('Activity not found');
     }
+
+    const reference = await this.uploads.save(file, {
+      kind: 'activity',
+      ownerId: id,
+    });
+    try {
+      const updated = await this.model
+        .findOneAndUpdate(
+          ownerFilter,
+          { $push: { images: { id: reference.id, url: reference.url } } },
+          { new: true },
+        )
+        .lean<ActivityLean>()
+        .exec();
+      if (!updated) {
+        await this.removeStoredImages([reference]);
+        throw new NotFoundException('Activity not found');
+      }
+      return toActivityDto(updated);
+    } catch (error) {
+      if (!(error instanceof NotFoundException)) {
+        await this.removeStoredImages([reference]);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * ITN-12: the owner removes one image of their activity. The image id must be one of the images stored on that
+   * activity (so nobody can delete another entity's file through this route): the activity is found by id, owner
+   * AND image id (404 otherwise). The file is removed first, which is safe to repeat, then the reference is
+   * pulled in one conditional update, so a failure in between can simply be retried.
+   */
+  async removeImage(
+    user: AuthenticatedUser,
+    id: string,
+    imageId: string,
+  ): Promise<void> {
+    const filter = {
+      _id: id,
+      ownerId: new Types.ObjectId(user.userId),
+      'images.id': imageId,
+    };
+    if (!(await this.model.exists(filter))) {
+      throw new NotFoundException('Activity or image not found');
+    }
+    await this.uploads.remove(imageId);
+    const pulled = await this.model
+      .findOneAndUpdate(filter, { $pull: { images: { id: imageId } } })
+      .select('_id')
+      .lean()
+      .exec();
+    if (!pulled) throw new NotFoundException('Activity or image not found');
   }
 
   /**
@@ -138,9 +214,9 @@ export class ActivitiesService {
       .map(({ row }) => toActivityDto(row));
   }
 
-  /** Called when an itinerary is deleted: its activities go with it. */
+  /** Called when an itinerary is deleted: its activities, and their stored images, go with it. */
   async removeForItinerary(itineraryId: Types.ObjectId): Promise<void> {
-    await this.model.deleteMany({ itineraryId }).exec();
+    await this.removeWhere({ itineraryId });
   }
 
   /** Called when one day is deleted (ITN-07): the activities of that day go with it, the other days keep theirs. */
@@ -148,6 +224,30 @@ export class ActivitiesService {
     itineraryId: Types.ObjectId,
     dayId: Types.ObjectId,
   ): Promise<void> {
-    await this.model.deleteMany({ itineraryId, dayId }).exec();
+    await this.removeWhere({ itineraryId, dayId });
+  }
+
+  /** Deletes the matching activities, then their images from the upload service (ITN-12). */
+  private async removeWhere(filter: {
+    itineraryId: Types.ObjectId;
+    dayId?: Types.ObjectId;
+  }): Promise<void> {
+    const withImages = await this.model
+      .find({ ...filter, 'images.0': { $exists: true } })
+      .select('images')
+      .lean<{ images: { id: string }[] }[]>()
+      .exec();
+    await this.model.deleteMany(filter).exec();
+    await this.removeStoredImages(withImages.flatMap((row) => row.images));
+  }
+
+  /**
+   * Removes stored files from the upload service. A failure is not reported to the caller: the row that referred
+   * to the file is already gone, and the upload service retries what it could not finish (its deleting state).
+   */
+  private async removeStoredImages(images: { id: string }[]): Promise<void> {
+    await Promise.allSettled(
+      images.map((image) => this.uploads.remove(image.id)),
+    );
   }
 }

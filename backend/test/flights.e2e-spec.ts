@@ -164,6 +164,8 @@ describe('flights (FLT-03) over HTTP (e2e)', () => {
         arrivalAirport: 'JFK',
         departureAt: '2090-12-01T12:30:00.000Z',
         arrivalAt: '2090-12-02T00:45:00.000Z',
+      departureLocal: '2090-12-01T14:30:00+02:00',
+      arrivalLocal: '2090-12-01T19:45:00-05:00',
         departureTimeZone: 'Africa/Cairo',
         arrivalTimeZone: 'America/New_York',
         status: 'SCHEDULED',
