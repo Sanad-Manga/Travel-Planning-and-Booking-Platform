@@ -73,6 +73,9 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
   /** The post whose comments the /api/posts/{id}/comments row pages through. */
   const commentedPostId = new Types.ObjectId();
 
+  /** The active hotel whose free rooms the /api/hotels/{id}/rooms/available row pages through. */
+  const roomsHotelId = new Types.ObjectId();
+
   /**
    * GETs that take page and limit but are NOT lists. The post page pages only its embedded first batch of
    * comments; the real comment list is /api/posts/{id}/comments, which is in the table above.
@@ -140,6 +143,13 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
       auth: 'none',
       // check-in far in the future: past dates are rejected. Hotels need rooms + availability; paging is proven with data in hotel-search.e2e-spec.ts
       query: 'cityId=city-0&checkIn=2099-01-01&checkOut=2099-01-03&guests=1',
+    },
+    {
+      swagger: '/api/hotels/{id}/rooms/available',
+      url: `/api/hotels/${roomsHotelId.toHexString()}/rooms/available`,
+      auth: 'none',
+      query: 'checkIn=2099-01-05&checkOut=2099-01-07',
+      total: 25,
     },
   ];
 
@@ -214,6 +224,37 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
         body: `Comment ${i}`,
         isHidden: false,
         createdAt: new Date(now.getTime() + i * 1000),
+        updatedAt: now,
+      })),
+    );
+    await db.collection('hotels').insertOne({
+      _id: roomsHotelId,
+      name: 'Paging Hotel',
+      nameKey: 'paging hotel',
+      address: '1 Test Street',
+      cityId: 'city-0',
+      countryCode: 'EG',
+      description: 'Hotel.',
+      photos: [],
+      starRating: 3,
+      amenities: [],
+      cancellationTiers: [],
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.collection('rooms').insertMany(
+      rows(25, (i) => ({
+        hotelId: roomsHotelId,
+        name: `Room ${i}`,
+        nameKey: `room ${i}`,
+        type: 'Double',
+        beds: 1,
+        maxOccupancy: 2,
+        pricePerNightCents: 10_000 + i,
+        isActive: true,
+        availability: [{ _id: new Types.ObjectId(), startDate: '2099-01-01', endDate: '2099-02-01' }],
+        createdAt: now,
         updatedAt: now,
       })),
     );
