@@ -1392,6 +1392,14 @@ a bare array fails too. For each list it checks defaults, limit 1/50 accepted, l
 past the end is an empty list, and 25 seeded rows split into pages with no row twice. No source code changed.
 
 Date: 2026-11-13
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: HTL-11 (SCRUM-31) Hotel search by city/country, dates, guests, rooms
+Prompt:
+Implement ONLY HTL-11: GET /api/hotels/search (public) by cityId or countryCode, checkIn, checkOut, guests and rooms (default 1); list ACTIVE hotels with enough rooms free for the whole stay whose combined max occupancy covers the guests. Put the "which rooms are free" rule in ONE exported function that HTL-15 and ITN-25 reuse; stub reservations/holds (Hessain) behind RoomReservations; stay inside the hotels module.
+How the output was used:
+The assistant added HotelAvailabilityService.findFreeRooms (2 queries for any number of hotels; adjacent ranges merged; no blocked ranges exist yet), a new RoomReservations.findReservedRoomIds with a safe stub, pure rules (nights, range coverage, exact cheapest room combination), HotelSearchService and a separate controller registered before HotelsController, DTOs, unit tests, e2e tests on an in-memory MongoDB, one row in the pagination e2e table and docs/api/hotel-search.md. I read every file, ran lint, build and the tests, and kept its decisions: exactly one of cityId/countryCode, unknown ids are a 400, guests max 100 and rooms max 10.
+Date: 2026-11-13
 Student: Abdulrahman Mohamad Hosny
 Tool: GitHub Copilot (Copilot SDK in VS Code)
 Related Requirement: FLT-17 (Flight details)
