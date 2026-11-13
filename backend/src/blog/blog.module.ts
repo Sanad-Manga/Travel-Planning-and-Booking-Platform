@@ -6,6 +6,7 @@ import { BlogService } from './blog.service';
 import { CommentsController } from './comments.controller';
 import { CommentsService } from './comments.service';
 import { Comment, CommentSchema } from './schemas/comment.schema';
+import { Like, LikeSchema } from './schemas/like.schema';
 import { Post, PostSchema } from './schemas/post.schema';
 import { TagsController } from './tags.controller';
 
@@ -14,6 +15,7 @@ import { TagsController } from './tags.controller';
     MongooseModule.forFeature([
       { name: Post.name, schema: PostSchema },
       { name: Comment.name, schema: CommentSchema },
+      { name: Like.name, schema: LikeSchema },
     ]),
     UsersModule,
   ],
