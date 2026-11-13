@@ -1329,6 +1329,30 @@ before the code. Merged the latest develop (#63 and others) with one conflict, i
 
 Date: 2026-11-13
 Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: GEN-09 (SCRUM-77)
+Prompt:
+Build GEN-09, report a post, comment, review or itinerary (once per item per user), following docs/contracts.md and the
+SCRUM-77 checklist: guest 401, a non-existent target is rejected, a second report by the same user is rejected also under
+parallel requests, reason required, status OPEN. Read other modules' content by type and id without editing their modules.
+How the output was used:
+New reports module (POST /api/reports) with a Report schema whose unique index on reporter + type + target is what holds
+under parallel requests (duplicate key becomes 409). A read-only ContentLookupService checks that a post or itinerary exists
+and is visible to the reporter (published, public, not hidden; otherwise 404 so reports cannot probe private content).
+COMMENT and REVIEW are valid types that return a field-level 400 until those modules exist. 23 e2e tests.
+Related Requirement: GEN-02 (SCRUM-124)
+Prompt:
+Build GEN-02, field-level validation messages on every endpoint, following docs/contracts.md section 3 (error shape with
+details[{field,message}]). Do not edit other owners' modules; prove it across the whole app, including modules added later.
+How the output was used:
+The global ValidationPipe already produces one details entry per broken field, so no controller was changed. Added one
+whole-app e2e spec that reads every route of the running AppModule, sends a bad body to each route that takes a body DTO
+(as the role the route needs) and checks the 400 shape, that the unknown field and every required field of the DTO each
+have a message. Added a small Swagger post-processor (common/swagger) that documents the 400 with a field-level example on
+every operation that takes input and has no 400 of its own, and a new box in the PR template so every later PR confirms it.
+
+Date: 2026-11-13
+Student: Ahmed Sanad
 Tool: Claude (Claude Code, Sonnet 5.5)
 Related Requirement: FLT-09 (SCRUM-65) Airline cancellation tiers (days-before-departure -> refund %)
 Prompt:
