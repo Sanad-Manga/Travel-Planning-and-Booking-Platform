@@ -1414,3 +1414,15 @@ helper, duration in minutes, currency, every cabin with available seats and bagg
 AirlinesService.getCancellationTiers. Added E2E checks for guest access, all cabin data including a sold-out cabin, local-time values,
 the cancellation policy and empty-policy behavior, missing/inactive flights, and Swagger. Backend build, changed-file lint, and the
 flight-search E2E suite passed (41 tests).
+================================================
+
+================================================
+Date: 2026-11-13
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: HTL-15 (SCRUM-62) List free rooms for the searched dates and select rooms
+Prompt:
+Implement ONLY HTL-15: GET /api/hotels/:id/rooms/available (public) with checkIn and checkOut. Return the rooms of one ACTIVE hotel that are free for every night, each with type, beds, maxOccupancy, price per night and total stay price (nights x price, integer cents). Reuse HotelAvailabilityService.findFreeRooms from HTL-11 (extend it only additively for beds), paginate with the shared envelope, add one row to pagination.e2e-spec.ts, stub reservations (Hessain), no select/hold endpoint, stay inside the hotels module. Branch is stacked on the unmerged HTL-11 PR.
+How the output was used:
+The assistant added HotelFreeRoomsController/Service (registered before the other hotel controllers), query and response DTOs, the pure stayTotalCents rule, the additive `beds` field in findFreeRooms, unit tests, an e2e spec on an in-memory MongoDB (partial/gap/adjacent/inactive/reserved rooms, other hotel, totals, paging, 400s, 404s), one seeded hotel plus one row in the pagination table, and an HTL-15 section in docs/api/hotel-search.md. I read every file, ran lint, build and the tests, and kept its decisions: stay data repeated on each item, sort by price then name then id, unknown query fields (guests, rooms) are a 400, deactivated hotel is a 404.
+================================================
