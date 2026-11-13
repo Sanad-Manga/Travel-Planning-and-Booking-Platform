@@ -38,7 +38,7 @@ export class CityGroupDto {
   @ApiProperty({
     example: 0,
     description:
-      'Budget subtotal of the group in cents. It is 0 until the budget (ITN-14) adds up the activity and transport costs of the group days.',
+      'Budget subtotal of the group in cents of the platform currency: the budget entries, activity costs and intercity transport costs (ITN-14, ITN-10, ITN-16) of the group days that are in the platform currency. Amounts in other currencies are not converted here (ITN-18); see the budget summary for them.',
   })
   subtotalCents: number;
 }
@@ -46,15 +46,21 @@ export class CityGroupDto {
 /**
  * Groups the days of an itinerary: consecutive days in the same city share a group, so A, B, A is three
  * groups. `days` must already be in order (their position gives the day number, as ITN-05 does).
+ * `platformTotalByDay` maps a day id to the platform-currency cost of that day; the group subtotal adds them up.
  */
-export function groupDaysByCity(days: ItineraryDayDto[]): CityGroupDto[] {
+export function groupDaysByCity(
+  days: ItineraryDayDto[],
+  platformTotalByDay: Map<string, number> = new Map(),
+): CityGroupDto[] {
   const groups: CityGroupDto[] = [];
   for (const day of days) {
     const last = groups[groups.length - 1];
+    const dayTotal = platformTotalByDay.get(day.id) ?? 0;
     if (last && last.cityId === day.cityId) {
       last.toDayNumber = day.dayNumber;
       last.dayCount += 1;
       last.endDate = day.date;
+      last.subtotalCents += dayTotal;
     } else {
       groups.push({
         cityId: day.cityId,
@@ -63,7 +69,7 @@ export function groupDaysByCity(days: ItineraryDayDto[]): CityGroupDto[] {
         dayCount: 1,
         startDate: day.date,
         endDate: day.date,
-        subtotalCents: 0,
+        subtotalCents: dayTotal,
       });
     }
   }
