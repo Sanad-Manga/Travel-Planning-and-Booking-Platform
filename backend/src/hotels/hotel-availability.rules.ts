@@ -63,3 +63,8 @@ export function cheapestNightlyCombination(free: RoomChoice[], rooms: number, gu
   }
   return best[rooms][guests] === INF ? null : best[rooms][guests];
 }
+
+/** HTL-15: total price of a stay in integer cents = nights x price per night. Both are integers, so no float appears. */
+export function stayTotalCents(pricePerNightCents: number, nights: number): number {
+  return pricePerNightCents * nights;
+}
