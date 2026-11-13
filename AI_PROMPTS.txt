@@ -1425,6 +1425,6 @@ The assistant added the route (role USER only, flagged for the lead), AccountDea
 upcoming bookings, one conditional update), a confirm DTO (Equals(true)) and UsersService.deactivate. Because the payments
 BookingProvider has no "bookings of a user" query, it added an UpcomingBookingsRegistry in users that Flights B and Hotels B
 register a checker with (documented in docs/api/account-deactivation.md); nothing is registered yet, so the real blocking is
-proven only with a test double. 16 e2e tests on mongodb-memory-server plus unit tests; they show comments already read
+proven only with a test double. 20 e2e tests on mongodb-memory-server (two files, COOKIE_SECURE true and false) plus unit tests; they show comments already read
 'Deleted user' and public itineraries are already hidden, and a read-only probe showed a deactivated author's posts are still
 visible (reported to the blog owner, not changed). I read every file before committing.
