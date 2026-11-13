@@ -38,6 +38,7 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
 
   const PASSWORD = 'Passw0rdOK';
   const HOLD = '/api/flight-bookings/hold';
+  const BOOKING = '/api/flight-bookings';
   const http = () => request(app.getHttpServer());
 
   async function loginAs(email: string, extra: Record<string, unknown> = {}) {
@@ -125,6 +126,14 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       .send(body(flightId, extra))
       .expect(201);
     return res.body.id as string;
+  }
+
+  async function setBaggagePolicy(extraBagPriceCents = 3000, maxExtraBags = 2) {
+    await http()
+      .put(`/api/airlines/${airline.id}/baggage-policy`)
+      .set('Cookie', moderator)
+      .send({ extraBagPriceCents, maxExtraBags })
+      .expect(200);
   }
 
   const expireNow = (bookingId: string) =>
@@ -222,7 +231,7 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       .collection('airlines')
       .updateOne(
         { _id: new Types.ObjectId(airline.id) },
-        { $set: { isActive: true } },
+        { $set: { isActive: true }, $unset: { baggagePolicy: '' } },
       );
   });
 
@@ -554,6 +563,293 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       expect(
         await connection.collection('flightBookings').countDocuments(),
       ).toBe(0);
+    });
+  });
+
+  describe('POST /api/flight-bookings (FLT-19)', () => {
+    const passenger = (
+      fullName: string,
+      dateOfBirth: string,
+      passportOrIdNumber: string,
+      extraBags?: Array<{ weightKg: number }>,
+    ) => ({
+      fullName,
+      dateOfBirth,
+      passportOrIdNumber,
+      ...(extraBags ? { extraBags } : {}),
+    });
+
+    it('derives age groups at the departure-date boundaries and includes baggage fees in cents', async () => {
+      await setBaggagePolicy(3000, 2);
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10, 0, 0, 45000);
+
+      const res = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          flightId,
+          cabinClass: 'ECONOMY',
+          passengers: [
+            passenger('Adult Passenger', '2078-12-01', 'A1234567', [
+              { weightKg: 20 },
+            ]),
+            passenger('Child Passenger', '2088-12-01', 'C1234567'),
+            passenger('Infant Passenger', '2089-12-02', 'I1234567'),
+          ],
+        })
+        .expect(201);
+
+      expect(res.body).toMatchObject({
+        flightId,
+        passengerCounts: { adults: 1, children: 1, infants: 1 },
+        passengers: [
+          {
+            fullName: 'Adult Passenger',
+            dateOfBirth: '2078-12-01',
+            passengerType: 'ADULT',
+            extraBags: [{ weightKg: 20 }],
+            baggageFeeCents: 3000,
+          },
+          {
+            fullName: 'Child Passenger',
+            passengerType: 'CHILD',
+            extraBags: [],
+            baggageFeeCents: 0,
+          },
+          {
+            fullName: 'Infant Passenger',
+            passengerType: 'INFANT',
+            extraBags: [],
+            baggageFeeCents: 0,
+          },
+        ],
+        seats: 2,
+        baggageFeeCents: 3000,
+        totalCents: 97500,
+        status: 'PENDING_PAYMENT',
+      });
+      expect(res.body.passengers[0]).not.toHaveProperty('passportOrIdNumber');
+
+      const stored = await connection
+        .collection('flightBookings')
+        .findOne({ _id: new Types.ObjectId(res.body.id) });
+      expect(stored?.passengers[0].passportOrIdNumber).toBe('A1234567');
+      expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 2 });
+    });
+
+    it.each([
+      ['fullName', { dateOfBirth: '2078-12-01', passportOrIdNumber: 'A123' }],
+      ['dateOfBirth', { fullName: 'Passenger', passportOrIdNumber: 'A123' }],
+      [
+        'passportOrIdNumber',
+        { fullName: 'Passenger', dateOfBirth: '2078-12-01' },
+      ],
+    ])("requires each passenger's %s", async (field, passengerDetails) => {
+      const res = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          flightId: new Types.ObjectId().toString(),
+          cabinClass: 'ECONOMY',
+          passengers: [passengerDetails],
+        })
+        .expect(400);
+
+      expect(res.body.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: `passengers.0.${field}` }),
+        ]),
+      );
+    });
+
+    it('rejects invalid and future dates of birth with a field-level error', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+      const base = {
+        flightId,
+        cabinClass: 'ECONOMY',
+        passengers: [passenger('Passenger', '2090-02-29', 'P123')],
+      };
+
+      const invalid = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send(base)
+        .expect(400);
+      expect(invalid.body.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: 'passengers.0.dateOfBirth' }),
+        ]),
+      );
+
+      const future = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          ...base,
+          passengers: [passenger('Passenger', '2091-01-01', 'P123')],
+        })
+        .expect(400);
+      expect(future.body.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: 'passengers.0.dateOfBirth' }),
+        ]),
+      );
+      expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0 });
+    });
+
+    it('requires an adult and limits infants to one per adult', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+
+      const noAdult = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          flightId,
+          cabinClass: 'ECONOMY',
+          passengers: [passenger('Child', '2088-12-01', 'C123')],
+        })
+        .expect(400);
+      expect(noAdult.body.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: 'passengers' }),
+        ]),
+      );
+
+      const tooManyInfants = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          flightId,
+          cabinClass: 'ECONOMY',
+          passengers: [
+            passenger('Adult', '2078-12-01', 'A123'),
+            passenger('Infant 1', '2089-12-02', 'I123'),
+            passenger('Infant 2', '2089-12-03', 'I456'),
+          ],
+        })
+        .expect(400);
+      expect(tooManyInfants.body.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: 'passengers' }),
+        ]),
+      );
+      expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0 });
+    });
+
+    it('rejects extra bags when no airline baggage policy exists', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+
+      const res = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          flightId,
+          cabinClass: 'ECONOMY',
+          passengers: [
+            passenger('Adult', '2078-12-01', 'A123', [{ weightKg: 20 }]),
+          ],
+        })
+        .expect(400);
+
+      expect(res.body.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: 'passengers' }),
+        ]),
+      );
+      expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0 });
+    });
+
+    it('rejects bags above the airline maximum without holding seats', async () => {
+      await setBaggagePolicy(3000, 1);
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+
+      const res = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          flightId,
+          cabinClass: 'ECONOMY',
+          passengers: [
+            passenger('Adult', '2078-12-01', 'A123', [
+              { weightKg: 20 },
+              { weightKg: 21 },
+            ]),
+          ],
+        })
+        .expect(400);
+
+      expect(res.body.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: 'passengers.0.extraBags' }),
+        ]),
+      );
+      expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0 });
+    });
+
+    it('rejects an extra bag heavier than the cabin limit without holding seats', async () => {
+      await setBaggagePolicy();
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+
+      const res = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          flightId,
+          cabinClass: 'ECONOMY',
+          passengers: [
+            passenger('Adult', '2078-12-01', 'A123', [{ weightKg: 23.01 }]),
+          ],
+        })
+        .expect(400);
+
+      expect(res.body.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: 'passengers.0.extraBags.0.weightKg',
+          }),
+        ]),
+      );
+      expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0 });
+      expect(
+        await connection.collection('flightBookings').countDocuments(),
+      ).toBe(0);
+    });
+
+    it('allows a passenger booking without extra bags when no baggage policy exists', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+
+      const res = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          flightId,
+          cabinClass: 'ECONOMY',
+          passengers: [passenger('Adult', '2078-12-01', 'A123')],
+        })
+        .expect(201);
+
+      expect(res.body).toMatchObject({
+        passengerCounts: { adults: 1, children: 0, infants: 0 },
+        baggageFeeCents: 0,
+        totalCents: 45000,
+      });
+    });
+
+    it('requires an authenticated traveler', async () => {
+      const payload = {
+        flightId: new Types.ObjectId().toString(),
+        cabinClass: 'ECONOMY',
+        passengers: [passenger('Adult', '2078-12-01', 'A123')],
+      };
+      await http().post(BOOKING).send(payload).expect(401);
+      await http().post(BOOKING).set('Cookie', admin).send(payload).expect(403);
     });
   });
 

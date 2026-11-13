@@ -1,6 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
-import { BookingStatus, CabinClass } from '../../common';
+import { BookingStatus, CabinClass, PassengerType } from '../../common';
 
 /** How many passengers of each type the booking was held for (details come with FLT-19). */
 @Schema({ _id: false })
@@ -16,6 +16,37 @@ export class PassengerCounts {
   infants: number;
 }
 const PassengerCountsSchema = SchemaFactory.createForClass(PassengerCounts);
+
+@Schema({ _id: false })
+export class ExtraBag {
+  @Prop({ type: Number, required: true, min: 0.01 })
+  weightKg: number;
+}
+const ExtraBagSchema = SchemaFactory.createForClass(ExtraBag);
+
+@Schema({ _id: false })
+export class BookingPassenger {
+  @Prop({ type: String, required: true, trim: true })
+  fullName: string;
+
+  /** Date of birth as YYYY-MM-DD; passenger type is derived for the flight's local departure date. */
+  @Prop({ type: String, required: true })
+  dateOfBirth: string;
+
+  /** Stored for the booking, but excluded from booking response DTOs. */
+  @Prop({ type: String, required: true, select: false })
+  passportOrIdNumber: string;
+
+  @Prop({ type: String, enum: Object.values(PassengerType), required: true })
+  passengerType: PassengerType;
+
+  @Prop({ type: [ExtraBagSchema], default: [] })
+  extraBags: ExtraBag[];
+
+  @Prop({ type: Number, required: true, min: 0, default: 0 })
+  baggageFeeCents: number;
+}
+const BookingPassengerSchema = SchemaFactory.createForClass(BookingPassenger);
 
 /**
  * A flight booking (collection `flightBookings`). FLT-22 creates it as PENDING_PAYMENT with the seats held;
@@ -40,6 +71,10 @@ export class FlightBooking {
   @Prop({ type: PassengerCountsSchema, required: true })
   passengerCounts: PassengerCounts;
 
+  /** FLT-19 details; absent on legacy bookings created through the FLT-22 hold endpoint. */
+  @Prop({ type: [BookingPassengerSchema], default: undefined })
+  passengers?: BookingPassenger[];
+
   /** Seats held in the cabin: adults + children (infants take none). */
   @Prop({ type: Number, required: true, min: 1 })
   seats: number;
@@ -54,6 +89,9 @@ export class FlightBooking {
   /** Amount to pay, integer cents in the platform currency. */
   @Prop({ type: Number, required: true, min: 0 })
   totalCents: number;
+
+  @Prop({ type: Number, required: true, min: 0, default: 0 })
+  baggageFeeCents: number;
 
   @Prop({ type: String, required: true })
   currency: string;

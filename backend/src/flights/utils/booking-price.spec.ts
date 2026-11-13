@@ -26,6 +26,16 @@ describe('booking price (FLT-22)', () => {
     ).toBe(45000);
   });
 
+  it('adds the extra-baggage fee (FLT-19) on top of the fares, and defaults to no fee', () => {
+    const counts = { adults: 1, children: 0, infants: 0 };
+    expect(bookingTotalCents(45000, counts, 3000)).toBe(48000);
+    expect(bookingTotalCents(45000, counts, 0)).toBe(45000);
+    expect(bookingTotalCents(45000, counts)).toBe(45000);
+    expect(
+      bookingTotalCents(45000, { adults: 2, children: 1, infants: 1 }, 6000),
+    ).toBe(3 * 45000 + 4500 + 6000);
+  });
+
   it('always returns a whole number of cents', () => {
     const total = bookingTotalCents(12345, {
       adults: 3,

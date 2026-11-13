@@ -1,11 +1,39 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { BookingStatus, CabinClass } from '../../common';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { BookingStatus, CabinClass, PassengerType } from '../../common';
 import { FlightBookingLean } from '../schemas/flight-booking.schema';
 
 export class PassengerCountsDto {
   @ApiProperty({ example: 2 }) adults: number;
   @ApiProperty({ example: 1 }) children: number;
   @ApiProperty({ example: 1 }) infants: number;
+}
+
+export class ExtraBagResponseDto {
+  @ApiProperty({ example: 18.5, description: 'Weight of this extra bag in kg' })
+  weightKg: number;
+}
+
+export class BookingPassengerResponseDto {
+  @ApiProperty({ example: 'Amina Example' })
+  fullName: string;
+
+  @ApiProperty({
+    example: '2010-05-21',
+    description: 'Date of birth (YYYY-MM-DD)',
+  })
+  dateOfBirth: string;
+
+  @ApiProperty({ enum: PassengerType, example: PassengerType.CHILD })
+  passengerType: PassengerType;
+
+  @ApiProperty({ type: [ExtraBagResponseDto] })
+  extraBags: ExtraBagResponseDto[];
+
+  @ApiProperty({
+    example: 3000,
+    description: "This passenger's extra-baggage fee in cents",
+  })
+  baggageFeeCents: number;
 }
 
 export class FlightBookingResponseDto {
@@ -15,6 +43,8 @@ export class FlightBookingResponseDto {
   cabinClass: CabinClass;
   @ApiProperty({ type: PassengerCountsDto })
   passengerCounts: PassengerCountsDto;
+  @ApiPropertyOptional({ type: [BookingPassengerResponseDto] })
+  passengers?: BookingPassengerResponseDto[];
   @ApiProperty({
     example: 3,
     description: 'Seats held: adults + children (infants take none)',
@@ -26,6 +56,11 @@ export class FlightBookingResponseDto {
   infantFareCents: number;
   @ApiProperty({ example: 139500, description: 'Total to pay in cents' })
   totalCents: number;
+  @ApiProperty({
+    example: 3000,
+    description: 'Extra-baggage fees included in totalCents',
+  })
+  baggageFeeCents: number;
   @ApiProperty({ example: 'USD' }) currency: string;
   @ApiProperty({ enum: BookingStatus, example: BookingStatus.PENDING_PAYMENT })
   status: BookingStatus;
@@ -52,10 +87,24 @@ export function toFlightBookingResponse(
       children: doc.passengerCounts.children,
       infants: doc.passengerCounts.infants,
     },
+    ...(doc.passengers
+      ? {
+          passengers: doc.passengers.map((passenger) => ({
+            fullName: passenger.fullName,
+            dateOfBirth: passenger.dateOfBirth,
+            passengerType: passenger.passengerType,
+            extraBags: passenger.extraBags.map((bag) => ({
+              weightKg: bag.weightKg,
+            })),
+            baggageFeeCents: passenger.baggageFeeCents,
+          })),
+        }
+      : {}),
     seats: doc.seats,
     farePerPassengerCents: doc.farePerPassengerCents,
     infantFareCents: doc.infantFareCents,
     totalCents: doc.totalCents,
+    baggageFeeCents: doc.baggageFeeCents ?? 0,
     currency: doc.currency,
     status: doc.status,
     holdExpiresAt: doc.holdExpiresAt ? doc.holdExpiresAt.toISOString() : null,
