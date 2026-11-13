@@ -1330,6 +1330,16 @@ before the code. Merged the latest develop (#63 and others) with one conflict, i
 Date: 2026-11-13
 Student: Ahmed Sanad
 Tool: Claude (Claude Code)
+Related Requirement: GEN-09 (SCRUM-77)
+Prompt:
+Build GEN-09, report a post, comment, review or itinerary (once per item per user), following docs/contracts.md and the
+SCRUM-77 checklist: guest 401, a non-existent target is rejected, a second report by the same user is rejected also under
+parallel requests, reason required, status OPEN. Read other modules' content by type and id without editing their modules.
+How the output was used:
+New reports module (POST /api/reports) with a Report schema whose unique index on reporter + type + target is what holds
+under parallel requests (duplicate key becomes 409). A read-only ContentLookupService checks that a post or itinerary exists
+and is visible to the reporter (published, public, not hidden; otherwise 404 so reports cannot probe private content).
+COMMENT and REVIEW are valid types that return a field-level 400 until those modules exist. 23 e2e tests.
 Related Requirement: GEN-02 (SCRUM-124)
 Prompt:
 Build GEN-02, field-level validation messages on every endpoint, following docs/contracts.md section 3 (error shape with
