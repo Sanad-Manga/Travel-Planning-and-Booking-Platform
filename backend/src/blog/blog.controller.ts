@@ -108,13 +108,19 @@ export class BlogController {
     return this.blogService.listPublished(query);
   }
 
-  @Get(':id')
+    @Get(':id')
   @Public()
   @ApiOperation({
     summary:
-      'Open a post: title, author, date, body, tags, images, like count and comments (BLG-02, public)',
+      'Open a published post with comments in chronological order (BLG-02, BLG-05)',
+    description:
+      'Public endpoint. The page and limit query parameters paginate the comments, with 10 comments per page by default.',
   })
   @ApiOkResponse({ type: PostDetailDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: 'Invalid page or limit',
+  })
   @ApiNotFoundResponse({
     type: ErrorResponseDto,
     description:
@@ -122,10 +128,10 @@ export class BlogController {
   })
   findOne(
     @Param('id') id: string,
+    @Query() query: PaginationDto,
     @Req() request: AuthenticatedRequest,
   ): Promise<PostDetailDto> {
-    // request.user is only set when the global guard identified the caller; guests have none.
-    return this.blogService.findOne(id, request.user);
+    return this.blogService.findOne(id, request.user, query);
   }
 
   @Patch(':id')
