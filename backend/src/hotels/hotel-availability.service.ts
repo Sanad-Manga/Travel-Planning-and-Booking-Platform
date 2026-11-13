@@ -11,6 +11,7 @@ export interface FreeRoom {
   hotelId: string;
   name: string;
   type: string;
+  beds: number;
   maxOccupancy: number;
   pricePerNightCents: number;
 }
@@ -52,7 +53,7 @@ export class HotelAvailabilityService {
         isActive: true,
         availability: { $elemMatch: { startDate: { $lt: checkOut }, endDate: { $gt: checkIn } } },
       })
-      .select('hotelId name type maxOccupancy pricePerNightCents availability')
+      .select('hotelId name type beds maxOccupancy pricePerNightCents availability')
       .lean()
       .exec();
 
@@ -73,6 +74,7 @@ export class HotelAvailabilityService {
         hotelId: room.hotelId.toString(),
         name: room.name,
         type: room.type,
+        beds: room.beds,
         maxOccupancy: room.maxOccupancy,
         pricePerNightCents: room.pricePerNightCents,
       }))

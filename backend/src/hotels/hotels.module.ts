@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ReferenceDataModule } from '../reference-data/reference-data.module';
 import { HotelAvailabilityService } from './hotel-availability.service';
+import { HotelFreeRoomsController } from './hotel-free-rooms.controller';
+import { HotelFreeRoomsService } from './hotel-free-rooms.service';
 import { HotelSearchController } from './hotel-search.controller';
 import { HotelSearchService } from './hotel-search.service';
 import { HotelsController } from './hotels.controller';
@@ -21,12 +23,13 @@ import { Room, RoomSchema } from './schemas/room.schema';
     ReferenceDataModule,
   ],
   // HotelSearchController first: fixed routes (search) must be matched before any future :id route.
-  controllers: [HotelSearchController, HotelsController, RoomsController],
+  controllers: [HotelSearchController, HotelFreeRoomsController, HotelsController, RoomsController],
   providers: [
     HotelsService,
     RoomsService,
     HotelAvailabilityService,
     HotelSearchService,
+    HotelFreeRoomsService,
     // Stub until hotel bookings exist (HTL-16): Hotels B replaces useClass with the real reservation lookup.
     { provide: RoomReservations, useClass: NoRoomReservations },
   ],
