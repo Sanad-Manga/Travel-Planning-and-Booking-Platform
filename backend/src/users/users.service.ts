@@ -73,6 +73,18 @@ export class UsersService {
   }
 
   /**
+   * ACC-12: ONE conditional update, ACTIVE -> DEACTIVATED, filtered on the id AND the current status (no
+   * read-then-write). Returns false when the user was not ACTIVE any more (e.g. a parallel call won).
+   */
+  async deactivate(id: string): Promise<boolean> {
+    if (!Types.ObjectId.isValid(id)) return false;
+    const result = await this.userModel
+      .updateOne({ _id: id, status: AccountStatus.ACTIVE }, { $set: { status: AccountStatus.DEACTIVATED } })
+      .exec();
+    return result.modifiedCount === 1;
+  }
+
+  /**
    * Records one wrong password in a SINGLE atomic update (no read-then-write), so parallel guesses
    * cannot slip past the limit. Uses an aggregation-pipeline update:
    *  - a lock that already ended restarts the counter at 1;

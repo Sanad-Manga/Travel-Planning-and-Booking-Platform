@@ -24,3 +24,7 @@ export const HOTEL_MAX_TIER_DAYS = 365;
 
 // HTL-04: bounded child data embedded in the room, so the no-overlap rule can be one atomic update.
 export const ROOM_MAX_AVAILABILITY_RANGES = 100;
+
+// HTL-11 search input limits: module-local, they only keep the room-combination check small (the ticket sets none).
+export const HOTEL_SEARCH_MAX_GUESTS = 100;
+export const HOTEL_SEARCH_MAX_ROOMS = 10;
