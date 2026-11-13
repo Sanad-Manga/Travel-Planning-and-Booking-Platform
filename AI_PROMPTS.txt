@@ -1444,3 +1444,36 @@ register a checker with (documented in docs/api/account-deactivation.md); nothin
 proven only with a test double. 20 e2e tests on mongodb-memory-server (two files, COOKIE_SECURE true and false) plus unit tests; they show comments already read
 'Deleted user' and public itineraries are already hidden, and a read-only probe showed a deactivated author's posts are still
 visible (reported to the blog owner, not changed). I read every file before committing.
+
+================================================
+Date: 2026-11-13
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: ACC-16 (SCRUM-44)
+Prompt:
+Implement independent USER-only atomic suspension/reactivation logic on the existing ACC-16 branch. Verify PR #81 status, reuse existing auth/audit/notification services, preserve bookings/content, avoid stacked branches or a competing AdminModule, and defer integration if ACC-14 remains unmerged. Do not invent ACCOUNT_REACTIVATED or alter shared contracts. Run focused tests/build/changed-file lint, document genuine blockers and leave changes uncommitted.
+How the output was used:
+Verified live SCRUM-44 and GitHub PR #81 (open/unmerged), then added separate AccountStatusService/controller, route/body/response DTOs and focused unit/database/HTTP fixture tests. Conditional updates enforce USER and exact source status; no unrelated fields or data are changed. Both successful transition directions call AuditService, and suspension attempts ACCOUNT_SUSPENDED through NotificationsService. Reactivation notification is explicitly blocked by the missing shared enum. Tests demonstrate non-atomic audit failure leaves changed status with a reported 500 and that shared notify() can swallow persistence failure. No unsafe rollback, fake notification type or replacement shared service was added. All 32 focused tests (two suites), build and changed-file ESLint passed in an environment-free temporary copy using disposable MongoDB and synthetic accounts; full regressions, production registration, ACC-14 regression and whole-app Swagger remain deferred. Admin README records scope, actual errors, tested behavior and the required lead decisions for the enum, durable notifications and audit atomicity. No AppModule/AdminModule, common/auth/users/audit/notifications implementation, dependency files, real .env, shared Atlas, PR/Jira or Git history was changed. Existing log entries were preserved.
+================================================
+
+================================================
+Date: 2026-11-13
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: ACC-16 (SCRUM-44) - final integration
+Prompt:
+After ACC-14 PR #81 merged and the restored README conflict was resolved, integrate the existing ACC-16 service/controller into the existing AdminModule without rewriting logic or changing ACC-14. Import AuditModule and NotificationsModule, reuse User registration, add real AppModule E2E tests, preserve known enum/audit/notification limitations, update documentation and run focused then full checks. Do not change branches/history, reapply stashes, commit, push, create PRs or edit Jira.
+How the output was used:
+Registered AccountStatusController and AccountStatusService in the existing AdminModule and imported the two shared service modules. Only the status service's outdated registration comment changed; transition logic and all prior tests were preserved. Added backend/test/account-status.e2e-spec.ts with 17 passing tests booting actual AppModule, confirming both PATCH endpoints and GET account list, all caller roles, login/cookie behavior, concurrency/errors, audits, suspension notifications, preserved bookings/content and public post visibility, ACC-14 combined filters, actual Swagger and explicit audit/notification failures. Updated only ACC-16 README integration claims while preserving ACC-18/ACC-14 documentation and earlier logs. In an environment-free temporary copy with disposable MongoDB and synthetic accounts, 32 focused tests passed, new AppModule E2E passed 17/17, full Jest passed 873/873 (55 suites), full E2E passed 1021/1021 (39 suites), build and full ESLint passed. Existing E2E listener warnings were not suppressed. Reactivation notification remains blocked by missing ACCOUNT_REACTIVATED; status and audit are not atomic; notify() still swallows persistence errors. No shared-service, enum, authentication, User-schema, ACC-14 implementation, AppModule or dependency changes, reinstalls, real .env/Atlas access, Git history/stash operations, commit, push, PR or Jira changes occurred.
+================================================
+
+================================================
+Date: 2026-11-13
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: ACC-16 (SCRUM-44) - Scrum Master final review
+Prompt:
+Apply Ahmed Sanad's approved final review without rewriting unrelated functionality: add ACCOUNT_REACTIVATED only to the shared enum/contract and notification-schema test, notify on both transitions, enforce atomic status update then awaited audit then best-effort notification, make already-target requests idempotent, recover missing audit work as safely as possible without false actor attribution or exactly-once claims, preserve all restrictions and run focused tests followed by full Jest, full E2E, build, lint and whitespace checks sequentially. Prepare PR text but do not create a PR, commit or push.
+How the output was used:
+Added the approved notification type while preserving all old values; PROVIDER_REACTIVATED was intentionally not added. Updated the existing status service/controller and tests for sequential effects, correct suspension/reactivation notifications, successful no-op repeats and explicit self-target rejection. Added only an admin-owned accountStatusOperations schema/model to retain original actor/transition metadata and coordinate retry phases with expiring MongoDB leases. Correlated audit reads avoid unnecessary duplicates for already-visible lost acknowledgements. Tests show another administrator can recover a recorded failed audit without claiming its historical action, completed repeats preserve User timestamps and do not duplicate effects, and same-direction concurrent requests remain safe. Documented separate status/journal writes, unrecoverable missing-journal windows, uncertain late-commit/lease duplicate limits and best-effort notification loss; no transaction, User-schema or shared AuditService/NotificationsService change was introduced. Fixed an unsorted notification assertion by explicitly sorting, preserving its strict expected types. Focused tests passed 52/52 (three suites), AppModule E2E passed 19/19; subsequent sequential full Jest passed 880/880 (55 suites), full E2E passed 1023/1023 (39 suites), build and full ESLint passed. README preserves prior documentation and includes prepared develop-target PR text with approvals/limitations. Verification used an environment-free temporary copy, synthetic users and disposable MongoDB without reinstalling dependencies. Existing log entries were preserved; no .env/shared Atlas access, branch/history operations, commit, push, PR creation or Jira edit occurred.
+================================================
