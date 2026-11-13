@@ -70,11 +70,27 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
     Array.from({ length: n }, (_v, i) => make(i));
   const now = new Date();
 
+  /** The post whose comments the /api/posts/{id}/comments row pages through. */
+  const commentedPostId = new Types.ObjectId();
+
+  /**
+   * GETs that take page and limit but are NOT lists. The post page pages only its embedded first batch of
+   * comments; the real comment list is /api/posts/{id}/comments, which is in the table above.
+   */
+  const NOT_LISTS = ['/api/posts/{id}'];
+
   const ROUTES: ListRoute[] = [
-    { swagger: '/api/posts', url: '/api/posts', auth: 'none', total: 25 },
+    // 25 plain posts + the one post that carries the comments below
+    { swagger: '/api/posts', url: '/api/posts', auth: 'none', total: 26 },
     {
       swagger: '/api/posts/mine',
       url: '/api/posts/mine',
+      auth: 'user',
+      total: 25,
+    },
+    {
+      swagger: '/api/posts/{id}/comments',
+      url: `/api/posts/${commentedPostId.toHexString()}/comments`,
       auth: 'user',
       total: 25,
     },
@@ -166,6 +182,31 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
         likeCount: 0,
         commentCount: 0,
         createdAt: now,
+        updatedAt: now,
+      })),
+    );
+    await db.collection('posts').insertOne({
+      _id: commentedPostId,
+      authorId: admin.id,
+      title: 'Post with comments',
+      body: 'Body',
+      tags: ['commented'],
+      images: [],
+      status: PostStatus.PUBLISHED,
+      publishedAt: now,
+      isHidden: false,
+      likeCount: 0,
+      commentCount: 25,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.collection('comments').insertMany(
+      rows(25, (i) => ({
+        postId: commentedPostId,
+        authorId: userId,
+        body: `Comment ${i}`,
+        isHidden: false,
+        createdAt: new Date(now.getTime() + i * 1000),
         updatedAt: now,
       })),
     );
@@ -266,6 +307,7 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
           return names.includes('page') && names.includes('limit');
         })
         .map(({ path }) => path)
+        .filter((path) => !NOT_LISTS.includes(path))
         .sort();
       expect(paged).toEqual(ROUTES.map((r) => r.swagger).sort());
     });
