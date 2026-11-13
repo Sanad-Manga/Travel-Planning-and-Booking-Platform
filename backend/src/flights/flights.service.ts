@@ -2,16 +2,25 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  InternalServerErrorException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { AirlinesService } from '../airlines';
-import { AuthenticatedUser, localToUtc, Role } from '../common';
+import {
+  AuthenticatedUser,
+  localToUtc,
+  PLATFORM_CURRENCY,
+  Role,
+  utcToLocal,
+} from '../common';
 import { ReferenceDataService } from '../reference-data/reference-data.service';
+import { FlightDetailsResponseDto } from './dto/flight-details-response.dto';
 import { CreateFlightDto } from './dto/create-flight.dto';
 import { FlightResponseDto, toFlightResponse } from './dto/flight-response.dto';
+import { FlightCabinsReader } from './flight-cabins.reader';
 import { Flight, FlightLean } from './schemas/flight.schema';
 
 const MONGO_DUPLICATE_KEY = 11000;
@@ -27,7 +36,75 @@ export class FlightsService {
     @InjectModel(Flight.name) private readonly model: Model<Flight>,
     private readonly airlines: AirlinesService,
     private readonly referenceData: ReferenceDataService,
+    private readonly cabins: FlightCabinsReader,
   ) {}
+
+  /** FLT-17: public flight details, including every cabin and the airline's cancellation tiers. */
+  async getDetails(id: string): Promise<FlightDetailsResponseDto> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new NotFoundException('Flight not found');
+    }
+
+    const flight = await this.model.findById(id).lean<FlightLean>().exec();
+    if (!flight) throw new NotFoundException('Flight not found');
+
+    const airline = await this.airlines.findById(flight.airlineId.toString());
+    if (!airline || !airline.isActive) {
+      throw new NotFoundException('Flight not found');
+    }
+
+    const [departureAirport, arrivalAirport, cabins, cancellationTiers] =
+      await Promise.all([
+        this.referenceData.findAirportById(flight.departureAirport),
+        this.referenceData.findAirportById(flight.arrivalAirport),
+        this.cabins.findForFlight(flight._id),
+        this.airlines.getCancellationTiers(flight.airlineId.toString()),
+      ]);
+
+    if (!departureAirport || !arrivalAirport) {
+      throw new InternalServerErrorException(
+        'Flight airport reference data is missing',
+      );
+    }
+
+    return {
+      id: flight._id.toString(),
+      airline: {
+        id: airline._id.toString(),
+        name: airline.name,
+        code: airline.code,
+      },
+      flightNumber: flight.flightNumber,
+      departureAirport: {
+        iataCode: departureAirport.iata_code,
+        name: departureAirport.name,
+        timeZone: flight.departureTimeZone,
+      },
+      arrivalAirport: {
+        iataCode: arrivalAirport.iata_code,
+        name: arrivalAirport.name,
+        timeZone: flight.arrivalTimeZone,
+      },
+      departureAt: flight.departureAt.toISOString(),
+      departureLocal: utcToLocal(flight.departureAt, flight.departureTimeZone),
+      arrivalAt: flight.arrivalAt.toISOString(),
+      arrivalLocal: utcToLocal(flight.arrivalAt, flight.arrivalTimeZone),
+      durationMinutes:
+        (flight.arrivalAt.getTime() - flight.departureAt.getTime()) / 60_000,
+      currency: PLATFORM_CURRENCY,
+      status: flight.status,
+      cabins: cabins.map((cabin) => ({
+        cabinClass: cabin.cabinClass,
+        priceCents: cabin.priceCents,
+        availableSeats: cabin.availableSeats,
+        baggageAllowance: {
+          freeBags: cabin.freeBags,
+          maxBagWeightKg: cabin.maxBagWeightKg,
+        },
+      })),
+      cancellationPolicy: { cancellationTiers },
+    };
+  }
 
   /**
    * FLT-03: an airline moderator creates a flight for THEIR airline.

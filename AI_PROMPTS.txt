@@ -1380,3 +1380,19 @@ which slices in memory and builds the same envelope by hand (reported to its own
 spec that reads the Swagger document, so a new list endpoint must be added to its table or the test fails, and a GET that returns
 a bare array fails too. For each list it checks defaults, limit 1/50 accepted, limit 51/0 and bad page rejected per field, a page
 past the end is an empty list, and 25 seeded rows split into pages with no row twice. No source code changed.
+
+Date: 2026-11-13
+Student: Abdulrahman Mohamad Hosny
+Tool: GitHub Copilot (Copilot SDK in VS Code)
+Related Requirement: FLT-17 (Flight details)
+Prompt:
+Implement FLT-17 on the existing FLT-17 branch, update it from develop, add the public GET /api/flights/:id flight-details endpoint
+with airline, airports, local departure and arrival times, duration, all cabin prices and seats remaining, baggage allowance, and the
+airline cancellation policy. Update Swagger and the relevant E2E tests, verify the ticket, append this prompt to AI_PROMPTS.txt,
+then stage, commit, and push the changes.
+How the output was used:
+Added the public flight-details route and DTO, including airport names and codes, local times with offsets through the shared GEN-06
+helper, duration in minutes, currency, every cabin with available seats and baggage allowance, and the cancellation tiers from
+AirlinesService.getCancellationTiers. Added E2E checks for guest access, all cabin data including a sold-out cabin, local-time values,
+the cancellation policy and empty-policy behavior, missing/inactive flights, and Swagger. Backend build, changed-file lint, and the
+flight-search E2E suite passed (41 tests).
