@@ -1298,4 +1298,4 @@ again if saving the reference fails or the activity was deleted in between. Remo
 that activity's images, removes the file (safe to repeat) and then pulls the reference, so a failure in between can
 be retried. Deleting an activity, a day or an itinerary now also removes its stored files, as the upload README asks
 of consumers. Used the multipart field "image" with a 5 MB multer limit (413 above it). The tests were written
-before the code. Merged the latest develop (#63 and others) with one conflict, in this file only. Lint, build, 710 unit and 596 e2e tests pass.
+before the code. Merged the latest develop (#63 and others) with one conflict, in this file only. Lint, build, 727 unit and 639 e2e tests pass.
