@@ -1414,3 +1414,17 @@ helper, duration in minutes, currency, every cabin with available seats and bagg
 AirlinesService.getCancellationTiers. Added E2E checks for guest access, all cabin data including a sold-out cabin, local-time values,
 the cancellation policy and empty-policy behavior, missing/inactive flights, and Swagger. Backend build, changed-file lint, and the
 flight-search E2E suite passed (41 tests).
+Related Requirement: ACC-12 (SCRUM-73)
+Prompt:
+Implement only ACC-12, DELETE /api/users/me, following docs/contracts.md. A user deactivates their own account after a
+{ confirm: true } body; it is blocked by an upcoming CONFIRMED flight or hotel booking; one atomic ACTIVE -> DEACTIVATED
+update; clear the auth cookies; stay inside users/auth (no common/, no other module); stub what depends on unmerged
+tickets; prove on a real in-memory database which acceptance criteria already hold in blog and itineraries.
+How the output was used:
+The assistant added the route (role USER only, flagged for the lead), AccountDeactivationService (load account, check
+upcoming bookings, one conditional update), a confirm DTO (Equals(true)) and UsersService.deactivate. Because the payments
+BookingProvider has no "bookings of a user" query, it added an UpcomingBookingsRegistry in users that Flights B and Hotels B
+register a checker with (documented in docs/api/account-deactivation.md); nothing is registered yet, so the real blocking is
+proven only with a test double. 16 e2e tests on mongodb-memory-server plus unit tests; they show comments already read
+'Deleted user' and public itineraries are already hidden, and a read-only probe showed a deactivated author's posts are still
+visible (reported to the blog owner, not changed). I read every file before committing.
