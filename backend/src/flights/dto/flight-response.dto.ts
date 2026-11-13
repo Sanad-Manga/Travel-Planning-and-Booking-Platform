@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { FlightStatus } from '../../common';
+import { FlightStatus, utcToLocal } from '../../common';
 import { FlightLean } from '../schemas/flight.schema';
 
 export class FlightResponseDto {
@@ -23,6 +23,20 @@ export class FlightResponseDto {
 
   @ApiProperty({ example: '2026-12-02T00:45:00.000Z', description: 'UTC' })
   arrivalAt: string;
+
+  @ApiProperty({
+    example: '2026-12-01T14:30:00+02:00',
+    description:
+      'Departure in the LOCAL time of the departure airport (with its UTC offset)',
+  })
+  departureLocal: string;
+
+  @ApiProperty({
+    example: '2026-12-01T19:45:00-05:00',
+    description:
+      'Arrival in the LOCAL time of the arrival airport (with its UTC offset)',
+  })
+  arrivalLocal: string;
 
   @ApiProperty({
     example: 'Africa/Cairo',
@@ -53,6 +67,8 @@ export function toFlightResponse(doc: FlightLean): FlightResponseDto {
     arrivalAirport: doc.arrivalAirport,
     departureAt: doc.departureAt.toISOString(),
     arrivalAt: doc.arrivalAt.toISOString(),
+    departureLocal: utcToLocal(doc.departureAt, doc.departureTimeZone),
+    arrivalLocal: utcToLocal(doc.arrivalAt, doc.arrivalTimeZone),
     departureTimeZone: doc.departureTimeZone,
     arrivalTimeZone: doc.arrivalTimeZone,
     status: doc.status,
