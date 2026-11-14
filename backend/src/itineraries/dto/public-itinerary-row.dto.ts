@@ -2,9 +2,8 @@ import { ApiProperty } from '@nestjs/swagger';
 import { ItineraryLean } from '../schemas/itinerary.schema';
 
 /**
- * One row of GET /api/itineraries/public/search (ITN-20). Only public, visible itineraries are listed, so
- * visibility and the hidden flag are not repeated. ITN-21 adds keyword and duration filters and the full
- * read-only view.
+ * One row of GET /api/itineraries/public/search (ITN-20, ITN-21). Only public, visible itineraries are listed, so
+ * visibility and the hidden flag are not repeated. Open one with GET /api/itineraries/public/:id.
  */
 export class PublicItineraryRowDto {
   @ApiProperty({ example: '674a1b2c3d4e5f6a7b8c9d0e' })
@@ -26,6 +25,13 @@ export class PublicItineraryRowDto {
   startDate: string;
 
   @ApiProperty({
+    example: 14,
+    description:
+      'How many days the itinerary has (what the duration filter uses)',
+  })
+  dayCount: number;
+
+  @ApiProperty({
     example: '2026-11-04T10:00:00.000Z',
     description: 'The list is ordered by this, newest first',
   })
@@ -41,6 +47,7 @@ export function toPublicItineraryRow(
     title: doc.title,
     countryCodes: doc.countryCodes,
     startDate: doc.startDate,
+    dayCount: (doc.days ?? []).length,
     updatedAt: doc.updatedAt.toISOString(),
   };
 }
