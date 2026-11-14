@@ -32,7 +32,7 @@ describe('UsersService', () => {
   it('findByEmail loads the hash only when asked', async () => {
     exec.mockResolvedValue(null);
     await service.findByEmail('ali@example.com', true);
-    expect(select).toHaveBeenCalledWith('+passwordHash');
+    expect(select).toHaveBeenCalledWith('+passwordHash +temporaryPasswordExpiresAt +temporaryPasswordConsumed');
   });
 
   it('findById queries by id', async () => {

@@ -16,19 +16,19 @@ const contextFor = (request: Partial<AuthenticatedRequest>): ExecutionContext =>
 describe('JwtAuthGuard', () => {
   const reflector = { getAllAndOverride: jest.fn() };
   const jwtService = { verifyAsync: jest.fn() };
-  const accounts = { isActive: jest.fn() };
+  const accounts = { isActive: jest.fn(), getAuthenticationState: jest.fn() };
   const guard = new JwtAuthGuard(jwtService as unknown as JwtService, reflector as unknown as Reflector, accounts);
 
   beforeEach(() => {
     jest.resetAllMocks();
-    accounts.isActive.mockResolvedValue(true);
+    accounts.getAuthenticationState.mockResolvedValue({ active: true, tokenVersion: 0, mustChangePassword: false });
   });
 
   it('lets @Public routes through without looking at the cookie or the account', async () => {
     reflector.getAllAndOverride.mockReturnValue(true);
     await expect(guard.canActivate(contextFor({ cookies: {} }))).resolves.toBe(true);
     expect(jwtService.verifyAsync).not.toHaveBeenCalled();
-    expect(accounts.isActive).not.toHaveBeenCalled();
+    expect(accounts.getAuthenticationState).not.toHaveBeenCalled();
   });
 
   it('401 when the cookie is missing', async () => {
@@ -49,13 +49,13 @@ describe('JwtAuthGuard', () => {
     jwtService.verifyAsync.mockResolvedValue({ sub: 'u1', role: Role.HOTEL_MODERATOR, hotelId: 'h1' });
     const request: Partial<AuthenticatedRequest> = { cookies: { access_token: 'x' } };
     await expect(guard.canActivate(contextFor(request))).resolves.toBe(true);
-    expect(request.user).toEqual({ userId: 'u1', role: Role.HOTEL_MODERATOR, hotelId: 'h1' });
-    expect(accounts.isActive).toHaveBeenCalledWith('u1');
+    expect(request.user).toEqual({ userId: 'u1', role: Role.HOTEL_MODERATOR, hotelId: 'h1', tokenVersion: 0 });
+    expect(accounts.getAuthenticationState).toHaveBeenCalledWith('u1');
   });
 
   it('401 when the account is no longer active (suspended, deactivated or deleted) even with a valid token', async () => {
     jwtService.verifyAsync.mockResolvedValue({ sub: 'u1', role: Role.USER });
-    accounts.isActive.mockResolvedValue(false);
+    accounts.getAuthenticationState.mockResolvedValue({ active: false, tokenVersion: 0, mustChangePassword: false });
     const request: Partial<AuthenticatedRequest> = { cookies: { access_token: 'x' } };
     await expect(guard.canActivate(contextFor(request))).rejects.toBeInstanceOf(UnauthorizedException);
     expect(request.user).toBeUndefined();
@@ -64,15 +64,29 @@ describe('JwtAuthGuard', () => {
   it('does not check the account when the token itself is already invalid', async () => {
     jwtService.verifyAsync.mockRejectedValue(new Error('jwt expired'));
     await expect(guard.canActivate(contextFor({ cookies: { access_token: 'x' } }))).rejects.toBeInstanceOf(UnauthorizedException);
-    expect(accounts.isActive).not.toHaveBeenCalled();
+    expect(accounts.getAuthenticationState).not.toHaveBeenCalled();
   });
 
   it('fails closed: if the account lookup itself fails, the error propagates and nobody gets in', async () => {
     jwtService.verifyAsync.mockResolvedValue({ sub: 'u1', role: Role.USER });
-    accounts.isActive.mockRejectedValue(new Error('database down'));
+    accounts.getAuthenticationState.mockRejectedValue(new Error('database down'));
     const request: Partial<AuthenticatedRequest> = { cookies: { access_token: 'x' } };
     await expect(guard.canActivate(contextFor(request))).rejects.toThrow('database down');
     expect(request.user).toBeUndefined();
+  });
+
+  it.each([undefined, 0, 1, -1, 1.5, '2', null])('rejects stale or malformed token version %p on a reset account', async tokenVersion => {
+    jwtService.verifyAsync.mockResolvedValue({ sub: 'u1', role: Role.USER, tokenVersion });
+    accounts.getAuthenticationState.mockResolvedValue({ active: true, tokenVersion: 2, mustChangePassword: false });
+    await expect(guard.canActivate(contextFor({ cookies: { access_token: 'x' } }))).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('uses explicit handler metadata to allow forced replacement; defaults to denial', async () => {
+    jwtService.verifyAsync.mockResolvedValue({ sub: 'u1', role: Role.USER, tokenVersion: 2 });
+    accounts.getAuthenticationState.mockResolvedValue({ active: true, tokenVersion: 2, mustChangePassword: true });
+    await expect(guard.canActivate(contextFor({ cookies: { access_token: 'x' } }))).rejects.toBeInstanceOf(ForbiddenException);
+    reflector.getAllAndOverride.mockReturnValueOnce(false).mockReturnValueOnce(true);
+    await expect(guard.canActivate(contextFor({ cookies: { access_token: 'x' } }))).resolves.toBe(true);
   });
 });
 
