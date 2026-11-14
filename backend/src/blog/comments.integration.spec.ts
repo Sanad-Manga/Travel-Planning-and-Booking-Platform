@@ -95,6 +95,7 @@ describe('BLG-05 comments integration', () => {
         {
           provide: ACCOUNT_STATUS_CHECKER,
           useValue: {
+            getAuthenticationState: async (id: string) => ({ active: accounts.get(id)?.status === AccountStatus.ACTIVE, tokenVersion: 0, mustChangePassword: false }),
             isActive: async (id: string) =>
               accounts.get(id)?.status === AccountStatus.ACTIVE,
           },

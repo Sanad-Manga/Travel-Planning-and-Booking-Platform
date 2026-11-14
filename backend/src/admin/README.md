@@ -337,3 +337,51 @@ access, dependency edits, console logs or unrelated changes were added. The AI
 prompt log records the request and follow-up authorizations. The student can use
 `feat(admin): list accounts with search and filters (ACC-14)` as the eventual PR
 title after independent review; PR descriptions/checklists were not edited here.
+
+## Administrator-assisted password reset — ACC-07a / SCRUM-45
+
+`POST /api/admin/users/:id/reset-password` (ADMIN only, empty body) gives a user or moderator a temporary password
+that can be used for one login, after which the account must set a new password.
+
+### Who can be reset
+
+Only ACTIVE `USER`, `AIRLINE_MODERATOR` and `HOTEL_MODERATOR` accounts. A malformed id is 400, an unknown account 404,
+an ADMIN, suspended or deactivated target 409. A reset never reactivates or relinks an account.
+
+### The temporary password
+
+- Generated from 24 random bytes (base64url, with a fixed prefix so it satisfies the shared password rules).
+- Only its bcrypt hash is stored, together with an expiry (24 hours). The plaintext is returned once, in the response
+  of this request, with `Cache-Control: no-store`. It is never logged, audited or stored.
+- Response: `{ id, temporaryPassword, expiresAt }`. There is no email or notification delivery: the administrator
+  hands the password to the user.
+- One successful login only. The login claims it with a single conditional update, so two parallel logins cannot both
+  win. A second login with the same password fails like a wrong password.
+
+### Sessions and the forced change
+
+- The reset sets the new hash, `mustChangePassword = true`, and raises `tokenVersion` by one in one update. Access and
+  refresh tokens carry the version, so every token issued before the reset stops working at once.
+- Logging in with the temporary password gives a restricted session. The global guard answers 403 on every route except
+  those marked `@AllowWhenMustChange()`: `GET /api/auth/me`, `PATCH /api/auth/change-password` and
+  `POST /api/auth/logout`. New routes are blocked by default. `POST /api/auth/refresh` is refused while a change is
+  pending.
+- `PATCH /api/auth/change-password` takes the temporary password as `currentPassword`. The new password must follow the
+  normal rules and differ from the temporary one. On success the flags are cleared, `tokenVersion` goes up again, the
+  cookies are cleared and the user logs in again with the new password.
+- An ordinary password change (no reset pending) keeps working as before and keeps the current session.
+
+### Audit and limits
+
+- Every reset writes an `ADMIN_PASSWORD_RESET` audit entry (`targetType: 'User'`) with the admin as actor and no secret.
+- The audit write happens after the credentials change. If it fails, the response is 500 and no password is shown, but
+  the old password no longer works: reset again.
+- A lost response, an expired temporary password, or a login that is not followed by a password change within the
+  access-token lifetime all need another reset.
+- Credential update failures are turned into a generic 500 so driver errors never reach the logs.
+
+### Tests
+
+`temporary-password.service.spec.ts`, `password-reset-target.service.spec.ts`, `auth.service.spec.ts`,
+`common/guards/guards.spec.ts`, `test/admin-password-reset.e2e-spec.ts` and `test/auth.e2e-spec.ts` (one-time use, old
+tokens revoked, restricted routes, refresh refused, change-password flow, every excluded target).

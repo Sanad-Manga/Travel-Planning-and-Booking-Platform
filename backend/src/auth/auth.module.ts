@@ -32,7 +32,7 @@ import { TokenRevocationService } from './token-revocation.service';
   providers: [
     AuthService,
     TokenRevocationService,
-    // What JwtAuthGuard uses to confirm the account is still ACTIVE on every request (UsersService.isActive).
+    // JwtAuthGuard reads ACTIVE status, tokenVersion and forced-change state on every protected request.
     { provide: ACCOUNT_STATUS_CHECKER, useExisting: UsersService },
     // Global guards run in the order they are listed here: first authenticate, then check the role.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
