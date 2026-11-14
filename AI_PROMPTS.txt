@@ -1444,3 +1444,27 @@ register a checker with (documented in docs/api/account-deactivation.md); nothin
 proven only with a test double. 20 e2e tests on mongodb-memory-server (two files, COOKIE_SECURE true and false) plus unit tests; they show comments already read
 'Deleted user' and public itineraries are already hidden, and a read-only probe showed a deactivated author's posts are still
 visible (reported to the blog owner, not changed). I read every file before committing.
+================================================
+
+Date: 2026-11-14
+Student: Yassin Yahya
+Tool: Claude (Claude Code)
+Related Requirement: ITN-25 (SCRUM-108)
+Prompt:
+Implement every ticket of mine that is not blocked and that I am allowed to do. ITN-25 (GET /api/itineraries/:id/hotels): the
+owner picks a city group of their itinerary and sees the hotels free for that group's dates; check-in is the group's first
+day, check-out the day after its last day; the user enters guests and rooms; it must reuse the HTL-11 hotel search with no
+copied logic; only the owner can use it; an unknown city group is a clear error. Branch cut from develop, no stacking.
+How the output was used:
+The endpoint takes fromDayNumber (the day where the group starts, as in cityGroups), guests, rooms and the shared paging.
+ItinerariesService.hotelsForGroup finds the itinerary by id AND owner (404 otherwise), derives the groups the same way ITN-09
+does, turns the chosen group into a city and two dates and calls HotelSearchService.search as it is, so the guest and room
+rules, availability, ordering and paging stay in the hotels module. A fromDayNumber where no group starts is a 400 on that
+field that lists the days where one does; a group already in the past is a 400 on the same field (the hotel search would
+name checkIn, which the user did not send). HotelsModule does not export HotelSearchService and the module is not mine, so
+ItinerariesModule imports HotelsModule and provides the same class itself; the PR asks the lead to export it instead.
+The lead's whole-app pagination test (GEN-05) failed on the new list route, as it is meant to; I added one row for it to
+backend/test/pagination.e2e-spec.ts (the file says new list endpoints are added there) and flagged it in the PR. A mutation
+check (check-out without the extra day) failed 6 tests. A spy test first looked at the wrong HotelSearchService instance
+(HotelsModule has its own), so the test now selects the one of ItinerariesModule. Lint, build, 851 unit and 1024 e2e pass.
+ITN-28 (bonus PDF) was not started: its ticket says bonus work comes only after the mandatory tickets pass in Swagger.

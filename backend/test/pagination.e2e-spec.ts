@@ -76,6 +76,9 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
   /** The active hotel whose free rooms the /api/hotels/{id}/rooms/available row pages through. */
   const roomsHotelId = new Types.ObjectId();
 
+  /** One of the user's itineraries (the first of the 25 below) has a day in city-0: the row of /api/itineraries/{id}/hotels (ITN-25). */
+  const groupHotelsItineraryId = new Types.ObjectId();
+
   /**
    * GETs that take page and limit but are NOT lists. The post page pages only its embedded first batch of
    * comments; the real comment list is /api/posts/{id}/comments, which is in the table above.
@@ -123,6 +126,13 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
       url: '/api/itineraries',
       auth: 'user',
       total: 25,
+    },
+    {
+      swagger: '/api/itineraries/{id}/hotels',
+      url: `/api/itineraries/${groupHotelsItineraryId.toHexString()}/hotels`,
+      auth: 'user',
+      // the city group of day 1 is city-0 from 2099-01-01 (the user's own itinerary, seeded below); paging with hotel data is proven in itineraries-hotels.service.spec.ts and itineraries.e2e-spec.ts
+      query: 'fromDayNumber=1&guests=1',
     },
     {
       swagger: '/api/admin/audit-logs',
@@ -269,6 +279,11 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
         days: [],
         createdAt: now,
         updatedAt: new Date(now.getTime() - i * 1000),
+        ...(i === 0 && {
+          _id: groupHotelsItineraryId,
+          startDate: '2099-01-01',
+          days: [{ _id: new Types.ObjectId(), cityId: 'city-0', notes: '' }],
+        }),
       })),
     );
     await db.collection('notifications').insertMany(

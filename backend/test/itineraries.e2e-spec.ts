@@ -1620,7 +1620,9 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
         position: 1,
       }).expect(200);
 
-      const moved = res.body.days.find((day: { id: string }) => day.id === a.id);
+      const moved = res.body.days.find(
+        (day: { id: string }) => day.id === a.id,
+      );
       expect(moved.activities).toEqual([activity.body]);
       expect(res.body.transportCosts).toEqual([cost.body]);
     });
@@ -2084,6 +2086,207 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
         .expect(401);
       await removeDay(admin, id, day.body.id).expect(403);
       await removeDay(airlineMod, id, day.body.id).expect(403);
+    });
+  });
+
+  describe('hotels for a city group (ITN-25)', () => {
+    /** Dates relative to today (UTC): the hotel search refuses a check-in in the past. */
+    const day = (offset: number): string =>
+      new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+    const hotels = (
+      id: string,
+      cookie?: string,
+      query = 'fromDayNumber=1&guests=2',
+    ) => {
+      const req = http().get(`/api/itineraries/${id}/hotels?${query}`);
+      return cookie ? req.set('Cookie', cookie) : req;
+    };
+    const hotelDoc = (name: string, cityId: string, countryCode: string) => ({
+      _id: new Types.ObjectId(),
+      name,
+      nameKey: name.toLowerCase(),
+      address: '1 Test Street',
+      cityId,
+      countryCode,
+      description: 'Hotel.',
+      photos: [],
+      starRating: 4,
+      amenities: [],
+      cancellationTiers: [],
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const roomDoc = (
+      hotelId: Types.ObjectId,
+      name: string,
+      maxOccupancy: number,
+      pricePerNightCents: number,
+      from: number,
+      to: number,
+    ) => ({
+      _id: new Types.ObjectId(),
+      hotelId,
+      name,
+      nameKey: name,
+      type: 'Double',
+      beds: 1,
+      maxOccupancy,
+      pricePerNightCents,
+      isActive: true,
+      availability: [
+        { _id: new Types.ObjectId(), startDate: day(from), endDate: day(to) },
+      ],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    /** Starts on day(10): two days in Cairo, one in Dubai. */
+    const planned = async () => {
+      const { id } = await createAs(alice, {
+        ...valid,
+        startDate: day(10),
+      });
+      for (const cityId of ['cairo', 'cairo', 'dubai']) {
+        await http()
+          .post(`/api/itineraries/${id}/days`)
+          .set('Cookie', alice)
+          .send({ cityId })
+          .expect(201);
+      }
+      return id;
+    };
+
+    beforeAll(async () => {
+      const exact = hotelDoc('Exact Stay Hotel', 'cairo', 'EG');
+      const short = hotelDoc('Short Stay Hotel', 'cairo', 'EG');
+      const gulf = hotelDoc('Gulf Hotel', 'dubai', 'AE');
+      await connection.collection('hotels').insertMany([exact, short, gulf]);
+      await connection.collection('rooms').insertMany([
+        // free for exactly the two nights of the Cairo group: day(10) and day(11)
+        roomDoc(exact._id, 'e1', 2, 10_000, 10, 12),
+        // free for the first night only
+        roomDoc(short._id, 's1', 2, 5_000, 10, 11),
+        roomDoc(gulf._id, 'g1', 2, 9_000, 12, 13),
+      ]);
+    });
+
+    it('401 for a guest, 403 for an admin and for a moderator', async () => {
+      const id = await planned();
+      await hotels(id).expect(401);
+      await hotels(id, admin).expect(403);
+      await hotels(id, airlineMod).expect(403);
+    });
+
+    it('lists the hotels free for the whole group: check-in is its first day, check-out the day after its last', async () => {
+      const id = await planned();
+
+      const res = await hotels(id, alice).expect(200);
+
+      expect(res.body).toMatchObject({ page: 1, limit: 10 });
+      const found = res.body.items as { name: string; nights: number }[];
+      expect(found.map((h) => h.name)).toEqual(['Exact Stay Hotel']);
+      expect(found[0]).toMatchObject({
+        cityId: 'cairo',
+        nights: 2,
+        cheapestTotalCents: 20_000,
+      });
+      // the Dubai group is the single night day(12)
+      const gulf = await hotels(id, alice, 'fromDayNumber=3&guests=2').expect(
+        200,
+      );
+      expect(
+        (gulf.body.items as { name: string }[]).map((h) => h.name),
+      ).toEqual(['Gulf Hotel']);
+    });
+
+    it('takes guests and rooms from the user and pages the result', async () => {
+      const id = await planned();
+      const tooMany = await hotels(
+        id,
+        alice,
+        'fromDayNumber=1&guests=4',
+      ).expect(200);
+      expect(tooMany.body.items).toEqual([]);
+      const paged = await hotels(
+        id,
+        alice,
+        'fromDayNumber=1&guests=2&rooms=1&page=2&limit=1',
+      ).expect(200);
+      expect(paged.body).toMatchObject({ page: 2, limit: 1, total: 1 });
+      expect(paged.body.items).toEqual([]);
+    });
+
+    it('only the owner: 404 for someone else, for an unknown id, 400 for a malformed id', async () => {
+      const id = await planned();
+      await hotels(id, bob).expect(404);
+      await hotels('674a1b2c3d4e5f6a7b8c9d0e', alice).expect(404);
+      await hotels('not-an-id', alice).expect(400);
+    });
+
+    it('a city group that does not exist is a 400 on fromDayNumber that says where groups start', async () => {
+      const id = await planned();
+      const res = await hotels(id, alice, 'fromDayNumber=2&guests=2').expect(
+        400,
+      );
+      expect(res.body.details).toEqual([
+        { field: 'fromDayNumber', message: expect.stringContaining('1, 3') },
+      ]);
+    });
+
+    it('400 for a missing or invalid fromDayNumber, guests or rooms, and for fields the user cannot choose', async () => {
+      const id = await planned();
+      for (const [query, field] of [
+        ['guests=2', 'fromDayNumber'],
+        ['fromDayNumber=0&guests=2', 'fromDayNumber'],
+        ['fromDayNumber=61&guests=2', 'fromDayNumber'],
+        ['fromDayNumber=abc&guests=2', 'fromDayNumber'],
+        ['fromDayNumber=1', 'guests'],
+        ['fromDayNumber=1&guests=0', 'guests'],
+        ['fromDayNumber=1&guests=101', 'guests'],
+        ['fromDayNumber=1&guests=2.5', 'guests'],
+        ['fromDayNumber=1&guests=2&rooms=0', 'rooms'],
+        ['fromDayNumber=1&guests=2&rooms=11', 'rooms'],
+        // the city and the dates come from the group, never from the request
+        ['fromDayNumber=1&guests=2&cityId=dubai', 'cityId'],
+        ['fromDayNumber=1&guests=2&checkIn=2030-01-01', 'checkIn'],
+      ]) {
+        const res = await hotels(id, alice, query).expect(400);
+        expect(
+          (res.body.details as { field: string }[]).map((d) => d.field),
+        ).toContain(field);
+      }
+    });
+
+    it('a group that is already over is a 400 on fromDayNumber', async () => {
+      const { id } = await createAs(alice, { ...valid, startDate: day(-5) });
+      await http()
+        .post(`/api/itineraries/${id}/days`)
+        .set('Cookie', alice)
+        .send({ cityId: 'cairo' })
+        .expect(201);
+      const res = await hotels(id, alice).expect(400);
+      expect(res.body.details).toEqual([
+        { field: 'fromDayNumber', message: expect.any(String) },
+      ]);
+    });
+
+    it('Swagger documents the route, its query and its answers', async () => {
+      const res = await http().get('/api/docs-json').expect(200);
+      const get = res.body.paths['/api/itineraries/{id}/hotels'].get;
+      expect(get.tags).toContain('itineraries');
+      expect((get.parameters as { name: string }[]).map((p) => p.name)).toEqual(
+        expect.arrayContaining([
+          'id',
+          'fromDayNumber',
+          'guests',
+          'rooms',
+          'page',
+          'limit',
+        ]),
+      );
+      expect(Object.keys(get.responses)).toEqual(
+        expect.arrayContaining(['200', '400', '401', '403', '404']),
+      );
     });
   });
 
