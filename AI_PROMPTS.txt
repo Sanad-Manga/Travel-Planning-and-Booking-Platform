@@ -1453,3 +1453,12 @@ Prompt:
 Do FLT-30, flight status SCHEDULED / CANCELLED / DEPARTED: a flight whose departure time has passed reads as DEPARTED even before a scheduled job runs, the job stores the status, and only SCHEDULED flights are searchable, editable or bookable, following docs/contracts.md.
 How the output was used:
 The assistant added the pure effectiveFlightStatus rule, a FlightStatusJob (every minute, one idempotent updateMany) in the flights module, applied the rule to the flight responses and the cabin edit guard, added a departureAt > now filter to search, plus unit tests, five e2e tests on an in-memory MongoDB and Swagger descriptions. I read every file and ran lint, build and the tests.
+
+Date: 2026-11-14
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: FLT-30 (SCRUM-74) review fixes on PR #82
+Prompt:
+Fix the review findings on PR #82: booking must decide from the effective flight status, CANCELLED is documented but nothing sets it (cancelling is FLT-06, so only reword the docs), and revert the formatting-only changes in flight-search.service.ts.
+How the output was used:
+The assistant made FlightInventoryService.loadBookableFlight use effectiveFlightStatus (409 message names the status), strengthened the past-departure hold e2e test (stored status still SCHEDULED, no seats held, no booking), reworded the DTO and PR descriptions for CANCELLED, and restored the original formatting in the search service. I ran build, lint, unit and e2e tests (runInBand).

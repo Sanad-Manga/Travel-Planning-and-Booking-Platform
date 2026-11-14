@@ -54,8 +54,7 @@ export class FlightSearchService {
     query: FlightSearchQueryDto,
     now: Date = new Date(),
   ): Promise<FlightSearchPageDto> {
-    const { departureAirport, arrivalAirport, departureDate, passengers } =
-      query;
+    const { departureAirport, arrivalAirport, departureDate, passengers } = query;
     const { page, limit } = query;
     await this.validate(query);
 
@@ -165,9 +164,7 @@ export class FlightSearchService {
     flights: FlightLean[],
   ): Promise<Map<string, SearchAirlineDto>> {
     const ids = [...new Set(flights.map((f) => f.airlineId.toString()))];
-    const found = await Promise.all(
-      ids.map((id) => this.airlines.findById(id)),
-    );
+    const found = await Promise.all(ids.map((id) => this.airlines.findById(id)));
     const active = new Map<string, SearchAirlineDto>();
     for (const airline of found) {
       if (airline && airline.isActive) {
@@ -219,10 +216,7 @@ export class FlightSearchService {
       });
     }
     if (errors.length > 0) {
-      throw new BadRequestException({
-        message: 'Validation failed',
-        details: errors,
-      });
+      throw new BadRequestException({ message: 'Validation failed', details: errors });
     }
   }
 }

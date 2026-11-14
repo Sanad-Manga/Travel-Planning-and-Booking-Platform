@@ -451,7 +451,7 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
         },
       );
 
-      it('a flight whose departure has passed cannot be held: 409', async () => {
+      it('a flight whose departure has passed cannot be held while its stored status is still SCHEDULED (FLT-30): 409, no seats held', async () => {
         const flightId = await createFlight();
         await addCabin(flightId, 'ECONOMY', 10);
         await connection
@@ -460,11 +460,22 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
             { _id: new Types.ObjectId(flightId) },
             { $set: { departureAt: new Date(Date.now() - 3_600_000) } },
           );
-        await http()
+        const stored = await connection
+          .collection('flights')
+          .findOne({ _id: new Types.ObjectId(flightId) });
+        expect(stored?.status).toBe('SCHEDULED'); // the status job has not run
+
+        const res = await http()
           .post(HOLD)
           .set('Cookie', traveler)
           .send(body(flightId))
           .expect(409);
+
+        expect(res.body.message).toContain('DEPARTED'); // names the effective status
+        expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0 });
+        expect(
+          await connection.collection('flightBookings').countDocuments(),
+        ).toBe(0);
       });
 
       it('a deactivated airline cannot be booked: 409', async () => {
