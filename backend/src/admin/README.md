@@ -338,231 +338,44 @@ prompt log records the request and follow-up authorizations. The student can use
 `feat(admin): list accounts with search and filters (ACC-14)` as the eventual PR
 title after independent review; PR descriptions/checklists were not edited here.
 
-## ACC-16 / SCRUM-44 — Suspension and reactivation
+## Suspend and reactivate users — ACC-16 / SCRUM-44
 
-**Registered through the existing AdminModule in production AppModule.** PR #81
-(ACC-14) has merged and is available on this branch. AdminModule registers the
-existing AccountStatusService/AccountStatusController and imports AuditModule
-and NotificationsModule while reusing its shared User model registration.
-AppModule already imports AdminModule and required no changes. No competing
-module, branch change, merge or stash operation was introduced. Existing ACC-18
-seeding and ACC-14 account-list implementation/documentation are preserved.
-
-### Registered endpoints and behavior
-
-| Route | Atomic transition |
+| Route | Transition |
 | --- | --- |
-| `PATCH /api/admin/accounts/:id/suspend` | Role.USER, ACTIVE → SUSPENDED |
-| `PATCH /api/admin/accounts/:id/reactivate` | Role.USER, SUSPENDED → ACTIVE |
+| `PATCH /api/admin/accounts/:id/suspend` | `USER`: ACTIVE → SUSPENDED |
+| `PATCH /api/admin/accounts/:id/reactivate` | `USER`: SUSPENDED → ACTIVE |
 
-The global `/api` prefix is supplied by normal application setup. Both handlers
-use existing cookie authentication and `@Roles(Role.ADMIN)`. The service also
-rejects missing principals (401), non-admin callers (403) and malformed ObjectIds
-(400) before issuing database operations. No status/role/ID override or other
-body field is accepted. An omitted or empty JSON object body is permitted.
+ADMIN only (`@Roles(Role.ADMIN)`), empty body. Response: `{ id, status }`.
 
-Each transition is one conditional findOneAndUpdate filtered by `_id`,
-`role: USER` and the exact source status; only `$set: { status }` is requested,
-with normal Mongoose timestamps. A targeted read after an unsuccessful update
-distinguishes 404 missing accounts from 409 invalid state/non-USER targets.
-ADMIN and moderator targets are rejected with 409 without mutation. Repeated,
-already-target-status requests now succeed as no-ops under Ahmed's final review.
-DEACTIVATED targets remain rejected. An administrator cannot target themselves.
-Completed repeats do not create another transition or duplicate its side effects;
-pending recorded side effects can be recovered as described below.
+### Rules
 
-The successful response is only `{ id: string, status: AccountStatus }`; no raw
-document, password hash or token is returned. Swagger metadata documents
-200/400/401/403/404/409/500, authentication, the ADMIN requirement and the empty
-body. Both routes now appear alongside GET /api/admin/accounts in the actual
-AppModule Swagger document. The approved non-transactional limitations below
-remain explicit in the API descriptions.
+- Only registered `USER` accounts. ADMIN and moderator targets are 409 and are never changed.
+- An administrator cannot change their own status (409). A DEACTIVATED target is 409. A malformed id is 400 and an unknown
+  account 404.
+- Each change is one conditional update on `_id`, role and the exact source status, so parallel requests cannot both
+  apply. Asking for the status the account already has succeeds as a no-op and creates no second audit entry or
+  notification.
+- Bookings and content are not touched. A suspended user is locked out at once, because the global guard reads the
+  account status on every request, and refresh is refused for a non-ACTIVE account.
 
-### Audit and notifications — Ahmed's approved final review
+### Audit and notification
 
-Required order is strictly sequential: atomic status update, persist admin-owned
-retry metadata, await AuditService.log(), await NotificationsService.notify(),
-then return the response. A no-op only finishes previously recorded pending work.
+- Each real change writes an audit entry (`USER_SUSPENDED` or `USER_REACTIVATED`, `targetType: 'User'`, with
+  `details.operationId` and the before/after status), then sends a best-effort `ACCOUNT_SUSPENDED` or
+  `ACCOUNT_REACTIVATED` notification.
+- The status change and the audit write are not one transaction. The change is recorded first in the admin-owned
+  `accountStatusOperations` collection (a retry journal with a lease). If the audit write fails, the response is 500 and
+  the status has already changed: repeat the same request. It finishes the recorded work with its original actor and
+  does not duplicate entries that were already written.
+- Limits: recovery is not exactly-once. A crash between steps can lose a notification, and the audit API has no unique
+  idempotency key, so the audit entry is matched by `operationId` before it is written.
 
-- Audit: `USER_SUSPENDED` or `USER_REACTIVATED`, target type `User`, actor/target
-  IDs, before/after status details and a non-sensitive operation correlation ID.
-- Suspension notification: existing `ACCOUNT_SUSPENDED`, safe title/message.
-- Reactivation notification: approved `ACCOUNT_REACTIVATED`, informing the user
-  that their account was reactivated and access restored. Ahmed explicitly
-  approved the enum addition in common/enums, the NotificationType contract list
-  in docs/contracts.md, and its notification-schema test. Other enum values were
-  preserved. No notification service/schema implementation was changed.
+### Requirements
 
-AuditService throws on persistence failure. This caller returns a sanitized 500
-(`Account status changed, but audit logging failed`) if that occurs and does
-not attempt a notification until auditing succeeds. Status may already be
-changed. There is no unsafe rollback or database transaction, and AuditService
-is unchanged. The stable log() contract accepts no transaction/session or unique
-idempotency key; status and audit are not transactionally atomic.
+- **MongoDB 5.0 or newer.** The retry lease uses an aggregation-pipeline update with `$$NOW` and `$dateAdd`.
+- `AdminModule` imports `AuditModule` and `NotificationsModule`.
 
-#### Minimal retry recovery and its limits
+### Tests
 
-The admin-owned `accountStatusOperations` journal retains the original actor,
-target, actual source/target states, correlation ID and completion phases for
-each successful transition. It is necessary because a USER already in the target
-status carries no information about which administrator changed it. The shared
-User schema is unchanged. Completed journal rows are retained; no automatic
-retry worker or external infrastructure is introduced.
-
-A repeat on the target status does not mutate the User document. If the journal
-has incomplete work, the request replays that work under the **original actor**,
-even when another administrator sends the retry. Conditional, expiring MongoDB
-leases coordinate ordinary concurrent replay across service instances. Audit
-lookup by correlation ID plus original actor/target/action avoids recreating an
-already-visible audit after a lost acknowledgement. Audit completion is tracked
-before the best-effort notification attempt is reserved and awaited. Completed
-repeats do not create new journals, audits or notification attempts.
-
-Guarantees are deliberately bounded:
-
-- Status update and journal insertion are separate writes. A crash or journal
-  failure between them loses attribution metadata. The request reports 500 when
-  that failure is observed, but a later no-op cannot safely reconstruct that
-  historical action. No metadata means no invented audit attributed to the
-  retrying caller; administrative reconciliation is required.
-- An ordinary no-op can arrive before the winning request inserts its journal.
-  Its success describes the current status, not proof that all historical
-  effects have completed. Existing accounts already in a target state likewise
-  produce no invented historical audit.
-- Audit lookup and insertion are separate because the shared API/schema has no
-  unique operation key. A delayed/uncertain commit, or an old writer continuing
-  after its 60-second lease expires, can still duplicate an audit. Completed
-  repeats and already-visible lost acknowledgements are deduplicated, but this
-  is **not exactly-once auditing**. A request waiting more than five seconds for
-  an active recovery lease reports a sanitized 500 rather than a false completion.
-- Notification attempts are recorded before notify(). A crash before/during
-  delivery can lose the notification; replay does not blindly send it twice.
-  If stronger recovery/atomicity is required, it needs an approved shared-schema
-  or session-aware design. None was silently added here.
-
-NotificationsService.notify() catches/logs its own persistence errors and resolves
-void. Its resolution does not prove that a notification was stored. The caller
-cannot detect or repair that swallowed failure through the current contract.
-An unexpected rejected notification promise is reported as a sanitized 500 after
-the status change, without rollback, but ordinary swallowed failures remain
-best-effort, as Ahmed explicitly approved. Reliable delivery is not claimed.
-ACC-15 will eventually need PROVIDER_REACTIVATED; it was intentionally not added
-to the enum/contract in this ticket.
-
-### Existing authentication and data preservation
-
-No AuthService, UsersService, guard, decorator or User schema changed. The only
-shared-enum change is Ahmed's approved ACCOUNT_REACTIVATED addition.
-Real fixture and AppModule HTTP tests verify ACTIVE login, `Account suspended` (403) on login
-after suspension, immediate 401 for an existing access cookie, and successful
-login after reactivation. A still-unexpired old access cookie becomes usable
-again under the existing guard; no additional token revocation was invented.
-
-Suspension does not cancel bookings, change payments, delete/hide content or
-alter other account fields. Database snapshots verify representative flight/hotel
-booking, payment, post, comment, review and itinerary records remain byte-for-byte
-equivalent through both transitions. GEN-10 moderation is independent.
-
-### Focused verification and checklist
-
-On 2026-11-13, focused unit plus real MongoDB/HTTP fixture tests passed **32/32
-across two suites**. Build and changed-file ESLint passed. The fixture uses the
-real AuthModule, AuditModule and NotificationsModule, synthetic accounts and
-disposable MongoDB, with dotenv mocked and environment-file loading disabled.
-It is explicitly not an application-integration substitute or a production module.
-
-```powershell
-npm test -- --runInBand src/admin/account-status
-npm run build
-# Changed-file ESLint: the five new ACC-16 TypeScript files.
-```
-
-The tests cover atomic filters, both directions, all caller/target roles,
-malformed/missing IDs, forbidden body fields, DEACTIVATED/repeated transitions,
-separate service instances racing, safe DTOs/audits, preserved fields/data,
-database failures, audit failures, swallowed notification failures and fixture
-Swagger. The final-review tests replace superseded repeated-409/missing-
-reactivation-notification expectations and add order, no-op, original-actor
-recovery and lost-acknowledgement cases without deleting the other safety checks.
-
-| Live SCRUM-44 checklist item | Status |
-| --- | --- |
-| Suspended user cannot log in and sees account suspended | Verified through real-auth fixture and actual AppModule E2E |
-| Reactivating allows login again | Verified through fixture and actual AppModule E2E |
-| Existing bookings/content unaffected | PASS for database snapshots and status-only update |
-| Each action creates audit and notification | Both transition types audited/notified in normal and recovered paths; best-effort delivery and non-transactional limitations explicitly approved/documented |
-| Admin-only, other roles receive 403 | Verified in service, fixture and actual AppModule E2E; missing auth receives 401 |
-| Swagger updated; PR names ACC-16; shared checklist | AppModule Swagger and ACC-14 regression covered; proposed PR text below records approvals/limitations. Publication remains pending independent review |
-
-During the initial independent phase, full regression suites were deferred while
-ACC-14 was unmerged. Final integration now adds
-`backend/test/account-status.e2e-spec.ts`, discovered by the normal E2E command.
-It boots the actual AppModule using synthetic accounts, disposable MongoDB and
-a temporary upload directory, with environment-file loading disabled. It does
-not register a replacement module/controller or override the status service.
-
-The application tests cover route registration, real authentication/roles,
-login/cookie suspension and restoration, one winner for concurrent HTTP
-transitions, errors/body validation, audits, suspension/reactivation notifications,
-unchanged records and public post visibility, combined ACC-14 search/role/status
-filters after each transition, and the actual Swagger document. Audit persistence
-failure is injected at the real audit model and verifies a reported 500 with
-changed status and no unsafe rollback. Swallowed notification persistence
-failure and unexpected notification rejection are also exercised explicitly.
-These tests document the known limitations; passing them does not imply durable
-notifications or atomic status+audit persistence.
-
-Final integration verification on 2026-11-13: focused ACC-16 tests **32/32**
-(two suites), new actual-AppModule E2E **17/17**, full Jest **873/873** (55
-suites), full standard E2E **1,021/1,021** (39 suites), TypeScript build and full
-ESLint all passed. Each full suite ran once after the focused checks passed.
-The unchanged ACC-14 E2E and whole-app pagination suites passed, and the new
-application test verifies its combined filters immediately after each status
-change. Existing E2E listener warnings appeared without failures; they were not
-suppressed. Verification used an environment-free temporary copy, existing
-dependencies, synthetic accounts and disposable MongoDB. No shared Atlas access,
-dependency reinstall, Git history changes, Jira edits or PR creation occurred.
-
-The preceding totals record the earlier integration, before the final-review
-changes. Final-review results are recorded separately below when verified.
-
-### Prepared eventual PR description — do not submit before independent review
-
-Target branch: `develop`.
-
-Title: `feat(admin): suspend and reactivate registered users (ACC-16)`
-
-SCRUM-44 / ACC-16 adds ADMIN-only USER suspension/reactivation through the
-existing AdminModule while preserving ACC-14, bookings and published content.
-Ahmed approved the scoped common/enums, docs/contracts.md and notification-schema
-test edits adding ACCOUNT_REACTIVATED. ACC-15's future PROVIDER_REACTIVATED is
-intentionally excluded. Status changes are atomic conditional updates; audit
-writes occur afterwards and failures return 500 without rollback. Status,
-journal and audit persistence are not transactionally atomic. Both notification
-types use the unchanged best-effort service. Target-state repeats are idempotent;
-the admin journal permits missing-audit recovery with original attribution and
-deduplicates completed/visible acknowledgements, subject to the precise crash,
-lease and uncertain-commit limitations above. No exactly-once or guaranteed
-notification delivery claim is made.
-
-Applicable technical checklist: shared auth/enums/error shape are reused; all
-route/body inputs are validated; the response exposes only ID/status; USER-only
-atomic filters and self/ADMIN/moderator/DEACTIVATED restrictions are tested;
-Swagger covers both routes and errors; published content/booking preservation
-and ACC-14 regressions are tested. Cross-module edits are exactly the three
-explicitly approved shared files. No credentials, dependencies, transactions,
-unrelated services or Git history changed. AI prompts are appended accurately.
-The actual PR and its checkboxes have not been created or edited.
-
-Final-review verification on 2026-11-13: **52/52** focused ACC-16/notification-
-schema tests (three suites), **19/19** AppModule E2E tests, then sequentially
-**880/880** full Jest tests (55 suites), **1,023/1,023** full E2E tests (39
-suites), build and full ESLint passed. The initial focused run exposed an
-unsorted notification-read assumption; sorting by ID preserved the strict
-type/order assertions and resolved it before full verification. All checks use
-an environment-free temporary copy, disposable MongoDB, synthetic accounts and
-existing dependencies. The prepared PR evidence includes real ACCOUNT_REACTIVATED
-schema acceptance, original-actor recovery by a different administrator,
-reconciliation after a lost audit acknowledgement, no-op timestamp preservation,
-same-direction concurrency, self/other-ADMIN/moderator rejection and unchanged
-bookings/content/ACC-14 behavior. No tests or assertions were suppressed.
+`account-status.service.spec.ts`, `account-status.integration.spec.ts` and `test/account-status.e2e-spec.ts` (transitions,
+no-ops, rejected targets, self-targeting, lockout, audit and notification, recovery after a failure).
