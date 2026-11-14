@@ -23,6 +23,28 @@ export const ItineraryDaySchema = SchemaFactory.createForClass(ItineraryDay);
 export type ItineraryDayLean = ItineraryDay & { _id: Types.ObjectId };
 
 /**
+ * The credit on a clone (ITN-21): which itinerary it was copied from and who made that one. It is a snapshot taken
+ * when the copy is made, so the credit stays even if the original is deleted, made private or its author renames
+ * themselves or leaves.
+ */
+@Schema({ _id: false })
+export class ClonedFrom {
+  /** The itinerary that was cloned. It may no longer exist. */
+  @Prop({ type: Types.ObjectId, required: true })
+  itineraryId: Types.ObjectId;
+
+  /** The author of that itinerary. */
+  @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+  authorId: Types.ObjectId;
+
+  /** The author's name when the copy was made. */
+  @Prop({ type: String, required: true })
+  authorName: string;
+}
+
+export const ClonedFromSchema = SchemaFactory.createForClass(ClonedFrom);
+
+/**
  * A user's trip plan (collection `itineraries`). Days are embedded (bounded child data: at most 60).
  * Activities, budgets and transport costs are added by later tickets.
  */
@@ -69,6 +91,10 @@ export class Itinerary {
   /** In day order (ITN-05). At most ITINERARY_MAX_DAYS, enforced atomically by the service when adding. */
   @Prop({ type: [ItineraryDaySchema], default: [] })
   days: ItineraryDay[];
+
+  /** Set only on a clone (ITN-21): the itinerary it was copied from and that itinerary's author. */
+  @Prop({ type: ClonedFromSchema })
+  clonedFrom?: ClonedFrom;
 }
 
 export type ItineraryDocument = HydratedDocument<Itinerary>;

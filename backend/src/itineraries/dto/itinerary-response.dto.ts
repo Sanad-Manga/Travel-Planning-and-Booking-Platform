@@ -5,6 +5,7 @@ import { ActivityDto } from './activity.dto';
 import { BudgetDto } from './budget.dto';
 import { buildBudgetSummary, platformTotalsByDay } from './budget-summary.dto';
 import { CityGroupDto, groupDaysByCity } from './city-group.dto';
+import { ClonedFromDto, toClonedFrom } from './cloned-from.dto';
 import { ItineraryDayDto, toItineraryDay } from './itinerary-day.dto';
 import { TransportCostDto } from './transport-cost.dto';
 
@@ -63,6 +64,14 @@ export class ItineraryResponseDto {
   })
   budgets: BudgetDto[];
 
+  @ApiProperty({
+    type: ClonedFromDto,
+    nullable: true,
+    description:
+      'Set when this itinerary is a copy of a public one (ITN-21): the itinerary it came from and its author. null otherwise.',
+  })
+  clonedFrom: ClonedFromDto | null;
+
   @ApiProperty({ example: '2026-11-04T10:00:00.000Z' })
   createdAt: string;
 
@@ -103,6 +112,7 @@ export function toItineraryResponse(
     ),
     transportCosts,
     budgets,
+    clonedFrom: toClonedFrom(doc.clonedFrom),
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
   };

@@ -1444,6 +1444,33 @@ register a checker with (documented in docs/api/account-deactivation.md); nothin
 proven only with a test double. 20 e2e tests on mongodb-memory-server (two files, COOKIE_SECURE true and false) plus unit tests; they show comments already read
 'Deleted user' and public itineraries are already hidden, and a read-only probe showed a deactivated author's posts are still
 visible (reported to the blog owner, not changed). I read every file before committing.
+================================================
+
+Date: 2026-11-14
+Student: Yassin Yahya
+Tool: Claude (Claude Code)
+Related Requirement: ITN-21 (SCRUM-96)
+Prompt:
+Implement ITN-21 following docs/contracts.md and the Jira checklist: guests and users search public itineraries by keyword
+(title, country, city) with duration and country/city filters, open one read-only with author, days, activities and
+budget, and a registered user clones it (POST /api/itineraries/:id/clone): all days, activities and budgets, private,
+credits the original author, independent of the original, 401 for guests. Search and the read-only view were done earlier
+on this branch; the clone and the budget in the view waited for ITN-14 to merge. Write the tests first, then the code.
+How the output was used:
+Merged the latest develop (ITN-14 and ITN-12 are in it) into the branch. Added ClonedFrom (itinerary id, author id, author
+name, a snapshot) on the itinerary schema and in both response DTOs. ItinerariesService.clone loads the itinerary the same
+way the public view does (404 for private, hidden, inactive author or unknown id), creates the copy as PRIVATE for the
+caller with new day ids, then copies activities, transport costs and budget entries onto the matching new days through a
+copyForClone method on each of the three services (rows of a day that is no longer there are skipped). Images are not
+copied, because a stored file is deleted with its activity. The copy runs in steps, not in one transaction; the three
+copies are awaited with Promise.allSettled and a failure removes the new itinerary and its rows. A test of that failure
+path found a real bug in my first version (Promise.all let the clean-up run while another copy was still inserting, so
+rows were left behind); fixed and kept as a test. The public view now builds the budget summary from the rows it already
+loads. Transport costs are copied too, although the ticket lists only days, activities and budgets, so the clone shows
+the same totals. A mutation check (wrong day id in the budget copy) failed two tests as expected. Lint, build, 880 unit
+and 1027 e2e tests pass. Known limits, stated in the PR: not atomic if the server dies mid-clone, cloning a clone credits
+the clone's author, the credit shows the original author's name even if that account is later deactivated, and there is
+no per-user cap on clones.
 
 Date: 2026-11-13
 Student: Mohamed Walid
