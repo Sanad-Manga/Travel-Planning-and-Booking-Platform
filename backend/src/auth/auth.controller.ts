@@ -14,7 +14,7 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { Request, Response } from 'express';
-import { AuthenticatedUser, CurrentUser, ErrorResponseDto, Public, REFRESH_TOKEN_COOKIE } from '../common';
+import { AllowWhenMustChange, AuthenticatedUser, CurrentUser, ErrorResponseDto, Public, REFRESH_TOKEN_COOKIE } from '../common';
 import { clearAuthCookies, setAuthCookies } from './auth-cookies';
 import { AuthService } from './auth.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
@@ -46,6 +46,7 @@ export class AuthController {
   @HttpCode(200)
   @ApiOperation({
     summary: 'Log in with email and password. Sets the access_token and refresh_token httpOnly cookies; no token is ever in the body.',
+    description: 'Temporary administrator-issued passwords expire after 24 hours and permit one successful login. mustChangePassword=true limits the session to me, change-password and logout; no refresh. Complete password replacement, then log in again.',
   })
   @ApiOkResponse({ type: UserResponseDto, description: 'The logged-in user. The tokens are only in the Set-Cookie headers.' })
   @ApiBadRequestResponse({ type: ErrorResponseDto, description: 'Malformed email or missing password' })
@@ -74,7 +75,7 @@ export class AuthController {
   @ApiUnauthorizedResponse({
     type: ErrorResponseDto,
     description:
-      'Missing, invalid, expired or logged-out (revoked) refresh cookie, or the account is no longer active. Same generic message for all; both cookies are cleared.',
+      'Missing, invalid, expired, revoked or outdated-version refresh cookie, inactive account, or forced password replacement pending. Same generic message for all; both cookies are cleared.',
   })
   async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response): Promise<UserResponseDto> {
     const secure = this.config.get<boolean>('cookieSecure') ?? false;
@@ -91,24 +92,27 @@ export class AuthController {
 
   // Authenticated by the global JwtAuthGuard (no @Public); the user comes from the token, never from the body.
   @Patch('change-password')
+  @AllowWhenMustChange()
   @HttpCode(204)
   @ApiCookieAuth()
   @ApiOperation({ summary: 'Change the logged-in user\'s password (current password + new password). The new password is stored only as a salted bcrypt hash.' })
-  @ApiNoContentResponse({ description: 'Password changed. The current session stays valid.' })
+  @ApiNoContentResponse({ description: 'Ordinary change: current session stays valid. Forced replacement: temporary state cleared, all tokens invalidated, cookies cleared; log in again with the new password.' })
   @ApiBadRequestResponse({
     type: ErrorResponseDto,
     description: 'Field-level errors: new password breaks the rules, or currentPassword is incorrect',
   })
   @ApiUnauthorizedResponse({ type: ErrorResponseDto, description: 'Not logged in, token invalid or expired, or account no longer active' })
   @ApiConflictResponse({ type: ErrorResponseDto, description: 'The password was changed by another request at the same moment' })
-  changePassword(@CurrentUser() current: AuthenticatedUser, @Body() dto: ChangePasswordDto): Promise<void> {
-    return this.authService.changePassword(current.userId, dto);
+  async changePassword(@CurrentUser() current: AuthenticatedUser, @Body() dto: ChangePasswordDto, @Res({ passthrough: true }) res: Response): Promise<void> {
+    const forced = await this.authService.changePassword(current.userId, dto, current.tokenVersion ?? 0);
+    if (forced) clearAuthCookies(res, this.config.get<boolean>('cookieSecure') ?? false);
   }
 
   // @Public: logout must work even when the access cookie has already expired or there is no session at all.
   // The refresh cookie is sent because it is scoped to /api/auth.
   @Public()
   @Post('logout')
+  @AllowWhenMustChange()
   @HttpCode(200)
   @ApiOperation({
     summary: 'Log out. Clears both auth cookies and revokes the refresh token on the server. Always 200, even without a session.',
@@ -122,6 +126,7 @@ export class AuthController {
   }
 
   @Get('me')
+  @AllowWhenMustChange()
   @ApiCookieAuth()
   @ApiOperation({ summary: 'The currently logged-in user' })
   @ApiOkResponse({ type: UserResponseDto })
