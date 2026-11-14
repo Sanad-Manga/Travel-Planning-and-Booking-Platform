@@ -338,6 +338,48 @@ prompt log records the request and follow-up authorizations. The student can use
 `feat(admin): list accounts with search and filters (ACC-14)` as the eventual PR
 title after independent review; PR descriptions/checklists were not edited here.
 
+## Suspend and reactivate users — ACC-16 / SCRUM-44
+
+| Route | Transition |
+| --- | --- |
+| `PATCH /api/admin/accounts/:id/suspend` | `USER`: ACTIVE → SUSPENDED |
+| `PATCH /api/admin/accounts/:id/reactivate` | `USER`: SUSPENDED → ACTIVE |
+
+ADMIN only (`@Roles(Role.ADMIN)`), empty body. Response: `{ id, status }`.
+
+### Rules
+
+- Only registered `USER` accounts. ADMIN and moderator targets are 409 and are never changed.
+- An administrator cannot change their own status (409). A DEACTIVATED target is 409. A malformed id is 400 and an unknown
+  account 404.
+- Each change is one conditional update on `_id`, role and the exact source status, so parallel requests cannot both
+  apply. Asking for the status the account already has succeeds as a no-op and creates no second audit entry or
+  notification.
+- Bookings and content are not touched. A suspended user is locked out at once, because the global guard reads the
+  account status on every request, and refresh is refused for a non-ACTIVE account.
+
+### Audit and notification
+
+- Each real change writes an audit entry (`USER_SUSPENDED` or `USER_REACTIVATED`, `targetType: 'User'`, with
+  `details.operationId` and the before/after status), then sends a best-effort `ACCOUNT_SUSPENDED` or
+  `ACCOUNT_REACTIVATED` notification.
+- The status change and the audit write are not one transaction. The change is recorded first in the admin-owned
+  `accountStatusOperations` collection (a retry journal with a lease). If the audit write fails, the response is 500 and
+  the status has already changed: repeat the same request. It finishes the recorded work with its original actor and
+  does not duplicate entries that were already written.
+- Limits: recovery is not exactly-once. A crash between steps can lose a notification, and the audit API has no unique
+  idempotency key, so the audit entry is matched by `operationId` before it is written.
+
+### Requirements
+
+- **MongoDB 5.0 or newer.** The retry lease uses an aggregation-pipeline update with `$$NOW` and `$dateAdd`.
+- `AdminModule` imports `AuditModule` and `NotificationsModule`.
+
+### Tests
+
+`account-status.service.spec.ts`, `account-status.integration.spec.ts` and `test/account-status.e2e-spec.ts` (transitions,
+no-ops, rejected targets, self-targeting, lockout, audit and notification, recovery after a failure).
+
 ## Administrator-assisted password reset — ACC-07a / SCRUM-45
 
 `POST /api/admin/users/:id/reset-password` (ADMIN only, empty body) gives a user or moderator a temporary password

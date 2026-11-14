@@ -16,6 +16,15 @@ const valid = () => ({
 });
 
 describe('Notification schema', () => {
+  it('accepts the ACC-16 reactivation type approved by the Scrum Master', () => {
+    expect(NotificationType.ACCOUNT_REACTIVATED).toBe('ACCOUNT_REACTIVATED');
+    expect(
+      new NotificationModel({
+        ...valid(),
+        type: NotificationType.ACCOUNT_REACTIVATED,
+      }).validateSync(),
+    ).toBeUndefined();
+  });
   it('accepts a complete notification and starts it unread', () => {
     const doc = new NotificationModel(valid());
     expect(doc.validateSync()).toBeUndefined();
