@@ -96,14 +96,14 @@ describe('AuthService', () => {
       expect(result.accessToken).toBe('signed.jwt.token');
       expect(result.user).toMatchObject({ id: ID, email: 'ali@example.com' });
       expect(JSON.stringify(result.user)).not.toContain('passwordHash');
-      expect(jwtService.signAsync).toHaveBeenCalledWith({ sub: ID, role: Role.USER });
+      expect(jwtService.signAsync).toHaveBeenCalledWith({ sub: ID, role: Role.USER, tokenVersion: 0 });
     });
 
     it('also issues a refresh token signed with the refresh secret (user id only, 30 minutes)', async () => {
       usersService.findByEmail.mockResolvedValue(userDoc());
       await service.login(credentials);
       expect(jwtService.signAsync).toHaveBeenCalledWith(
-        { sub: ID },
+        { sub: ID, tokenVersion: 0 },
         { secret: 'r'.repeat(32), expiresIn: 30 * 60, jwtid: expect.stringMatching(/^[0-9a-f-]{36}$/) },
       );
     });
@@ -122,7 +122,7 @@ describe('AuthService', () => {
         userDoc({ role: Role.AIRLINE_MODERATOR, airlineId: { toString: () => 'airline-1' } }),
       );
       await service.login(credentials);
-      expect(jwtService.signAsync).toHaveBeenCalledWith({ sub: ID, role: Role.AIRLINE_MODERATOR, airlineId: 'airline-1' });
+      expect(jwtService.signAsync).toHaveBeenCalledWith({ sub: ID, role: Role.AIRLINE_MODERATOR, airlineId: 'airline-1', tokenVersion: 0 });
     });
 
     it('wrong password -> 401 generic message, no token', async () => {
@@ -230,7 +230,7 @@ describe('AuthService', () => {
       jwtService.verifyAsync.mockResolvedValue(claims({ role: Role.ADMIN }));
       usersService.findById.mockResolvedValue(userDoc({ role: Role.HOTEL_MODERATOR, hotelId: { toString: () => 'hotel-1' } }));
       await service.refresh('old.refresh.token');
-      expect(jwtService.signAsync).toHaveBeenCalledWith({ sub: ID, role: Role.HOTEL_MODERATOR, hotelId: 'hotel-1' });
+      expect(jwtService.signAsync).toHaveBeenCalledWith({ sub: ID, role: Role.HOTEL_MODERATOR, hotelId: 'hotel-1', tokenVersion: 0 });
     });
 
     it.each([undefined, null, '', 123])('401 "Invalid or expired session" for a missing token (%p)', async (token) => {

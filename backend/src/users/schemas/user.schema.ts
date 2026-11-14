@@ -19,6 +19,18 @@ export class User {
   @Prop({ required: true, select: false })
   passwordHash: string;
 
+  @Prop({ type: Boolean, default: false })
+  mustChangePassword: boolean;
+
+  @Prop({ type: Number, default: 0, min: 0 })
+  tokenVersion: number;
+
+  @Prop({ type: Date, select: false })
+  temporaryPasswordExpiresAt?: Date;
+
+  @Prop({ type: Boolean, select: false })
+  temporaryPasswordConsumed?: boolean;
+
   @Prop({ type: String, enum: Object.values(Role), default: Role.USER })
   role: Role;
 

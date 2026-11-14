@@ -7,10 +7,14 @@ import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
 import { AccountStatusController } from './account-status.controller';
 import { AccountStatusService } from './account-status.service';
+import { AdminPasswordResetController } from './admin-password-reset.controller';
+import { AdminPasswordResetService } from './admin-password-reset.service';
+import { PasswordResetTargetService } from './password-reset-target.service';
 import {
   AccountStatusOperation,
   AccountStatusOperationSchema,
 } from './schemas/account-status-operation.schema';
+import { TemporaryPasswordService } from './temporary-password.service';
 
 @Module({
   imports: [
@@ -24,7 +28,17 @@ import {
     AuditModule,
     NotificationsModule,
   ],
-  controllers: [AdminController, AccountStatusController],
-  providers: [AdminService, AccountStatusService],
+  controllers: [
+    AdminController,
+    AccountStatusController,
+    AdminPasswordResetController,
+  ],
+  providers: [
+    AdminService,
+    AccountStatusService,
+    AdminPasswordResetService,
+    PasswordResetTargetService,
+    TemporaryPasswordService,
+  ],
 })
 export class AdminModule {}
