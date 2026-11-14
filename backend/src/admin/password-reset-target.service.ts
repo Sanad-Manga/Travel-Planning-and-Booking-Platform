@@ -12,8 +12,10 @@ import { Model } from 'mongoose';
 import { AccountStatus, AuthenticatedUser, Role } from '../common';
 import { User } from '../users/schemas/user.schema';
 
-/** Read-only preflight, not a password reset. The eventual atomic write must
- * recheck role/status and expected hash/version after protected integration.
+/**
+ * Read-only eligibility check for an administrator-assisted reset: the target must exist and be an ACTIVE
+ * regular user or moderator. It changes nothing. AdminPasswordResetService repeats the role, status and
+ * token-version conditions inside its own atomic update, so a change between the two steps is a 409.
  */
 @Injectable()
 export class PasswordResetTargetService {

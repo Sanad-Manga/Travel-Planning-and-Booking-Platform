@@ -80,7 +80,7 @@ export class AdminPasswordResetService {
       await this.audit.log({
         actorId: actor.userId,
         action: 'ADMIN_PASSWORD_RESET',
-        targetType: 'USER',
+        targetType: 'User',
         targetId: id,
       });
     } catch {

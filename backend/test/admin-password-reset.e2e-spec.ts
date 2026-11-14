@@ -225,7 +225,7 @@ describe('ACC-07a actual AppModule: administrator reset and restricted authentic
       expect(audit).toMatchObject({
         actorId: adminId,
         targetId: target.id,
-        targetType: 'USER',
+        targetType: 'User',
         createdAt: expect.any(Date),
       });
       expect(Object.keys(audit!).sort()).toEqual([
