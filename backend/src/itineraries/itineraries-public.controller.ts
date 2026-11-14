@@ -43,7 +43,7 @@ export class ItinerariesPublicController {
   @Get(':id')
   @ApiOperation({
     summary:
-      'Open one public itinerary read-only: author, days and activities; open to guests - ITN-21',
+      'Open one public itinerary read-only: author, days, activities and budget totals; open to guests - ITN-21',
   })
   @ApiOkResponse({ type: PublicItineraryDto })
   @ApiBadRequestResponse({

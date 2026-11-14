@@ -181,12 +181,105 @@ export class ItinerariesService {
   }
 
   /**
-   * ITN-21: the read-only view of one public itinerary, open to guests: author name, days and their activities. It
+   * ITN-21: the read-only view of one public itinerary, open to guests: author name, days with their activities, the
+   * budget totals and, on a clone, the credit to the original author. It
    * answers 404 for anything that search would not list (private, hidden by an admin, author not ACTIVE, unknown
    * id), so nothing reveals that a private itinerary exists. The author's account is read here too, because the
    * view shows the name.
    */
   async findPublic(id: string): Promise<PublicItineraryDto> {
+    const { itinerary, author } = await this.loadPublic(id);
+    const [activities, transportCosts, budgets] = await Promise.all([
+      this.activities.listByItinerary(itinerary._id),
+      this.transportCosts.listByItinerary(itinerary._id),
+      this.budgets.listByItinerary(itinerary._id),
+    ]);
+    return toPublicItinerary(
+      itinerary,
+      { id: itinerary.authorId.toString(), name: author.name },
+      activities,
+      transportCosts,
+      budgets,
+    );
+  }
+
+  /**
+   * ITN-21: a registered user copies a public itinerary into a new one of their own. The copy is PRIVATE, belongs to
+   * the caller and has its own id, its own days (new ids) and its own activities, transport costs and daily budget
+   * entries, so editing or deleting either one never touches the other. It carries the credit (`clonedFrom`): the
+   * original itinerary and its author's name, as they were at that moment. Images of activities are not copied (see
+   * ActivitiesService.copyForClone).
+   *
+   * Only what the public view shows can be cloned: anything else (private, hidden by an admin, author not active,
+   * unknown id) answers 404, like the view. The author may copy their own public itinerary too.
+   *
+   * The copy is made in steps, not in one transaction: the new itinerary first, then its rows. If copying the rows
+   * fails, the new itinerary and whatever was copied are removed again, so a failed clone leaves nothing behind.
+   */
+  async clone(
+    user: AuthenticatedUser,
+    id: string,
+  ): Promise<ItineraryResponseDto> {
+    const { itinerary: source, author } = await this.loadPublic(id);
+    const ownerId = new Types.ObjectId(user.userId);
+
+    // Each embedded day gets a new id; the rows that hang on a day are moved onto the matching new day.
+    const dayIds = new Map(
+      (source.days ?? []).map((day) => [
+        day._id.toString(),
+        new Types.ObjectId(),
+      ]),
+    );
+    const created = await this.model.create({
+      authorId: ownerId,
+      title: source.title,
+      countryCodes: source.countryCodes,
+      startDate: source.startDate,
+      visibility: Visibility.PRIVATE,
+      days: (source.days ?? []).map((day) => ({
+        _id: dayIds.get(day._id.toString()),
+        cityId: day.cityId,
+        notes: day.notes,
+      })),
+      clonedFrom: {
+        itineraryId: source._id,
+        authorId: source.authorId,
+        authorName: author.name,
+      },
+    });
+
+    // Wait for ALL three copies to finish, even when one fails: with Promise.all the clean-up below could run while
+    // another copy is still inserting, and those rows would be left behind with no itinerary.
+    const copies = await Promise.allSettled([
+      this.activities.copyForClone(source._id, created._id, ownerId, dayIds),
+      this.transportCosts.copyForClone(
+        source._id,
+        created._id,
+        ownerId,
+        dayIds,
+      ),
+      this.budgets.copyForClone(source._id, created._id, ownerId, dayIds),
+    ]);
+    const failed = copies.find((copy) => copy.status === 'rejected');
+    if (failed) {
+      await Promise.allSettled([
+        this.activities.removeForItinerary(created._id),
+        this.transportCosts.removeForItinerary(created._id),
+        this.budgets.removeForItinerary(created._id),
+        this.model.deleteOne({ _id: created._id }).exec(),
+      ]);
+      throw failed.reason;
+    }
+    return this.withActivities(created.toObject<ItineraryLean>());
+  }
+
+  /**
+   * The public itinerary that the read-only view and the clone work from, with its author's account: 404 for
+   * anything search would not list (private, hidden by an admin, author not ACTIVE, unknown id).
+   */
+  private async loadPublic(
+    id: string,
+  ): Promise<{ itinerary: ItineraryLean; author: { name: string } }> {
     const itinerary = await this.model
       .findOne({ _id: id, visibility: Visibility.PUBLIC, isHidden: false })
       .lean<ItineraryLean>()
@@ -197,12 +290,7 @@ export class ItinerariesService {
     if (!author || author.status !== AccountStatus.ACTIVE) {
       throw new NotFoundException('Itinerary not found');
     }
-    const activities = await this.activities.listByItinerary(itinerary._id);
-    return toPublicItinerary(
-      itinerary,
-      { id: itinerary.authorId.toString(), name: author.name },
-      activities,
-    );
+    return { itinerary, author };
   }
 
   /**
