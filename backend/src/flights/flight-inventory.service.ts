@@ -10,6 +10,7 @@ import { AirlinesService } from '../airlines';
 import { CabinClass, FlightStatus } from '../common';
 import { Cabin, CabinLean } from './schemas/cabin.schema';
 import { Flight, FlightLean } from './schemas/flight.schema';
+import { effectiveFlightStatus } from './utils/flight-status';
 import { hasAtLeastSeats } from './utils/seat-availability';
 
 /**
@@ -38,11 +39,12 @@ export class FlightInventoryService {
       .lean<FlightLean>()
       .exec();
     if (!flight) throw new NotFoundException('Flight not found');
-    if (flight.status !== FlightStatus.SCHEDULED) {
-      throw new ConflictException('This flight is not open for booking');
-    }
-    if (flight.departureAt.getTime() <= now.getTime()) {
-      throw new ConflictException('This flight has already departed');
+    // FLT-30: the effective status, so a flight past its departure time is closed even before the status job stores DEPARTED.
+    const status = effectiveFlightStatus(flight, now);
+    if (status !== FlightStatus.SCHEDULED) {
+      throw new ConflictException(
+        `This flight is not open for booking (it is ${status})`,
+      );
     }
     const airline = await this.airlines.findById(flight.airlineId.toString());
     if (!airline || !airline.isActive) {
