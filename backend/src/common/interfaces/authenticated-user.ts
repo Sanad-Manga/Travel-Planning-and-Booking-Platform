@@ -6,6 +6,7 @@ import { Role } from '../enums';
  */
 export interface AuthenticatedUser {
   userId: string;
+  tokenVersion?: number;
   role: Role;
   airlineId?: string;
   hotelId?: string;
