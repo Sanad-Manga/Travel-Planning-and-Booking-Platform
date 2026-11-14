@@ -520,6 +520,7 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
           title: 'Shared two',
           countryCodes: ['EG', 'AE'],
           startDate: '2026-12-20',
+          dayCount: 0,
           updatedAt: expect.any(String),
         },
         expect.objectContaining({ id: first.id }),
@@ -2089,6 +2090,543 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
     });
   });
 
+  describe('public search filters and read-only view (ITN-21)', () => {
+    /** Titles carry a marker, so the filters are tested on these itineraries only (other tests make public ones too). */
+    const MARK = 'itn21zq';
+    const setVisibility = (cookie: string, id: string, visibility: string) =>
+      http()
+        .patch(`/api/itineraries/${id}`)
+        .set('Cookie', cookie)
+        .send({ visibility });
+    const addDay = (id: string, cityId: string) =>
+      http()
+        .post(`/api/itineraries/${id}/days`)
+        .set('Cookie', alice)
+        .send({ cityId })
+        .expect(201);
+    const makePublic = async (
+      title: string,
+      options: { countryCodes?: string[]; cities?: string[] } = {},
+    ) => {
+      const { id } = await createAs(alice, {
+        ...valid,
+        title,
+        countryCodes: options.countryCodes ?? ['EG'],
+      });
+      for (const cityId of options.cities ?? []) await addDay(id, cityId);
+      await setVisibility(alice, id, 'PUBLIC').expect(200);
+      return id;
+    };
+    const search = (query: string, cookie?: string) => {
+      const req = http().get(`/api/itineraries/public/search?${query}`);
+      return cookie ? req.set('Cookie', cookie) : req;
+    };
+    const titlesFor = async (query: string, cookie?: string) => {
+      const res = await search(`limit=50&${query}`, cookie).expect(200);
+      return (res.body.items as { title: string }[]).map((row) => row.title);
+    };
+
+    let long: string;
+    beforeAll(async () => {
+      await makePublic(`${MARK} short`, { cities: ['cairo'] });
+      await makePublic(`${MARK} medium`, {
+        cities: ['cairo', 'cairo', 'cairo'],
+      });
+      long = await makePublic(`${MARK} long`, {
+        countryCodes: ['EG', 'AE'],
+        cities: ['cairo', 'cairo', 'dubai', 'dubai', 'dubai'],
+      });
+    });
+
+    it('finds by keyword in the title, the country name and the city name, for guests too', async () => {
+      expect((await titlesFor(`q=${MARK}`)).sort()).toEqual([
+        `${MARK} long`,
+        `${MARK} medium`,
+        `${MARK} short`,
+      ]);
+      expect(await titlesFor(`q=${MARK.toUpperCase()}%20SHORT`, bob)).toEqual([
+        `${MARK} short`,
+      ]);
+      // "emirates" is in no title: the match comes from the country AE of the long trip
+      expect(await titlesFor('q=emirates')).toEqual(
+        expect.arrayContaining([`${MARK} long`]),
+      );
+      // "dubai" is a city name, in no title
+      expect(await titlesFor('q=dubai')).toEqual(
+        expect.arrayContaining([`${MARK} long`]),
+      );
+      expect(await titlesFor('q=dubai')).not.toContain(`${MARK} short`);
+    });
+
+    it('treats the keyword as text: a pattern character matches nothing and does not fail', async () => {
+      expect(await titlesFor('q=.*')).toEqual([]);
+      expect(await titlesFor('q=(')).toEqual([]);
+    });
+
+    it('filters by duration (minDays, maxDays, both)', async () => {
+      expect((await titlesFor(`q=${MARK}&minDays=3`)).sort()).toEqual([
+        `${MARK} long`,
+        `${MARK} medium`,
+      ]);
+      expect((await titlesFor(`q=${MARK}&maxDays=3`)).sort()).toEqual([
+        `${MARK} medium`,
+        `${MARK} short`,
+      ]);
+      expect(await titlesFor(`q=${MARK}&minDays=3&maxDays=3`)).toEqual([
+        `${MARK} medium`,
+      ]);
+    });
+
+    it('keyword and duration work together, and with the country and city filters', async () => {
+      expect(await titlesFor(`q=long&minDays=5`)).toEqual(
+        expect.arrayContaining([`${MARK} long`]),
+      );
+      expect(await titlesFor(`q=${MARK}%20short&minDays=2`)).toEqual([]);
+      expect(await titlesFor(`q=${MARK}&countryCode=ae`)).toEqual([
+        `${MARK} long`,
+      ]);
+      expect(await titlesFor(`q=${MARK}&cityId=dubai&maxDays=4`)).toEqual([]);
+      expect(await titlesFor(`q=${MARK}&cityId=dubai&minDays=4`)).toEqual([
+        `${MARK} long`,
+      ]);
+    });
+
+    it('is paginated with a page size of 10 by default, and the rows show their number of days', async () => {
+      const res = await search(`q=${MARK}`).expect(200);
+      expect(res.body).toMatchObject({ page: 1, limit: 10, total: 3 });
+      const long5 = (res.body.items as { id: string; dayCount: number }[]).find(
+        (row) => row.id === long,
+      );
+      expect(long5?.dayCount).toBe(5);
+      const second = await search(`q=${MARK}&page=2&limit=2`).expect(200);
+      expect(second.body).toMatchObject({ page: 2, limit: 2, total: 3 });
+      expect(second.body.items).toHaveLength(1);
+    });
+
+    it('never shows a private itinerary or one hidden by an admin, with or without filters', async () => {
+      const privateId = await makePublic(`${MARK} secret`, {
+        cities: ['cairo'],
+      });
+      await setVisibility(alice, privateId, 'PRIVATE').expect(200);
+      const hiddenId = await makePublic(`${MARK} hidden`, {
+        cities: ['cairo'],
+      });
+      await connection
+        .collection('itineraries')
+        .updateOne(
+          { _id: new Types.ObjectId(hiddenId) },
+          { $set: { isHidden: true } },
+        );
+
+      const titles = await titlesFor(`q=${MARK}&minDays=1&maxDays=60`);
+      expect(titles).not.toContain(`${MARK} secret`);
+      expect(titles).not.toContain(`${MARK} hidden`);
+      expect(await titlesFor(`q=${MARK}%20secret`)).toEqual([]);
+      await http().get(`/api/itineraries/public/${privateId}`).expect(404);
+      await http().get(`/api/itineraries/public/${hiddenId}`).expect(404);
+    });
+
+    it('400 for a bad keyword length, minDays or maxDays, a minimum above the maximum, a bad country code or an unknown field', async () => {
+      for (const query of [
+        `q=${'x'.repeat(101)}`,
+        'minDays=0',
+        'minDays=61',
+        'minDays=abc',
+        'minDays=2.5',
+        'maxDays=0',
+        'maxDays=61',
+        'minDays=5&maxDays=2',
+        'countryCode=EGY',
+        'countryCode=1',
+        'sort=title',
+      ]) {
+        await search(query).expect(400);
+      }
+    });
+
+    it('opens one public itinerary read-only for a guest and for another user: author, days and activities', async () => {
+      const id = await makePublic(`${MARK} view`, {
+        cities: ['cairo', 'dubai'],
+      });
+      const itinerary = await http()
+        .get(`/api/itineraries/${id}`)
+        .set('Cookie', alice)
+        .expect(200);
+      await http()
+        .post(
+          `/api/itineraries/${id}/days/${itinerary.body.days[0].id}/activities`,
+        )
+        .set('Cookie', alice)
+        .send({ name: 'Pyramids', time: '08:30', costCents: 3500 })
+        .expect(201);
+
+      for (const cookie of [undefined, bob]) {
+        const req = http().get(`/api/itineraries/public/${id}`);
+        const res = await (cookie ? req.set('Cookie', cookie) : req).expect(
+          200,
+        );
+        expect(res.body).toMatchObject({
+          id,
+          title: `${MARK} view`,
+          countryCodes: ['EG'],
+          startDate: '2026-12-20',
+          author: { id: itinerary.body.authorId, name: 'Seeded' },
+        });
+        expect(res.body.days).toHaveLength(2);
+        expect(res.body.days[0].activities).toEqual([
+          expect.objectContaining({
+            name: 'Pyramids',
+            time: '08:30',
+            costCents: 3500,
+          }),
+        ]);
+        expect(res.body).not.toHaveProperty('authorId');
+        expect(res.body).not.toHaveProperty('isHidden');
+        expect(res.body).not.toHaveProperty('visibility');
+      }
+    });
+
+    it('the public view is read-only: no write route exists under /public, and the owner routes still refuse others', async () => {
+      const id = await makePublic(`${MARK} readonly`);
+      await http()
+        .patch(`/api/itineraries/public/${id}`)
+        .set('Cookie', bob)
+        .send({ title: 'Mine now' })
+        .expect(404);
+      await http()
+        .delete(`/api/itineraries/public/${id}`)
+        .set('Cookie', bob)
+        .expect(404);
+      await http()
+        .patch(`/api/itineraries/${id}`)
+        .set('Cookie', bob)
+        .send({ title: 'Mine now' })
+        .expect(404);
+    });
+
+    it('404 for an unknown id or a private one, 400 for a malformed id, and "search" is never read as an id', async () => {
+      await http()
+        .get('/api/itineraries/public/674a1b2c3d4e5f6a7b8c9d0e')
+        .expect(404);
+      await http().get('/api/itineraries/public/not-an-id').expect(400);
+      await http().get('/api/itineraries/public/search').expect(200);
+      const { id } = await createAs(alice);
+      await http().get(`/api/itineraries/public/${id}`).expect(404);
+    });
+
+    it('stops showing the itinerary the moment the owner makes it private', async () => {
+      const id = await makePublic(`${MARK} toggled`);
+      await http().get(`/api/itineraries/public/${id}`).expect(200);
+      expect(await titlesFor(`q=${MARK}%20toggled`)).toEqual([
+        `${MARK} toggled`,
+      ]);
+
+      await setVisibility(alice, id, 'PRIVATE').expect(200);
+
+      await http().get(`/api/itineraries/public/${id}`).expect(404);
+      expect(await titlesFor(`q=${MARK}%20toggled`)).toEqual([]);
+    });
+
+    it('Swagger documents the filters and the public view', async () => {
+      const res = await http().get('/api/docs-json').expect(200);
+      const names = (
+        res.body.paths['/api/itineraries/public/search'].get.parameters as {
+          name: string;
+        }[]
+      ).map((p) => p.name);
+      expect(names).toEqual(
+        expect.arrayContaining([
+          'q',
+          'minDays',
+          'maxDays',
+          'countryCode',
+          'cityId',
+          'page',
+          'limit',
+        ]),
+      );
+      expect(res.body.paths['/api/itineraries/public/{id}'].get.tags).toContain(
+        'itineraries',
+      );
+    });
+  });
+
+  describe('clone a public itinerary (ITN-21)', () => {
+    const MARK = 'itn21clone';
+    const clone = (id: string, cookie?: string) => {
+      const req = http().post(`/api/itineraries/${id}/clone`);
+      return cookie ? req.set('Cookie', cookie) : req;
+    };
+    const open = (cookie: string, id: string) =>
+      http().get(`/api/itineraries/${id}`).set('Cookie', cookie);
+    const countOf = (collection: string) =>
+      connection.collection(collection).countDocuments();
+
+    /** A public itinerary of alice: two days, an activity, a daily budget entry and a transport cost. */
+    const publicPlan = async (title = `${MARK} plan`) => {
+      const { id } = await createAs(alice, { ...valid, title });
+      const day1 = await http()
+        .post(`/api/itineraries/${id}/days`)
+        .set('Cookie', alice)
+        .send({ cityId: 'cairo', notes: 'Arrive' })
+        .expect(201);
+      const day2 = await http()
+        .post(`/api/itineraries/${id}/days`)
+        .set('Cookie', alice)
+        .send({ cityId: 'dubai' })
+        .expect(201);
+      await http()
+        .post(`/api/itineraries/${id}/days/${day1.body.id}/activities`)
+        .set('Cookie', alice)
+        .send({ name: 'Pyramids', time: '08:30', costCents: 3500 })
+        .expect(201);
+      await http()
+        .post(`/api/itineraries/${id}/days/${day1.body.id}/budgets`)
+        .set('Cookie', alice)
+        .send({ category: 'FOOD', amountCents: 2500, currency: 'EGP' })
+        .expect(201);
+      await http()
+        .post(`/api/itineraries/${id}/transport-costs`)
+        .set('Cookie', alice)
+        .send({
+          dayId: day2.body.id,
+          mode: 'FLIGHT',
+          fromCityId: 'cairo',
+          toCityId: 'dubai',
+          amountCents: 12000,
+          currency: 'USD',
+        })
+        .expect(201);
+      await http()
+        .patch(`/api/itineraries/${id}`)
+        .set('Cookie', alice)
+        .send({ visibility: 'PUBLIC' })
+        .expect(200);
+      return { id, day1: day1.body.id as string, day2: day2.body.id as string };
+    };
+
+    it('401 for a guest, and nothing is created', async () => {
+      const { id } = await publicPlan();
+      const before = await countOf('itineraries');
+
+      await clone(id).expect(401);
+
+      expect(await countOf('itineraries')).toBe(before);
+    });
+
+    it('403 for an admin and for a moderator: only registered users have itineraries', async () => {
+      const { id } = await publicPlan();
+      await clone(id, admin).expect(403);
+      await clone(id, airlineMod).expect(403);
+    });
+
+    it('201: a private copy that belongs to the caller, with all days, activities, budget entries and costs', async () => {
+      const { id, day1, day2 } = await publicPlan();
+
+      const res = await clone(id, bob).expect(201);
+
+      expect(res.body.id).not.toBe(id);
+      expect(res.body).toMatchObject({
+        title: `${MARK} plan`,
+        countryCodes: ['EG', 'AE'],
+        startDate: '2026-12-20',
+        visibility: 'PRIVATE',
+        isHidden: false,
+      });
+      expect(res.body.authorId).not.toBe(
+        (await open(alice, id).expect(200)).body.authorId,
+      );
+      expect(res.body.days.map((d: { cityId: string }) => d.cityId)).toEqual([
+        'cairo',
+        'dubai',
+      ]);
+      const newDays = res.body.days as { id: string; activities: unknown[] }[];
+      expect([day1, day2]).not.toContain(newDays[0].id);
+      expect(newDays[0].activities).toEqual([
+        expect.objectContaining({
+          name: 'Pyramids',
+          time: '08:30',
+          costCents: 3500,
+          dayId: newDays[0].id,
+        }),
+      ]);
+      expect(res.body.budgets).toEqual([
+        expect.objectContaining({
+          dayId: newDays[0].id,
+          category: 'FOOD',
+          amountCents: 2500,
+          currency: 'EGP',
+        }),
+      ]);
+      expect(res.body.transportCosts).toEqual([
+        expect.objectContaining({
+          dayId: newDays[1].id,
+          mode: 'FLIGHT',
+          amountCents: 12000,
+        }),
+      ]);
+      // the caller opens it like any of their own itineraries; the original author does not see it
+      await open(bob, res.body.id).expect(200);
+      await open(alice, res.body.id).expect(404);
+    });
+
+    it('credits the original author, and the credit stays on the copy', async () => {
+      const { id } = await publicPlan();
+      const original = await open(alice, id).expect(200);
+      expect(original.body.clonedFrom).toBeNull();
+
+      const res = await clone(id, bob).expect(201);
+
+      const credit = {
+        itineraryId: id,
+        authorId: original.body.authorId,
+        authorName: 'Seeded',
+      };
+      expect(res.body.clonedFrom).toEqual(credit);
+      expect(
+        (await open(bob, res.body.id).expect(200)).body.clonedFrom,
+      ).toEqual(credit);
+    });
+
+    it('is independent: editing or deleting the copy never changes the original, and the other way round', async () => {
+      const { id } = await publicPlan();
+      const copy = (await clone(id, bob).expect(201)).body;
+      const before = (await open(alice, id).expect(200)).body;
+
+      await http()
+        .patch(`/api/itineraries/${copy.id}`)
+        .set('Cookie', bob)
+        .send({ title: 'Mine now', visibility: 'PUBLIC' })
+        .expect(200);
+      await http()
+        .patch(`/api/activities/${copy.days[0].activities[0].id}`)
+        .set('Cookie', bob)
+        .send({ name: 'Changed', costCents: 1 })
+        .expect(200);
+      await http()
+        .patch(`/api/budgets/${copy.budgets[0].id}`)
+        .set('Cookie', bob)
+        .send({ amountCents: 1 })
+        .expect(200);
+      await http()
+        .delete(`/api/itineraries/${copy.id}/days/${copy.days[1].id}`)
+        .set('Cookie', bob)
+        .expect(204);
+      expect((await open(alice, id).expect(200)).body).toEqual(before);
+
+      // the original's owner edits and deletes it: the copy keeps its rows
+      const second = (await clone(id, bob).expect(201)).body;
+      await http()
+        .delete(`/api/itineraries/${id}`)
+        .set('Cookie', alice)
+        .expect(204);
+      expect((await open(bob, second.id).expect(200)).body).toEqual(second);
+    });
+
+    it('cannot clone a private itinerary, one hidden by an admin or an unknown id: 404, and nothing is created', async () => {
+      const privateOne = await createAs(alice, { ...valid, title: 'Secret' });
+      const hidden = await publicPlan(`${MARK} hidden`);
+      await connection
+        .collection('itineraries')
+        .updateOne(
+          { _id: new Types.ObjectId(hidden.id) },
+          { $set: { isHidden: true } },
+        );
+      const before = {
+        itineraries: await countOf('itineraries'),
+        activities: await countOf('activities'),
+      };
+
+      await clone(privateOne.id, bob).expect(404);
+      await clone(hidden.id, bob).expect(404);
+      await clone('674a1b2c3d4e5f6a7b8c9d0e', bob).expect(404);
+
+      expect({
+        itineraries: await countOf('itineraries'),
+        activities: await countOf('activities'),
+      }).toEqual(before);
+    });
+
+    it('400 for a malformed id', async () => {
+      await clone('not-an-id', bob).expect(400);
+    });
+
+    it('lets the author copy their own public itinerary', async () => {
+      const { id } = await publicPlan();
+      const res = await clone(id, alice).expect(201);
+      expect(res.body.visibility).toBe('PRIVATE');
+      expect(res.body.id).not.toBe(id);
+    });
+
+    it('a copy is not in the public search until its owner makes it public', async () => {
+      const { id } = await publicPlan(`${MARK} searchable`);
+      const copy = (await clone(id, bob).expect(201)).body;
+      const titles = async () =>
+        (
+          (
+            await http()
+              .get(
+                `/api/itineraries/public/search?limit=50&q=${MARK}%20searchable`,
+              )
+              .expect(200)
+          ).body.items as { id: string }[]
+        ).map((row) => row.id);
+
+      expect(await titles()).toEqual([id]);
+      await http()
+        .patch(`/api/itineraries/${copy.id}`)
+        .set('Cookie', bob)
+        .send({ visibility: 'PUBLIC' })
+        .expect(200);
+      expect((await titles()).sort()).toEqual([id, copy.id].sort());
+    });
+
+    it('the read-only view shows the budget totals and, on a copy, the credit', async () => {
+      const { id } = await publicPlan();
+
+      const view = await http()
+        .get(`/api/itineraries/public/${id}`)
+        .expect(200);
+
+      expect(view.body.budget).toMatchObject({ itineraryId: id });
+      const totals = view.body.budget.totals as {
+        currency: string;
+        totalCents: number;
+      }[];
+      // activity 3500 and flight 12000 in the platform currency (USD); food 2500 in EGP
+      expect(totals.find((t) => t.currency === 'USD')?.totalCents).toBe(15500);
+      expect(totals.find((t) => t.currency === 'EGP')?.totalCents).toBe(2500);
+      expect(view.body.clonedFrom).toBeNull();
+
+      const copy = (await clone(id, bob).expect(201)).body;
+      await http()
+        .patch(`/api/itineraries/${copy.id}`)
+        .set('Cookie', bob)
+        .send({ visibility: 'PUBLIC' })
+        .expect(200);
+      const copyView = await http()
+        .get(`/api/itineraries/public/${copy.id}`)
+        .expect(200);
+      expect(copyView.body.clonedFrom).toMatchObject({ itineraryId: id });
+    });
+
+    it('Swagger documents the clone endpoint and the new fields', async () => {
+      const res = await http().get('/api/docs-json').expect(200);
+      const post = res.body.paths['/api/itineraries/{id}/clone'].post;
+      expect(post.tags).toContain('itineraries');
+      expect(Object.keys(post.responses)).toEqual(
+        expect.arrayContaining(['201', '400', '401', '403', '404']),
+      );
+      const schemas = res.body.components.schemas;
+      expect(Object.keys(schemas.PublicItineraryDto.properties)).toEqual(
+        expect.arrayContaining(['budget', 'clonedFrom']),
+      );
+      expect(Object.keys(schemas.ItineraryResponseDto.properties)).toContain(
+        'clonedFrom',
+      );
+    });
+  });
+
   describe('hotels for a city group (ITN-25)', () => {
     /** Dates relative to today (UTC): the hotel search refuses a check-in in the past. */
     const day = (offset: number): string =>
@@ -2289,6 +2827,7 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
       );
     });
   });
+
 
   describe('Swagger', () => {
     it('documents the ITN-01, ITN-03 and ITN-05 endpoints under the itineraries tag', async () => {

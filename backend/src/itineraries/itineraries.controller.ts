@@ -337,6 +337,28 @@ export class ItinerariesController {
     return this.itineraries.hotelsForGroup(user, params.id, query);
   }
 
+  @Post(':id/clone')
+  @ApiOperation({
+    summary:
+      'Clone a public itinerary into a new private one of mine: all days, activities, transport costs and budget entries, credited to the original author and independent of the original - ITN-21',
+  })
+  @ApiCreatedResponse({ type: ItineraryResponseDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: 'id is not a valid id',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description:
+      'No such itinerary, or it is private, hidden by an admin, or its author is not active',
+  })
+  clone(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: ItineraryIdParamDto,
+  ) {
+    return this.itineraries.clone(user, params.id);
+  }
+
   @Post(':id/transport-costs')
   @ApiOperation({
     summary:

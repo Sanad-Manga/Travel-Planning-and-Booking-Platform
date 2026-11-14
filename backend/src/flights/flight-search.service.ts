@@ -50,7 +50,10 @@ export class FlightSearchService {
    * FLT-15: optional inclusive price range (applied per cabin fare, in cents, together with the seat
    * check) and sorting by price, duration or departure time. All other criteria still apply.
    */
-  async search(query: FlightSearchQueryDto): Promise<FlightSearchPageDto> {
+  async search(
+    query: FlightSearchQueryDto,
+    now: Date = new Date(),
+  ): Promise<FlightSearchPageDto> {
     const { departureAirport, arrivalAirport, departureDate, passengers } = query;
     const { page, limit } = query;
     await this.validate(query);
@@ -58,6 +61,8 @@ export class FlightSearchService {
     const flights = await this.model
       .find({
         status: FlightStatus.SCHEDULED,
+        // FLT-30: a flight that has left is not searchable even before the status job has stored DEPARTED.
+        departureAt: { $gt: now },
         departureAirport,
         arrivalAirport,
         departureLocalDate: departureDate,

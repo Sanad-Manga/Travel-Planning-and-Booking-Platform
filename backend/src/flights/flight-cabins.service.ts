@@ -13,6 +13,7 @@ import { CreateCabinDto } from './dto/create-cabin.dto';
 import { UpdateCabinDto } from './dto/update-cabin.dto';
 import { Cabin, CabinLean } from './schemas/cabin.schema';
 import { Flight, FlightLean } from './schemas/flight.schema';
+import { effectiveFlightStatus } from './utils/flight-status';
 
 const MONGO_DUPLICATE_KEY = 11000;
 
@@ -144,9 +145,10 @@ export class FlightCabinsService {
     if (flight.airlineId.toString() !== user.airlineId) {
       throw new ForbiddenException('You can only manage your own flights');
     }
-    if (flight.status !== FlightStatus.SCHEDULED) {
+    const status = effectiveFlightStatus(flight);
+    if (status !== FlightStatus.SCHEDULED) {
       throw new ConflictException(
-        `Cabins cannot be changed on a ${flight.status} flight`,
+        `Cabins cannot be changed on a ${status} flight`,
       );
     }
     return flight;
