@@ -48,6 +48,8 @@ import { ItineraryDayDto } from './dto/itinerary-day.dto';
 import { ItineraryIdParamDto } from './dto/itinerary-id-param.dto';
 import { ItineraryResponseDto } from './dto/itinerary-response.dto';
 import { ItineraryRowDto } from './dto/itinerary-row.dto';
+import { GroupHotelsQueryDto } from './dto/group-hotels-query.dto';
+import { HotelSearchItemDto } from '../hotels/dto/hotel-search-response.dto';
 import { ReorderDaysDto } from './dto/reorder-days.dto';
 import { UpdateItineraryDayDto } from './dto/update-itinerary-day.dto';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto';
@@ -310,6 +312,29 @@ export class ItinerariesController {
     @Param() params: ItineraryIdParamDto,
   ) {
     return this.budgets.summary(user, params.id);
+  }
+
+  @Get(':id/hotels')
+  @ApiOperation({
+    summary:
+      "Hotels that are free for one city group of my itinerary: check-in is the group's first day, check-out the day after its last day; pick the group with fromDayNumber and enter guests and rooms (reuses the hotel search, HTL-11) - ITN-25",
+  })
+  @ApiPaginatedResponse(HotelSearchItemDto)
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description:
+      'Invalid id, page or limit; a missing or invalid fromDayNumber, guests or rooms; a fromDayNumber where no city group starts (the message lists the days where one does); a group that is already over; or an unknown query field',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'No such itinerary (or it belongs to someone else)',
+  })
+  hotelsForGroup(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: ItineraryIdParamDto,
+    @Query() query: GroupHotelsQueryDto,
+  ) {
+    return this.itineraries.hotelsForGroup(user, params.id, query);
   }
 
   @Post(':id/clone')

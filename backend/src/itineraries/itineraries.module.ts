@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { HotelSearchService } from '../hotels/hotel-search.service';
+import { HotelsModule } from '../hotels/hotels.module';
 import { ReferenceDataModule } from '../reference-data/reference-data.module';
 import { UploadsModule } from '../uploads';
 import { UsersModule } from '../users/users.module';
@@ -34,6 +36,8 @@ import { TransportCostsService } from './transport-costs.service';
     UsersModule,
     // ITN-12: activity images are stored through the shared UploadService (GEN-08).
     UploadsModule,
+    // ITN-25: the hotel search (HTL-11) needs the hotel models and HotelAvailabilityService, which HotelsModule exports.
+    HotelsModule,
   ],
   // The public controller comes first so its static paths win over ItinerariesController's /:id.
   controllers: [
@@ -48,6 +52,10 @@ import { TransportCostsService } from './transport-costs.service';
     ActivitiesService,
     TransportCostsService,
     BudgetsService,
+    // ITN-25: HotelsModule does not export HotelSearchService, and its module is not mine to change. This provides
+    // the SAME class (not a copy of its logic) here; it is stateless and takes only what is imported above. If the
+    // hotels owner adds it to the exports of HotelsModule, delete this line.
+    HotelSearchService,
   ],
   // Blog (author page) and Reports (hide/delete) look itineraries up through the service, never the model.
   exports: [ItinerariesService],
