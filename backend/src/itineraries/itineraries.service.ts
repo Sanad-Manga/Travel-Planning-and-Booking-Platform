@@ -5,7 +5,9 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import { FilterQuery } from 'mongoose';
 import {
+  AccountStatus,
   AuthenticatedUser,
   paginate,
   PaginatedResponse,
@@ -35,6 +37,11 @@ import {
   PublicItineraryRowDto,
   toPublicItineraryRow,
 } from './dto/public-itinerary-row.dto';
+import {
+  PublicItineraryDto,
+  toPublicItinerary,
+} from './dto/public-itinerary.dto';
+import { PublicSearchQueryDto } from './dto/public-search-query.dto';
 import { ReorderDaysDto } from './dto/reorder-days.dto';
 import { UpdateItineraryDayDto } from './dto/update-itinerary-day.dto';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto';
@@ -111,17 +118,35 @@ export class ItinerariesService {
   }
 
   /**
-   * ITN-20: the shared search: PUBLIC itineraries that an admin has not hidden and whose author's account is
-   * still ACTIVE (ACC-12 hides a suspended or deactivated author's public itineraries), most recently
+   * ITN-20, ITN-21: the shared search: PUBLIC itineraries that an admin has not hidden and whose author's account
+   * is still ACTIVE (ACC-12 hides a suspended or deactivated author's public itineraries), most recently
    * updated first, paginated. Visibility is read on every request, so setting PRIVATE removes an itinerary
-   * from the next search on. ITN-21 adds the keyword and duration filters.
+   * from the next search on.
+   *
+   * ITN-21 filters (all that are sent must match): `q`, a plain-text keyword (never a pattern) found in the title,
+   * in the name of one of its countries or in the name of a city it visits; `minDays` and `maxDays`, the number of
+   * days; `countryCode`; `cityId`. The base conditions are always part of the filter, so no combination of
+   * filters can show a private, hidden or inactive-author itinerary.
    *
    * The author check goes through UsersService.isActive (the Users module's exported method), once per
    * distinct author with public itineraries, so the page and the total count only what is shown.
    */
   async searchPublic(
-    query: PaginationDto,
+    query: PublicSearchQueryDto,
   ): Promise<PaginatedResponse<PublicItineraryRowDto>> {
+    const { q, minDays, maxDays, countryCode, cityId } = query;
+    if (minDays !== undefined && maxDays !== undefined && minDays > maxDays) {
+      throw new BadRequestException({
+        message: 'Validation failed',
+        details: [
+          {
+            field: 'minDays',
+            message: 'minDays must not be greater than maxDays',
+          },
+        ],
+      });
+    }
+
     const shared = { visibility: Visibility.PUBLIC, isHidden: false };
     const authorIds = (await this.model
       .distinct('authorId', shared)
@@ -131,12 +156,183 @@ export class ItinerariesService {
     );
     const activeAuthorIds = authorIds.filter((_, index) => active[index]);
 
-    return paginate(
-      this.model,
+    const clauses: FilterQuery<Itinerary>[] = [
       { ...shared, authorId: { $in: activeAuthorIds } },
-      query,
-      { map: toPublicItineraryRow, sort: { updatedAt: -1, _id: -1 } },
+    ];
+    if (q) clauses.push(await this.keywordClause(q, shared));
+    if (countryCode) clauses.push({ countryCodes: countryCode });
+    if (cityId) clauses.push({ 'days.cityId': cityId });
+    if (minDays !== undefined || maxDays !== undefined) {
+      const dayCount = { $size: { $ifNull: ['$days', []] } };
+      clauses.push({
+        $expr: {
+          $and: [
+            ...(minDays !== undefined ? [{ $gte: [dayCount, minDays] }] : []),
+            ...(maxDays !== undefined ? [{ $lte: [dayCount, maxDays] }] : []),
+          ],
+        },
+      });
+    }
+
+    return paginate(this.model, { $and: clauses }, query, {
+      map: toPublicItineraryRow,
+      sort: { updatedAt: -1, _id: -1 },
+    });
+  }
+
+  /**
+   * ITN-21: the read-only view of one public itinerary, open to guests: author name, days with their activities, the
+   * budget totals and, on a clone, the credit to the original author. It
+   * answers 404 for anything that search would not list (private, hidden by an admin, author not ACTIVE, unknown
+   * id), so nothing reveals that a private itinerary exists. The author's account is read here too, because the
+   * view shows the name.
+   */
+  async findPublic(id: string): Promise<PublicItineraryDto> {
+    const { itinerary, author } = await this.loadPublic(id);
+    const [activities, transportCosts, budgets] = await Promise.all([
+      this.activities.listByItinerary(itinerary._id),
+      this.transportCosts.listByItinerary(itinerary._id),
+      this.budgets.listByItinerary(itinerary._id),
+    ]);
+    return toPublicItinerary(
+      itinerary,
+      { id: itinerary.authorId.toString(), name: author.name },
+      activities,
+      transportCosts,
+      budgets,
     );
+  }
+
+  /**
+   * ITN-21: a registered user copies a public itinerary into a new one of their own. The copy is PRIVATE, belongs to
+   * the caller and has its own id, its own days (new ids) and its own activities, transport costs and daily budget
+   * entries, so editing or deleting either one never touches the other. It carries the credit (`clonedFrom`): the
+   * original itinerary and its author's name, as they were at that moment. Images of activities are not copied (see
+   * ActivitiesService.copyForClone).
+   *
+   * Only what the public view shows can be cloned: anything else (private, hidden by an admin, author not active,
+   * unknown id) answers 404, like the view. The author may copy their own public itinerary too.
+   *
+   * The copy is made in steps, not in one transaction: the new itinerary first, then its rows. If copying the rows
+   * fails, the new itinerary and whatever was copied are removed again, so a failed clone leaves nothing behind.
+   */
+  async clone(
+    user: AuthenticatedUser,
+    id: string,
+  ): Promise<ItineraryResponseDto> {
+    const { itinerary: source, author } = await this.loadPublic(id);
+    const ownerId = new Types.ObjectId(user.userId);
+
+    // Each embedded day gets a new id; the rows that hang on a day are moved onto the matching new day.
+    const dayIds = new Map(
+      (source.days ?? []).map((day) => [
+        day._id.toString(),
+        new Types.ObjectId(),
+      ]),
+    );
+    const created = await this.model.create({
+      authorId: ownerId,
+      title: source.title,
+      countryCodes: source.countryCodes,
+      startDate: source.startDate,
+      visibility: Visibility.PRIVATE,
+      days: (source.days ?? []).map((day) => ({
+        _id: dayIds.get(day._id.toString()),
+        cityId: day.cityId,
+        notes: day.notes,
+      })),
+      clonedFrom: {
+        itineraryId: source._id,
+        authorId: source.authorId,
+        authorName: author.name,
+      },
+    });
+
+    // Wait for ALL three copies to finish, even when one fails: with Promise.all the clean-up below could run while
+    // another copy is still inserting, and those rows would be left behind with no itinerary.
+    const copies = await Promise.allSettled([
+      this.activities.copyForClone(source._id, created._id, ownerId, dayIds),
+      this.transportCosts.copyForClone(
+        source._id,
+        created._id,
+        ownerId,
+        dayIds,
+      ),
+      this.budgets.copyForClone(source._id, created._id, ownerId, dayIds),
+    ]);
+    const failed = copies.find((copy) => copy.status === 'rejected');
+    if (failed) {
+      await Promise.allSettled([
+        this.activities.removeForItinerary(created._id),
+        this.transportCosts.removeForItinerary(created._id),
+        this.budgets.removeForItinerary(created._id),
+        this.model.deleteOne({ _id: created._id }).exec(),
+      ]);
+      throw failed.reason;
+    }
+    return this.withActivities(created.toObject<ItineraryLean>());
+  }
+
+  /**
+   * The public itinerary that the read-only view and the clone work from, with its author's account: 404 for
+   * anything search would not list (private, hidden by an admin, author not ACTIVE, unknown id).
+   */
+  private async loadPublic(
+    id: string,
+  ): Promise<{ itinerary: ItineraryLean; author: { name: string } }> {
+    const itinerary = await this.model
+      .findOne({ _id: id, visibility: Visibility.PUBLIC, isHidden: false })
+      .lean<ItineraryLean>()
+      .exec();
+    if (!itinerary) throw new NotFoundException('Itinerary not found');
+
+    const author = await this.users.findById(itinerary.authorId.toString());
+    if (!author || author.status !== AccountStatus.ACTIVE) {
+      throw new NotFoundException('Itinerary not found');
+    }
+    return { itinerary, author };
+  }
+
+  /**
+   * The filter for the keyword: it matches when the title contains it, one of the itinerary's countries has a name
+   * containing it, or it visits a city whose name contains it. Country and city names come from the reference
+   * data (never read from its collections here); only the cities that public itineraries actually use are
+   * looked up. The keyword is escaped, so it is always plain text.
+   */
+  private async keywordClause(
+    keyword: string,
+    shared: { visibility: Visibility; isHidden: boolean },
+  ): Promise<FilterQuery<Itinerary>> {
+    const pattern = new RegExp(
+      keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+      'i',
+    );
+    const [countries, usedCityIds] = await Promise.all([
+      this.referenceData.listCountries(),
+      this.model.distinct('days.cityId', shared).exec() as Promise<string[]>,
+    ]);
+    const cities = await Promise.all(
+      usedCityIds.map((cityId) => this.referenceData.findCityById(cityId)),
+    );
+    return {
+      $or: [
+        { title: pattern },
+        {
+          countryCodes: {
+            $in: countries
+              .filter((country) => pattern.test(country.name))
+              .map((country) => country.code),
+          },
+        },
+        {
+          'days.cityId': {
+            $in: cities.flatMap((city) =>
+              city && pattern.test(city.name) ? [city.city_id] : [],
+            ),
+          },
+        },
+      ],
+    };
   }
 
   /**

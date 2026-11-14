@@ -214,6 +214,41 @@ export class ActivitiesService {
       .map(({ row }) => toActivityDto(row));
   }
 
+  /**
+   * ITN-21: copies the activities of a public itinerary into its clone. `dayIds` maps each day of the original to the
+   * matching day of the clone; a row of a day that is not in the map (a leftover of a deleted day) is skipped. The copy
+   * belongs to `ownerId`. Images are NOT copied: a stored file is deleted with the activity it is attached to, so a
+   * file shared by two activities would vanish from the clone when the original is edited or deleted.
+   */
+  async copyForClone(
+    fromItineraryId: Types.ObjectId,
+    toItineraryId: Types.ObjectId,
+    ownerId: Types.ObjectId,
+    dayIds: Map<string, Types.ObjectId>,
+  ): Promise<void> {
+    const rows = await this.model
+      .find({ itineraryId: fromItineraryId })
+      .sort({ _id: 1 })
+      .lean<ActivityLean[]>()
+      .exec();
+    const copies = rows.flatMap((row) => {
+      const dayId = dayIds.get(row.dayId.toString());
+      if (!dayId) return [];
+      return [
+        {
+          itineraryId: toItineraryId,
+          dayId,
+          ownerId,
+          name: row.name,
+          description: row.description,
+          ...(row.time !== undefined && { time: row.time }),
+          ...(row.costCents !== undefined && { costCents: row.costCents }),
+        },
+      ];
+    });
+    if (copies.length > 0) await this.model.insertMany(copies);
+  }
+
   /** Called when an itinerary is deleted: its activities, and their stored images, go with it. */
   async removeForItinerary(itineraryId: Types.ObjectId): Promise<void> {
     await this.removeWhere({ itineraryId });

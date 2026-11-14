@@ -164,6 +164,38 @@ export class BudgetsService {
     return rows.map(toBudgetDto);
   }
 
+  /**
+   * ITN-21: copies the entries of a public itinerary into its clone, onto the matching new day (`dayIds` maps each day
+   * of the original to its copy). An entry of a day that is not in the map is skipped. The copy belongs to `ownerId`.
+   */
+  async copyForClone(
+    fromItineraryId: Types.ObjectId,
+    toItineraryId: Types.ObjectId,
+    ownerId: Types.ObjectId,
+    dayIds: Map<string, Types.ObjectId>,
+  ): Promise<void> {
+    const rows = await this.model
+      .find({ itineraryId: fromItineraryId })
+      .sort({ _id: 1 })
+      .lean<BudgetLean[]>()
+      .exec();
+    const copies = rows.flatMap((row) => {
+      const dayId = dayIds.get(row.dayId.toString());
+      if (!dayId) return [];
+      return [
+        {
+          itineraryId: toItineraryId,
+          dayId,
+          ownerId,
+          category: row.category,
+          amountCents: row.amountCents,
+          currency: row.currency,
+        },
+      ];
+    });
+    if (copies.length > 0) await this.model.insertMany(copies);
+  }
+
   /** Called when an itinerary is deleted: its entries go with it. */
   async removeForItinerary(itineraryId: Types.ObjectId): Promise<void> {
     await this.model.deleteMany({ itineraryId }).exec();

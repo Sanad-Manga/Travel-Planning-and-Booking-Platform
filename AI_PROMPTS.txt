@@ -1444,6 +1444,33 @@ register a checker with (documented in docs/api/account-deactivation.md); nothin
 proven only with a test double. 20 e2e tests on mongodb-memory-server (two files, COOKIE_SECURE true and false) plus unit tests; they show comments already read
 'Deleted user' and public itineraries are already hidden, and a read-only probe showed a deactivated author's posts are still
 visible (reported to the blog owner, not changed). I read every file before committing.
+================================================
+
+Date: 2026-11-14
+Student: Yassin Yahya
+Tool: Claude (Claude Code)
+Related Requirement: ITN-21 (SCRUM-96)
+Prompt:
+Implement ITN-21 following docs/contracts.md and the Jira checklist: guests and users search public itineraries by keyword
+(title, country, city) with duration and country/city filters, open one read-only with author, days, activities and
+budget, and a registered user clones it (POST /api/itineraries/:id/clone): all days, activities and budgets, private,
+credits the original author, independent of the original, 401 for guests. Search and the read-only view were done earlier
+on this branch; the clone and the budget in the view waited for ITN-14 to merge. Write the tests first, then the code.
+How the output was used:
+Merged the latest develop (ITN-14 and ITN-12 are in it) into the branch. Added ClonedFrom (itinerary id, author id, author
+name, a snapshot) on the itinerary schema and in both response DTOs. ItinerariesService.clone loads the itinerary the same
+way the public view does (404 for private, hidden, inactive author or unknown id), creates the copy as PRIVATE for the
+caller with new day ids, then copies activities, transport costs and budget entries onto the matching new days through a
+copyForClone method on each of the three services (rows of a day that is no longer there are skipped). Images are not
+copied, because a stored file is deleted with its activity. The copy runs in steps, not in one transaction; the three
+copies are awaited with Promise.allSettled and a failure removes the new itinerary and its rows. A test of that failure
+path found a real bug in my first version (Promise.all let the clean-up run while another copy was still inserting, so
+rows were left behind); fixed and kept as a test. The public view now builds the budget summary from the rows it already
+loads. Transport costs are copied too, although the ticket lists only days, activities and budgets, so the clone shows
+the same totals. A mutation check (wrong day id in the budget copy) failed two tests as expected. Lint, build, 880 unit
+and 1027 e2e tests pass. Known limits, stated in the PR: not atomic if the server dies mid-clone, cloning a clone credits
+the clone's author, the credit shows the original author's name even if that account is later deactivated, and there is
+no per-user cap on clones.
 
 ================================================
 Date: 2026-11-13
@@ -1478,6 +1505,22 @@ How the output was used:
 Added the approved notification type while preserving all old values; PROVIDER_REACTIVATED was intentionally not added. Updated the existing status service/controller and tests for sequential effects, correct suspension/reactivation notifications, successful no-op repeats and explicit self-target rejection. Added only an admin-owned accountStatusOperations schema/model to retain original actor/transition metadata and coordinate retry phases with expiring MongoDB leases. Correlated audit reads avoid unnecessary duplicates for already-visible lost acknowledgements. Tests show another administrator can recover a recorded failed audit without claiming its historical action, completed repeats preserve User timestamps and do not duplicate effects, and same-direction concurrent requests remain safe. Documented separate status/journal writes, unrecoverable missing-journal windows, uncertain late-commit/lease duplicate limits and best-effort notification loss; no transaction, User-schema or shared AuditService/NotificationsService change was introduced. Fixed an unsorted notification assertion by explicitly sorting, preserving its strict expected types. Focused tests passed 52/52 (three suites), AppModule E2E passed 19/19; subsequent sequential full Jest passed 880/880 (55 suites), full E2E passed 1023/1023 (39 suites), build and full ESLint passed. README preserves prior documentation and includes prepared develop-target PR text with approvals/limitations. Verification used an environment-free temporary copy, synthetic users and disposable MongoDB without reinstalling dependencies. Existing log entries were preserved; no .env/shared Atlas access, branch/history operations, commit, push, PR creation or Jira edit occurred.
 ================================================
 Date: 2026-11-13
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: FLT-30 (SCRUM-74)
+Prompt:
+Do FLT-30, flight status SCHEDULED / CANCELLED / DEPARTED: a flight whose departure time has passed reads as DEPARTED even before a scheduled job runs, the job stores the status, and only SCHEDULED flights are searchable, editable or bookable, following docs/contracts.md.
+How the output was used:
+The assistant added the pure effectiveFlightStatus rule, a FlightStatusJob (every minute, one idempotent updateMany) in the flights module, applied the rule to the flight responses and the cabin edit guard, added a departureAt > now filter to search, plus unit tests, five e2e tests on an in-memory MongoDB and Swagger descriptions. I read every file and ran lint, build and the tests.
+
+Date: 2026-11-14
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: FLT-30 (SCRUM-74) review fixes on PR #82
+Prompt:
+Fix the review findings on PR #82: booking must decide from the effective flight status, CANCELLED is documented but nothing sets it (cancelling is FLT-06, so only reword the docs), and revert the formatting-only changes in flight-search.service.ts.
+How the output was used:
+The assistant made FlightInventoryService.loadBookableFlight use effectiveFlightStatus (409 message names the status), strengthened the past-departure hold e2e test (stored status still SCHEDULED, no seats held, no booking), reworded the DTO and PR descriptions for CANCELLED, and restored the original formatting in the search service. I ran build, lint, unit and e2e tests (runInBand).
 Student: Mohamed Walid
 Tool: OpenAI Codex
 Related Requirement: ACC-07a (SCRUM-45)

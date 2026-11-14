@@ -22,6 +22,7 @@ import { CreateFlightDto } from './dto/create-flight.dto';
 import { FlightResponseDto, toFlightResponse } from './dto/flight-response.dto';
 import { FlightCabinsReader } from './flight-cabins.reader';
 import { Flight, FlightLean } from './schemas/flight.schema';
+import { effectiveFlightStatus } from './utils/flight-status';
 
 const MONGO_DUPLICATE_KEY = 11000;
 
@@ -92,7 +93,7 @@ export class FlightsService {
       durationMinutes:
         (flight.arrivalAt.getTime() - flight.departureAt.getTime()) / 60_000,
       currency: PLATFORM_CURRENCY,
-      status: flight.status,
+      status: effectiveFlightStatus(flight),
       cabins: cabins.map((cabin) => ({
         cabinClass: cabin.cabinClass,
         priceCents: cabin.priceCents,
