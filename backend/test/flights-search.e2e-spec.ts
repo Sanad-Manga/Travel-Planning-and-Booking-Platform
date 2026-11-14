@@ -77,7 +77,7 @@ describe('flight search (FLT-11) over HTTP (e2e)', () => {
     return res.body.id as string;
   }
 
-  /** Cabins are not creatable through the API yet (FLT-04), so tests insert them directly. */
+  /** Seed cabin documents directly so these tests focus on flight search and details. */
   async function addCabin(
     flightId: string,
     cabinClass: string,
@@ -85,6 +85,8 @@ describe('flight search (FLT-11) over HTTP (e2e)', () => {
     bookedSeats: number,
     heldSeats: number,
     priceCents: number,
+    freeBags = 1,
+    maxBagWeightKg = 23,
   ) {
     await connection.collection('cabins').insertOne({
       flightId: new Types.ObjectId(flightId),
@@ -93,6 +95,8 @@ describe('flight search (FLT-11) over HTTP (e2e)', () => {
       bookedSeats,
       heldSeats,
       priceCents,
+      freeBags,
+      maxBagWeightKg,
     });
   }
 
@@ -154,7 +158,111 @@ describe('flight search (FLT-11) over HTTP (e2e)', () => {
     await connection.collection('cabins').deleteMany({});
     await connection
       .collection('airlines')
-      .updateOne({ _id: new Types.ObjectId(airline.id) }, { $set: { isActive: true } });
+      .updateOne(
+        { _id: new Types.ObjectId(airline.id) },
+        { $set: { isActive: true }, $unset: { cancellationTiers: '' } },
+      );
+  });
+
+  describe('GET /api/flights/:id (FLT-17)', () => {
+    it('is public and returns local times, duration, every cabin, baggage and cancellation policy', async () => {
+      const id = await createFlight();
+      await addCabin(id, 'ECONOMY', 100, 30, 5, 45000, 1, 23);
+      await addCabin(id, 'BUSINESS', 8, 7, 1, 120000, 2, 32);
+      await http()
+        .put(`/api/airlines/${airline.id}/cancellation-policy`)
+        .set('Cookie', modCookie)
+        .send({
+          cancellationTiers: [
+            { daysBeforeThreshold: 7, refundPercent: 50 },
+            { daysBeforeThreshold: 14, refundPercent: 100 },
+          ],
+        })
+        .expect(200);
+
+      const res = await http().get(`/api/flights/${id}`).expect(200);
+
+      expect(res.body).toMatchObject({
+        id,
+        airline: { id: airline.id, name: 'Airline A', code: 'AA' },
+        flightNumber: 'MS777',
+        departureAirport: {
+          iataCode: 'CAI',
+          name: 'Cairo',
+          timeZone: 'Africa/Cairo',
+        },
+        arrivalAirport: {
+          iataCode: 'JFK',
+          name: 'John F. Kennedy',
+          timeZone: 'America/New_York',
+        },
+        departureAt: '2090-12-01T12:30:00.000Z',
+        departureLocal: '2090-12-01T14:30:00+02:00',
+        arrivalAt: '2090-12-02T00:45:00.000Z',
+        arrivalLocal: '2090-12-01T19:45:00-05:00',
+        durationMinutes: 735,
+        currency: 'USD',
+        status: 'SCHEDULED',
+        cabins: [
+          {
+            cabinClass: 'ECONOMY',
+            priceCents: 45000,
+            availableSeats: 65,
+            baggageAllowance: { freeBags: 1, maxBagWeightKg: 23 },
+          },
+          {
+            cabinClass: 'BUSINESS',
+            priceCents: 120000,
+            availableSeats: 0,
+            baggageAllowance: { freeBags: 2, maxBagWeightKg: 32 },
+          },
+        ],
+        cancellationPolicy: {
+          cancellationTiers: [
+            { daysBeforeThreshold: 14, refundPercent: 100 },
+            { daysBeforeThreshold: 7, refundPercent: 50 },
+          ],
+        },
+      });
+    });
+
+    it('returns an empty cancellation policy and cabins when none are configured', async () => {
+      const id = await createFlight();
+
+      const res = await http().get(`/api/flights/${id}`).expect(200);
+
+      expect(res.body.cabins).toEqual([]);
+      expect(res.body.cancellationPolicy.cancellationTiers).toEqual([]);
+    });
+
+    it.each(['not-an-id', new Types.ObjectId().toString()])(
+      'returns 404 for an invalid or unknown flight id (%s)',
+      async (id) => {
+        await http().get(`/api/flights/${id}`).expect(404);
+      },
+    );
+
+    it('hides flights whose airline is inactive', async () => {
+      const id = await createFlight();
+      await connection
+        .collection('airlines')
+        .updateOne(
+          { _id: new Types.ObjectId(airline.id) },
+          { $set: { isActive: false } },
+        );
+
+      await http().get(`/api/flights/${id}`).expect(404);
+    });
+
+    it('documents the public route and response in Swagger', async () => {
+      const docs = await http().get('/api/docs-json').expect(200);
+      const operation = docs.body.paths['/api/flights/{id}'].get;
+
+      expect(operation).toBeDefined();
+      expect(operation.security).toBeUndefined();
+      expect(operation.responses['200']).toBeDefined();
+      expect(operation.responses['404']).toBeDefined();
+    });
   });
 
   describe('GET /api/flights/search', () => {
@@ -174,6 +282,8 @@ describe('flight search (FLT-11) over HTTP (e2e)', () => {
         departureAirport: 'CAI',
         arrivalAirport: 'JFK',
         departureAt: '2090-12-01T12:30:00.000Z',
+        departureLocal: '2090-12-01T14:30:00+02:00',
+        arrivalLocal: '2090-12-01T19:45:00-05:00',
         departureTimeZone: 'Africa/Cairo',
         arrivalTimeZone: 'America/New_York',
       });

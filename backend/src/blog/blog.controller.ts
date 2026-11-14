@@ -37,6 +37,7 @@ import { BrowsePostsQueryDto } from './dto/browse-posts-query.dto';
 import { CreatePostDto } from './dto/create-post.dto';
 import { MyPostRowDto } from './dto/my-post-row.dto';
 import { PostDetailDto } from './dto/post-detail.dto';
+import { PostLikeResponseDto } from './dto/post-like-response.dto';
 import { PostListRowDto } from './dto/post-list-row.dto';
 import { PostResponseDto } from './dto/post-response.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
@@ -108,13 +109,19 @@ export class BlogController {
     return this.blogService.listPublished(query);
   }
 
-  @Get(':id')
+    @Get(':id')
   @Public()
   @ApiOperation({
     summary:
-      'Open a post: title, author, date, body, tags, images, like count and comments (BLG-02, public)',
+      'Open a published post with comments in chronological order (BLG-02, BLG-05)',
+    description:
+      'Public endpoint. The page and limit query parameters paginate the comments, with 10 comments per page by default.',
   })
   @ApiOkResponse({ type: PostDetailDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: 'Invalid page or limit',
+  })
   @ApiNotFoundResponse({
     type: ErrorResponseDto,
     description:
@@ -122,10 +129,48 @@ export class BlogController {
   })
   findOne(
     @Param('id') id: string,
+    @Query() query: PaginationDto,
     @Req() request: AuthenticatedRequest,
   ): Promise<PostDetailDto> {
-    // request.user is only set when the global guard identified the caller; guests have none.
-    return this.blogService.findOne(id, request.user);
+    return this.blogService.findOne(id, request.user, query);
+  }
+
+  @Post(':id/like')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Like a published post (BLG-06)' })
+  @ApiOkResponse({ type: PostLikeResponseDto })
+  @ApiUnauthorizedResponse({
+    type: ErrorResponseDto,
+    description: 'Not logged in',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'Unknown, unpublished, or hidden post',
+  })
+  like(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<PostLikeResponseDto> {
+    return this.blogService.like(id, user);
+  }
+
+  @Delete(':id/like')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Remove your like from a post (BLG-06)' })
+  @ApiOkResponse({ type: PostLikeResponseDto })
+  @ApiUnauthorizedResponse({
+    type: ErrorResponseDto,
+    description: 'Not logged in',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'Post not found',
+  })
+  unlike(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<PostLikeResponseDto> {
+    return this.blogService.unlike(id, user);
   }
 
   @Patch(':id')

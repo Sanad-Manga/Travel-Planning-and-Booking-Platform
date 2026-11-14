@@ -5,12 +5,17 @@ import { Test } from '@nestjs/testing';
 import { hashSync } from 'bcryptjs';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { Connection, Types } from 'mongoose';
+import { promises as fs } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import sharp from 'sharp';
 import request from 'supertest';
 import { AuthModule } from '../src/auth/auth.module';
 import { Role } from '../src/common';
 import configuration from '../src/config/configuration';
 import { ItinerariesModule } from '../src/itineraries';
 import { setupApp, setupSwagger } from '../src/setup-app';
+import { UPLOAD_OPTIONS } from '../src/uploads/upload-options';
 import {
   TEST_ACCESS_SECRET,
   TEST_REFRESH_SECRET,
@@ -20,6 +25,8 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
   let app: INestApplication;
   let mongo: MongoMemoryServer;
   let connection: Connection;
+  let uploadRoot: string;
+  let png: Buffer;
 
   const PASSWORD = 'Passw0rdOK';
   const http = () => request(app.getHttpServer());
@@ -71,6 +78,12 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
     process.env.COOKIE_SECURE = 'false';
 
     mongo = await MongoMemoryServer.create();
+    uploadRoot = await fs.mkdtemp(join(tmpdir(), 'itn12-e2e-'));
+    png = await sharp({
+      create: { width: 4, height: 4, channels: 3, background: '#c00' },
+    })
+      .png()
+      .toBuffer();
     const moduleRef = await Test.createTestingModule({
       imports: [
         ConfigModule.forRoot({
@@ -82,7 +95,15 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
         AuthModule,
         ItinerariesModule,
       ],
-    }).compile();
+    })
+      .overrideProvider(UPLOAD_OPTIONS)
+      .useValue({
+        root: uploadRoot,
+        leaseMs: 60_000,
+        recoveryIntervalMs: 3_600_000,
+        recoveryBatchSize: 50,
+      })
+      .compile();
     app = moduleRef.createNestApplication();
     setupApp(app);
     setupSwagger(app);
@@ -115,6 +136,7 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
   afterAll(async () => {
     await app?.close();
     await mongo?.stop();
+    await fs.rm(uploadRoot, { recursive: true, force: true });
   });
 
   describe('POST /api/itineraries', () => {
@@ -945,6 +967,7 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
         time: '08:30',
         costCents: 3500,
         currency: expect.any(String),
+        images: [],
       });
 
       const itinerary = await http()
@@ -1145,6 +1168,162 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
           dayId: new Types.ObjectId(second.body.id),
         }),
       ).toBe(1);
+    });
+  });
+
+  describe('activity images (ITN-12)', () => {
+    const attach = (cookie: string | undefined, activityId: string) => {
+      const req = http().post(`/api/activities/${activityId}/images`);
+      return cookie ? req.set('Cookie', cookie) : req;
+    };
+    const removeImage = (
+      cookie: string | undefined,
+      activityId: string,
+      imageId: string,
+    ) => {
+      const req = http().delete(
+        `/api/activities/${activityId}/images/${imageId}`,
+      );
+      return cookie ? req.set('Cookie', cookie) : req;
+    };
+    const withActivity = async () => {
+      const { id } = await createAs(alice);
+      const day = await http()
+        .post(`/api/itineraries/${id}/days`)
+        .set('Cookie', alice)
+        .send({ cityId: 'cairo' })
+        .expect(201);
+      const activity = await http()
+        .post(`/api/itineraries/${id}/days/${day.body.id}/activities`)
+        .set('Cookie', alice)
+        .send({ name: 'Pyramids' })
+        .expect(201);
+      return { itineraryId: id, activityId: activity.body.id as string };
+    };
+    const sendPng = (req: request.Test) =>
+      req.attach('image', png, {
+        filename: 'photo.png',
+        contentType: 'image/png',
+      });
+
+    it('attaches an image (201): the activity comes back with it and the itinerary shows it', async () => {
+      const { itineraryId, activityId } = await withActivity();
+
+      const res = await sendPng(attach(alice, activityId)).expect(201);
+
+      expect(res.body.images).toEqual([
+        {
+          id: expect.stringMatching(/^[0-9a-f]{24}$/),
+          url: expect.stringMatching(/^\/uploads\/[0-9a-f]{24}\.png$/),
+        },
+      ]);
+      const itinerary = await http()
+        .get(`/api/itineraries/${itineraryId}`)
+        .set('Cookie', alice)
+        .expect(200);
+      expect(itinerary.body.days[0].activities[0].images).toEqual(
+        res.body.images,
+      );
+    });
+
+    it('400 for a file that is not a JPG or PNG, a disguised file, no file, or a malformed activity id', async () => {
+      const { activityId } = await withActivity();
+      await attach(alice, activityId)
+        .attach('image', Buffer.from('hello'), {
+          filename: 'a.txt',
+          contentType: 'text/plain',
+        })
+        .expect(400);
+      await attach(alice, activityId)
+        .attach('image', Buffer.from('not a png'), {
+          filename: 'a.png',
+          contentType: 'image/png',
+        })
+        .expect(400);
+      await attach(alice, activityId).expect(400);
+      await sendPng(attach(alice, 'not-an-id')).expect(400);
+    });
+
+    it('413 for a file over 5 MB', async () => {
+      const { activityId } = await withActivity();
+      await attach(alice, activityId)
+        .attach('image', Buffer.alloc(5 * 1024 * 1024 + 1), {
+          filename: 'big.png',
+          contentType: 'image/png',
+        })
+        .expect(413);
+    });
+
+    it('409 for a 6th image; the five stay', async () => {
+      const { itineraryId, activityId } = await withActivity();
+      for (let i = 0; i < 5; i++) {
+        await sendPng(attach(alice, activityId)).expect(201);
+      }
+
+      await sendPng(attach(alice, activityId)).expect(409);
+
+      const itinerary = await http()
+        .get(`/api/itineraries/${itineraryId}`)
+        .set('Cookie', alice)
+        .expect(200);
+      expect(itinerary.body.days[0].activities[0].images).toHaveLength(5);
+    });
+
+    it('removes an image (204): the reference goes from the activity; a second remove is 404', async () => {
+      const { itineraryId, activityId } = await withActivity();
+      const res = await sendPng(attach(alice, activityId)).expect(201);
+      const [image] = res.body.images;
+
+      await removeImage(alice, activityId, image.id).expect(204);
+      await removeImage(alice, activityId, image.id).expect(404);
+
+      const itinerary = await http()
+        .get(`/api/itineraries/${itineraryId}`)
+        .set('Cookie', alice)
+        .expect(200);
+      expect(itinerary.body.days[0].activities[0].images).toEqual([]);
+    });
+
+    it('404 when someone else attaches or removes, or the image belongs to another activity; 400 for malformed ids', async () => {
+      const { activityId } = await withActivity();
+      const other = await withActivity();
+      const res = await sendPng(attach(alice, activityId)).expect(201);
+      const [image] = res.body.images;
+
+      await sendPng(attach(bob, activityId)).expect(404);
+      await removeImage(bob, activityId, image.id).expect(404);
+      await removeImage(alice, other.activityId, image.id).expect(404);
+      await removeImage(alice, activityId, '674a1b2c3d4e5f6a7b8c9d0e').expect(
+        404,
+      );
+      await sendPng(attach(alice, '674a1b2c3d4e5f6a7b8c9d0e')).expect(404);
+      await removeImage(alice, activityId, 'not-an-id').expect(400);
+      await removeImage(alice, 'not-an-id', image.id).expect(400);
+
+      // still there after all of that
+      await removeImage(alice, activityId, image.id).expect(204);
+    });
+
+    it('401 without a cookie, 403 for an admin or moderator', async () => {
+      const { activityId } = await withActivity();
+      const res = await sendPng(attach(alice, activityId)).expect(201);
+      const [image] = res.body.images;
+
+      await sendPng(attach(undefined, activityId)).expect(401);
+      await removeImage(undefined, activityId, image.id).expect(401);
+      for (const cookie of [admin, airlineMod]) {
+        await sendPng(attach(cookie, activityId)).expect(403);
+        await removeImage(cookie, activityId, image.id).expect(403);
+      }
+    });
+
+    it('Swagger documents both routes as multipart / delete', async () => {
+      const res = await http().get('/api/docs-json').expect(200);
+      const post = res.body.paths['/api/activities/{id}/images'].post;
+      expect(post.requestBody.content['multipart/form-data']).toBeDefined();
+      expect(
+        res.body.paths['/api/activities/{id}/images/{imageId}'].delete,
+      ).toBeDefined();
     });
   });
 
@@ -1385,6 +1564,436 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
           dayId: new Types.ObjectId(second.body.id),
         }),
       ).toBe(1);
+    });
+  });
+
+  describe('PATCH /api/itineraries/:id/days/reorder (ITN-08)', () => {
+    const addDay = (cookie: string, id: string, body: object) =>
+      http()
+        .post(`/api/itineraries/${id}/days`)
+        .set('Cookie', cookie)
+        .send(body);
+    const reorder = (cookie: string, id: string, body: object) =>
+      http()
+        .patch(`/api/itineraries/${id}/days/reorder`)
+        .set('Cookie', cookie)
+        .send(body);
+    const threeDays = async () => {
+      const { id } = await createAs(alice);
+      const a = await addDay(alice, id, { cityId: 'cairo' }).expect(201);
+      const b = await addDay(alice, id, { cityId: 'dubai' }).expect(201);
+      const c = await addDay(alice, id, {
+        cityId: 'cairo',
+        notes: 'Back home',
+      }).expect(201);
+      return { id, a: a.body, b: b.body, c: c.body };
+    };
+    const savedOrder = async (id: string) => {
+      const saved = await http()
+        .get(`/api/itineraries/${id}`)
+        .set('Cookie', alice)
+        .expect(200);
+      return saved.body.days.map((day: { id: string }) => day.id);
+    };
+
+    it('the answer keeps the activities of every day and the transport costs, like a GET', async () => {
+      const { id, a, c } = await threeDays();
+      const activity = await http()
+        .post(`/api/itineraries/${id}/days/${a.id}/activities`)
+        .set('Cookie', alice)
+        .send({ name: 'Pyramids of Giza' })
+        .expect(201);
+      const cost = await http()
+        .post(`/api/itineraries/${id}/transport-costs`)
+        .set('Cookie', alice)
+        .send({
+          mode: 'FLIGHT',
+          fromCityId: 'cairo',
+          toCityId: 'dubai',
+          amountCents: 25000,
+          currency: 'USD',
+          dayId: a.id,
+        })
+        .expect(201);
+
+      const res = await reorder(alice, id, {
+        dayId: c.id,
+        position: 1,
+      }).expect(200);
+
+      const moved = res.body.days.find((day: { id: string }) => day.id === a.id);
+      expect(moved.activities).toEqual([activity.body]);
+      expect(res.body.transportCosts).toEqual([cost.body]);
+    });
+
+    it('moves a day (200): returns the itinerary with the days renumbered and re-dated', async () => {
+      const { id, a, b, c } = await threeDays();
+
+      const res = await reorder(alice, id, {
+        dayId: c.id,
+        position: 1,
+      }).expect(200);
+
+      expect(
+        res.body.days.map(
+          (day: { id: string; dayNumber: number; date: string }) => [
+            day.id,
+            day.dayNumber,
+            day.date,
+          ],
+        ),
+      ).toEqual([
+        [c.id, 1, '2026-12-20'],
+        [a.id, 2, '2026-12-21'],
+        [b.id, 3, '2026-12-22'],
+      ]);
+      expect(res.body.days[0]).toMatchObject({
+        cityId: 'cairo',
+        notes: 'Back home',
+      });
+      expect(await savedOrder(id)).toEqual([c.id, a.id, b.id]);
+    });
+
+    it('400 for a missing, non-integer, zero, negative or text position, a malformed day id or an unknown field', async () => {
+      const { id, a } = await threeDays();
+      for (const [body, field] of [
+        [{ dayId: a.id }, 'position'],
+        [{ dayId: a.id, position: 0 }, 'position'],
+        [{ dayId: a.id, position: -1 }, 'position'],
+        [{ dayId: a.id, position: 1.5 }, 'position'],
+        [{ dayId: a.id, position: '2' }, 'position'],
+        [{ dayId: a.id, position: null }, 'position'],
+        [{ position: 1 }, 'dayId'],
+        [{ dayId: 'not-an-id', position: 1 }, 'dayId'],
+        [{ dayId: a.id, position: 1, dayNumber: 2 }, 'dayNumber'],
+      ] as const) {
+        const res = await reorder(alice, id, body).expect(400);
+        expect(res.body.details).toEqual(
+          expect.arrayContaining([expect.objectContaining({ field })]),
+        );
+      }
+    });
+
+    it('400 for a position after the last day; the order is unchanged', async () => {
+      const { id, a, b, c } = await threeDays();
+      const res = await reorder(alice, id, {
+        dayId: a.id,
+        position: 4,
+      }).expect(400);
+      expect(res.body.details).toEqual([
+        expect.objectContaining({ field: 'position' }),
+      ]);
+      expect(await savedOrder(id)).toEqual([a.id, b.id, c.id]);
+    });
+
+    it('400 for a malformed itinerary id', async () => {
+      await reorder(alice, 'not-an-id', {
+        dayId: '674a1b2c3d4e5f6a7b8c9d0e',
+        position: 1,
+      }).expect(400);
+    });
+
+    it("404 for someone else's itinerary or an unknown day; the order is unchanged", async () => {
+      const { id, a, b, c } = await threeDays();
+      await reorder(bob, id, { dayId: a.id, position: 2 }).expect(404);
+      await reorder(alice, id, {
+        dayId: '674a1b2c3d4e5f6a7b8c9d0e',
+        position: 2,
+      }).expect(404);
+      expect(await savedOrder(id)).toEqual([a.id, b.id, c.id]);
+    });
+
+    it('401 without a cookie, 403 for an admin or moderator', async () => {
+      const { id, a } = await threeDays();
+      await http()
+        .patch(`/api/itineraries/${id}/days/reorder`)
+        .send({ dayId: a.id, position: 2 })
+        .expect(401);
+      await reorder(admin, id, { dayId: a.id, position: 2 }).expect(403);
+      await reorder(airlineMod, id, { dayId: a.id, position: 2 }).expect(403);
+    });
+  });
+
+  describe('budgets (ITN-14)', () => {
+    const addDay = (cookie: string, id: string, body: object) =>
+      http()
+        .post(`/api/itineraries/${id}/days`)
+        .set('Cookie', cookie)
+        .send(body);
+    const add = (cookie: string, id: string, dayId: string, body: object) =>
+      http()
+        .post(`/api/itineraries/${id}/days/${dayId}/budgets`)
+        .set('Cookie', cookie)
+        .send(body);
+    const edit = (cookie: string, entryId: string, body: object) =>
+      http().patch(`/api/budgets/${entryId}`).set('Cookie', cookie).send(body);
+    const remove = (cookie: string, entryId: string) =>
+      http().delete(`/api/budgets/${entryId}`).set('Cookie', cookie);
+    const summaryOf = (cookie: string, id: string) =>
+      http().get(`/api/itineraries/${id}/budget-summary`).set('Cookie', cookie);
+    const entry = { category: 'FOOD', amountCents: 2500, currency: 'EGP' };
+    const withDay = async () => {
+      const { id } = await createAs(alice);
+      const day = await addDay(alice, id, { cityId: 'cairo' }).expect(201);
+      return { id, dayId: day.body.id as string };
+    };
+
+    it('adds an entry (201) that shows up on the itinerary', async () => {
+      const { id, dayId } = await withDay();
+
+      const created = await add(alice, id, dayId, entry).expect(201);
+
+      expect(created.body).toEqual({
+        id: expect.stringMatching(/^[0-9a-f]{24}$/),
+        itineraryId: id,
+        dayId,
+        category: 'FOOD',
+        amountCents: 2500,
+        currency: 'EGP',
+      });
+      const itinerary = await http()
+        .get(`/api/itineraries/${id}`)
+        .set('Cookie', alice)
+        .expect(200);
+      expect(itinerary.body.budgets).toEqual([created.body]);
+    });
+
+    it('accepts an amount of 0, a lower-case currency code, and no currency (platform currency)', async () => {
+      const { id, dayId } = await withDay();
+      const zero = await add(alice, id, dayId, {
+        ...entry,
+        amountCents: 0,
+        currency: ' egp ',
+      }).expect(201);
+      expect(zero.body).toMatchObject({ amountCents: 0, currency: 'EGP' });
+      const noCurrency = await add(alice, id, dayId, {
+        category: 'ACTIVITIES',
+        amountCents: 5,
+      }).expect(201);
+      expect(noCurrency.body.currency).toMatch(/^[A-Z]{3}$/);
+    });
+
+    it('400 for a missing or unknown category, a negative, fractional, text or missing amount, an unsupported currency, or an unknown field', async () => {
+      const { id, dayId } = await withDay();
+      for (const [payload, field] of [
+        [{ ...entry, category: undefined }, 'category'],
+        [{ ...entry, category: 'TRANSPORT' }, 'category'],
+        [{ ...entry, category: 'food' }, 'category'],
+        [{ ...entry, amountCents: undefined }, 'amountCents'],
+        [{ ...entry, amountCents: -1 }, 'amountCents'],
+        [{ ...entry, amountCents: 10.5 }, 'amountCents'],
+        [{ ...entry, amountCents: '100' }, 'amountCents'],
+        [{ ...entry, currency: 'XXX' }, 'currency'],
+        [{ ...entry, currency: 'EURO' }, 'currency'],
+        [{ ...entry, itineraryId: id }, 'itineraryId'],
+        [{ ...entry, dayId }, 'dayId'],
+        [{ ...entry, ownerId: id }, 'ownerId'],
+      ] as const) {
+        const res = await add(alice, id, dayId, payload).expect(400);
+        expect(res.body.details).toEqual(
+          expect.arrayContaining([expect.objectContaining({ field })]),
+        );
+      }
+      const itinerary = await http()
+        .get(`/api/itineraries/${id}`)
+        .set('Cookie', alice)
+        .expect(200);
+      expect(itinerary.body.budgets).toEqual([]);
+    });
+
+    it('404 for a day of another itinerary or an unknown day; 400 for malformed ids', async () => {
+      const { id } = await withDay();
+      const other = await withDay();
+      await add(alice, id, other.dayId, entry).expect(404);
+      await add(alice, id, '674a1b2c3d4e5f6a7b8c9d0e', entry).expect(404);
+      await add(alice, 'not-an-id', other.dayId, entry).expect(400);
+      await add(alice, id, 'not-an-id', entry).expect(400);
+    });
+
+    it('edits an entry (200): only the sent fields change', async () => {
+      const { id, dayId } = await withDay();
+      const created = await add(alice, id, dayId, entry).expect(201);
+
+      const edited = await edit(alice, created.body.id, {
+        category: 'ACCOMMODATION',
+        amountCents: 9000,
+      }).expect(200);
+
+      expect(edited.body).toEqual({
+        ...created.body,
+        category: 'ACCOMMODATION',
+        amountCents: 9000,
+      });
+    });
+
+    it('400 for an empty edit, a bad category, a negative amount, an unsupported currency, a null field, an unknown field or a malformed id', async () => {
+      const { id, dayId } = await withDay();
+      const created = await add(alice, id, dayId, entry).expect(201);
+      await edit(alice, created.body.id, {}).expect(400);
+      await edit(alice, created.body.id, { category: 'TAXI' }).expect(400);
+      await edit(alice, created.body.id, { amountCents: -5 }).expect(400);
+      await edit(alice, created.body.id, { currency: 'XXX' }).expect(400);
+      await edit(alice, created.body.id, { category: null }).expect(400);
+      await edit(alice, created.body.id, { amountCents: null }).expect(400);
+      await edit(alice, created.body.id, { dayId }).expect(400);
+      await edit(alice, 'not-an-id', { amountCents: 1 }).expect(400);
+    });
+
+    it('deletes an entry (204); a second delete is 404', async () => {
+      const { id, dayId } = await withDay();
+      const created = await add(alice, id, dayId, entry).expect(201);
+
+      await remove(alice, created.body.id).expect(204);
+      await remove(alice, created.body.id).expect(404);
+
+      const itinerary = await http()
+        .get(`/api/itineraries/${id}`)
+        .set('Cookie', alice)
+        .expect(200);
+      expect(itinerary.body.budgets).toEqual([]);
+    });
+
+    it('404 when someone else adds, edits, deletes or reads the summary; the entry is unchanged', async () => {
+      const { id, dayId } = await withDay();
+      const created = await add(alice, id, dayId, entry).expect(201);
+
+      await add(bob, id, dayId, entry).expect(404);
+      await edit(bob, created.body.id, { amountCents: 1 }).expect(404);
+      await remove(bob, created.body.id).expect(404);
+      await summaryOf(bob, id).expect(404);
+      await edit(alice, '674a1b2c3d4e5f6a7b8c9d0e', { amountCents: 1 }).expect(
+        404,
+      );
+
+      const itinerary = await http()
+        .get(`/api/itineraries/${id}`)
+        .set('Cookie', alice)
+        .expect(200);
+      expect(itinerary.body.budgets).toEqual([created.body]);
+    });
+
+    it('401 without a cookie on every route, 403 for an admin or moderator', async () => {
+      const { id, dayId } = await withDay();
+      const created = await add(alice, id, dayId, entry).expect(201);
+
+      await http()
+        .post(`/api/itineraries/${id}/days/${dayId}/budgets`)
+        .send(entry)
+        .expect(401);
+      await http()
+        .patch(`/api/budgets/${created.body.id}`)
+        .send({ amountCents: 1 })
+        .expect(401);
+      await http().delete(`/api/budgets/${created.body.id}`).expect(401);
+      await http().get(`/api/itineraries/${id}/budget-summary`).expect(401);
+      for (const cookie of [admin, airlineMod]) {
+        await add(cookie, id, dayId, entry).expect(403);
+        await edit(cookie, created.body.id, { amountCents: 1 }).expect(403);
+        await remove(cookie, created.body.id).expect(403);
+        await summaryOf(cookie, id).expect(403);
+      }
+    });
+
+    it('summary: totals by category and by day add up to the same grand total and include activities and intercity transport', async () => {
+      const { id, dayId } = await withDay();
+      const second = await addDay(alice, id, { cityId: 'dubai' }).expect(201);
+      await add(alice, id, dayId, {
+        category: 'FOOD',
+        amountCents: 2500,
+        currency: 'EGP',
+      }).expect(201);
+      await add(alice, id, second.body.id, {
+        category: 'ACCOMMODATION',
+        amountCents: 9000,
+        currency: 'EGP',
+      }).expect(201);
+      await http()
+        .post(`/api/itineraries/${id}/days/${dayId}/activities`)
+        .set('Cookie', alice)
+        .send({ name: 'Pyramids', costCents: 3500 })
+        .expect(201);
+      await http()
+        .post(`/api/itineraries/${id}/transport-costs`)
+        .set('Cookie', alice)
+        .send({
+          mode: 'FLIGHT',
+          fromCityId: 'cairo',
+          toCityId: 'dubai',
+          amountCents: 25000,
+          currency: 'EGP',
+          dayId,
+        })
+        .expect(201);
+
+      const res = await summaryOf(alice, id).expect(200);
+
+      expect(res.body.itineraryId).toBe(id);
+      const egp = res.body.totals.find(
+        (t: { currency: string }) => t.currency === 'EGP',
+      );
+      // 2500 food + 9000 hotel + 25000 flight (EGP); the 3500 activity is in the platform currency
+      expect(egp.totalCents).toBe(36500);
+      expect(egp.byCategory).toEqual([
+        { category: 'FOOD', totalCents: 2500 },
+        { category: 'ACCOMMODATION', totalCents: 9000 },
+        { category: 'IN_CITY_TRANSPORT', totalCents: 0 },
+        { category: 'ACTIVITIES', totalCents: 0 },
+        { category: 'INTERCITY_TRANSPORT', totalCents: 25000 },
+      ]);
+      expect(
+        egp.byDay.map((d: { totalCents: number }) => d.totalCents),
+      ).toEqual([27500, 9000]);
+      for (const total of res.body.totals) {
+        const byCategory = total.byCategory.reduce(
+          (sum: number, c: { totalCents: number }) => sum + c.totalCents,
+          0,
+        );
+        const byDay = total.byDay.reduce(
+          (sum: number, d: { totalCents: number }) => sum + d.totalCents,
+          0,
+        );
+        expect(byCategory).toBe(total.totalCents);
+        expect(byDay).toBe(total.totalCents);
+      }
+      const platform = res.body.totals.find(
+        (t: { currency: string }) => t.currency === res.body.platformCurrency,
+      );
+      expect(platform.byCategory).toContainEqual({
+        category: 'ACTIVITIES',
+        totalCents: 3500,
+      });
+    });
+
+    it('summary: no totals for an itinerary without costs; 400 for a malformed id', async () => {
+      const { id } = await withDay();
+      const res = await summaryOf(alice, id).expect(200);
+      expect(res.body.totals).toEqual([]);
+      await summaryOf(alice, 'not-an-id').expect(400);
+    });
+
+    it('deleting the day or the itinerary deletes its entries and they stop counting', async () => {
+      const { id, dayId } = await withDay();
+      await add(alice, id, dayId, entry).expect(201);
+
+      await http()
+        .delete(`/api/itineraries/${id}/days/${dayId}`)
+        .set('Cookie', alice)
+        .expect(204);
+
+      const itinerary = await http()
+        .get(`/api/itineraries/${id}`)
+        .set('Cookie', alice)
+        .expect(200);
+      expect(itinerary.body.budgets).toEqual([]);
+      expect((await summaryOf(alice, id).expect(200)).body.totals).toEqual([]);
+
+      const other = await withDay();
+      await add(alice, other.id, other.dayId, entry).expect(201);
+      await http()
+        .delete(`/api/itineraries/${other.id}`)
+        .set('Cookie', alice)
+        .expect(204);
+      await summaryOf(alice, other.id).expect(404);
     });
   });
 
@@ -1773,6 +2382,14 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
       expect(
         res.body.paths['/api/itineraries/public/search'].get.tags,
       ).toContain('itineraries');
+      expect(
+        res.body.paths['/api/itineraries/{id}/days/{dayId}/budgets'].post.tags,
+      ).toContain('itineraries');
+      expect(
+        res.body.paths['/api/itineraries/{id}/budget-summary'].get,
+      ).toBeDefined();
+      expect(res.body.paths['/api/budgets/{id}'].patch).toBeDefined();
+      expect(res.body.paths['/api/budgets/{id}'].delete).toBeDefined();
     });
   });
 });

@@ -11,10 +11,32 @@ export interface CabinOption {
   availableSeats: number;
 }
 
+export interface FlightCabinDetails extends CabinOption {
+  freeBags: number;
+  maxBagWeightKg: number;
+}
+
 /** Reads cabins for flight search (FLT-11, FLT-15). */
 @Injectable()
 export class FlightCabinsReader {
   constructor(@InjectModel(Cabin.name) private readonly model: Model<Cabin>) {}
+
+  /** All cabins for a flight, including sold-out cabins, ordered by price then class. */
+  async findForFlight(flightId: Types.ObjectId): Promise<FlightCabinDetails[]> {
+    const rows = await this.model
+      .find({ flightId })
+      .sort({ priceCents: 1, cabinClass: 1 })
+      .lean<CabinLean[]>()
+      .exec();
+
+    return rows.map((row) => ({
+      cabinClass: row.cabinClass,
+      priceCents: row.priceCents,
+      availableSeats: availableSeats(row),
+      freeBags: row.freeBags,
+      maxBagWeightKg: row.maxBagWeightKg,
+    }));
+  }
 
   /** Cabins with at least `seats` available, grouped by flight id, cheapest first. */
   async findWithSeats(

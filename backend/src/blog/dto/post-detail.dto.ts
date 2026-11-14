@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Post } from '../schemas/post.schema';
+import { CommentResponseDto } from './comment-response.dto';
 import { PostImageDto } from './create-post.dto';
 import { PostAuthorDto } from './post-list-row.dto';
 
@@ -39,15 +40,16 @@ export class PostDetailDto {
   commentCount: number;
 
   @ApiProperty({
-    type: [Object],
+    type: [CommentResponseDto],
     description:
-      'Empty until comments (BLG-05) are merged; BLG-05 replaces this with the real comment shape.',
+      'First page of visible comments, oldest first. Logged-in users can retrieve further pages through GET /api/posts/:id/comments.',
   })
-  comments: Record<string, unknown>[];
+  comments: CommentResponseDto[];
 
   static fromLean(
     doc: Post & { _id: { toString(): string } },
     authorName: string,
+    comments: CommentResponseDto[] = [],
   ): PostDetailDto {
     return {
       id: doc._id.toString(),
@@ -62,7 +64,7 @@ export class PostDetailDto {
       createdAt: (doc.createdAt ?? new Date(0)).toISOString(),
       likeCount: doc.likeCount ?? 0,
       commentCount: doc.commentCount ?? 0,
-      comments: [],
+      comments,
     };
   }
 }

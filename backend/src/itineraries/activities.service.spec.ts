@@ -101,6 +101,7 @@ describe('ActivitiesService (ITN-10) with an isolated MongoDB', () => {
         time: null,
         costCents: null,
         currency: PLATFORM_CURRENCY,
+        images: [],
       });
       expect(await storedCount(id)).toBe(1);
     });

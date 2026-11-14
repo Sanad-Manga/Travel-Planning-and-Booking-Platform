@@ -15,5 +15,16 @@ export const ROOM_MAX_OCCUPANCY = 50;
 // Upper bound only to keep the value a safe integer / sane (100 000.00 per night).
 export const ROOM_MAX_PRICE_CENTS = 10_000_000;
 
+// HTL-09 check-in / check-out time of day: 24-hour "HH:mm", 00:00 to 23:59, two digits each ("9:00" is rejected).
+export const HOTEL_TIME_OF_DAY_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+// HTL-10 cancellation tiers. A threshold is a whole number of days; a year ahead is more than any booking allows.
+export const HOTEL_MAX_CANCELLATION_TIERS = 20;
+export const HOTEL_MAX_TIER_DAYS = 365;
+
 // HTL-04: bounded child data embedded in the room, so the no-overlap rule can be one atomic update.
 export const ROOM_MAX_AVAILABILITY_RANGES = 100;
+
+// HTL-11 search input limits: module-local, they only keep the room-combination check small (the ticket sets none).
+export const HOTEL_SEARCH_MAX_GUESTS = 100;
+export const HOTEL_SEARCH_MAX_ROOMS = 10;
