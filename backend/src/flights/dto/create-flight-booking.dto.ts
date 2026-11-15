@@ -8,6 +8,7 @@ import {
   IsMongoId,
   IsNotEmpty,
   IsNumber,
+  IsOptional,
   IsString,
   MaxLength,
   Min,
@@ -79,8 +80,53 @@ export class BookingPassengerDto {
 export class CreateFlightBookingDto {
   @ApiProperty({
     example: '674a1b2c3d4e5f6a7b8c9d0e',
-    description: 'Id of the flight (from the search results)',
+    description:
+      'One-way flight id. For a round trip, provide two segments instead.',
+    required: false,
   })
+  @IsOptional()
+  @Transform(trim)
+  @IsMongoId({ message: 'flightId must be a valid id' })
+  flightId?: string;
+
+  @ApiProperty({
+    enum: CabinClass,
+    example: CabinClass.ECONOMY,
+    required: false,
+  })
+  @IsOptional()
+  @IsEnum(CabinClass, {
+    message:
+      'cabinClass must be one of: ECONOMY, PREMIUM_ECONOMY, BUSINESS, FIRST',
+  })
+  cabinClass?: CabinClass;
+
+  @ApiPropertyOptional({
+    type: () => [CreateFlightBookingSegmentDto],
+    minItems: 2,
+    maxItems: 2,
+    description:
+      'Outbound then return flight. Each segment may use a different cabin class.',
+  })
+  @IsOptional()
+  @IsArray({ message: 'segments must be an array' })
+  @ArrayMinSize(2, { message: 'segments must contain outbound and return legs' })
+  @ArrayMaxSize(2, { message: 'segments must contain exactly two legs' })
+  @ValidateNested({ each: true })
+  @Type(() => CreateFlightBookingSegmentDto)
+  segments?: CreateFlightBookingSegmentDto[];
+
+  @ApiProperty({ type: [BookingPassengerDto], minItems: 1, maxItems: 300 })
+  @IsArray({ message: 'passengers must be an array' })
+  @ArrayMinSize(1, { message: 'at least one passenger is required' })
+  @ArrayMaxSize(300, { message: 'passengers must contain at most 300 people' })
+  @ValidateNested({ each: true })
+  @Type(() => BookingPassengerDto)
+  passengers: BookingPassengerDto[];
+}
+
+export class CreateFlightBookingSegmentDto {
+  @ApiProperty({ example: '674a1b2c3d4e5f6a7b8c9d0e' })
   @Transform(trim)
   @IsMongoId({ message: 'flightId must be a valid id' })
   flightId: string;
@@ -91,12 +137,4 @@ export class CreateFlightBookingDto {
       'cabinClass must be one of: ECONOMY, PREMIUM_ECONOMY, BUSINESS, FIRST',
   })
   cabinClass: CabinClass;
-
-  @ApiProperty({ type: [BookingPassengerDto], minItems: 1, maxItems: 300 })
-  @IsArray({ message: 'passengers must be an array' })
-  @ArrayMinSize(1, { message: 'at least one passenger is required' })
-  @ArrayMaxSize(300, { message: 'passengers must contain at most 300 people' })
-  @ValidateNested({ each: true })
-  @Type(() => BookingPassengerDto)
-  passengers: BookingPassengerDto[];
 }

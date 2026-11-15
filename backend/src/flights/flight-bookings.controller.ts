@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+} from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
@@ -8,6 +16,7 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiServiceUnavailableResponse,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
@@ -20,6 +29,7 @@ import {
 } from '../common';
 import { FlightBookingResponseDto } from './dto/flight-booking-response.dto';
 import { CreateFlightBookingDto } from './dto/create-flight-booking.dto';
+import { FlightBookingCancellationResponseDto } from './dto/flight-booking-cancellation-response.dto';
 import { FlightBookingSummaryResponseDto } from './dto/flight-booking-summary-response.dto';
 import { HoldFlightBookingDto } from './dto/hold-flight-booking.dto';
 import { FlightBookingsService } from './flight-bookings.service';
@@ -93,6 +103,40 @@ export class FlightBookingsController {
     @Body() dto: CreateFlightBookingDto,
   ) {
     return this.bookings.create(user, dto);
+  }
+
+  @Post(':id/cancel')
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.USER)
+  @ApiOperation({
+    summary: 'Cancel a confirmed flight booking - FLT-12',
+    description:
+      'Cancels every segment using the outbound airline cancellation tiers. Until Payments RefundsService.issue is available, cancellation with a positive refund returns 503 and changes nothing.',
+  })
+  @ApiOkResponse({ type: FlightBookingCancellationResponseDto })
+  @ApiForbiddenResponse({
+    type: ErrorResponseDto,
+    description: 'Only travelers (role USER) can cancel flight bookings',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'The booking is unknown or belongs to another traveler',
+  })
+  @ApiConflictResponse({
+    type: ErrorResponseDto,
+    description:
+      'The booking is not confirmed or the outbound flight has departed',
+  })
+  @ApiServiceUnavailableResponse({
+    type: ErrorResponseDto,
+    description:
+      'A positive refund is due, but Payments RefundsService.issue is not integrated; the booking remains confirmed',
+  })
+  cancel(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ) {
+    return this.bookings.cancel(user, id);
   }
 
   @Post('hold')

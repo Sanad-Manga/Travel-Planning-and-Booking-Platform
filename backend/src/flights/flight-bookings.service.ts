@@ -4,6 +4,7 @@ import {
   InternalServerErrorException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model, Types } from 'mongoose';
@@ -11,20 +12,23 @@ import {
   AuthenticatedUser,
   BookingStatus,
   BookingType,
+  CabinClass,
   HOLD_MINUTES,
   isCalendarDate,
   PassengerType,
   PLATFORM_CURRENCY,
 } from '../common';
 import { AirlinesService } from '../airlines';
-import { BookingLifecycle } from '../payments';
+import { BookingLifecycle, RefundCalculator } from '../payments';
 import { FlightInventoryService } from './flight-inventory.service';
 import {
   FlightBookingResponseDto,
   toBookingPassengerResponse,
+  toFlightBookingSegmentResponse,
   toFlightBookingResponse,
 } from './dto/flight-booking-response.dto';
 import { CreateFlightBookingDto } from './dto/create-flight-booking.dto';
+import { FlightBookingCancellationResponseDto } from './dto/flight-booking-cancellation-response.dto';
 import { FlightBookingSummaryResponseDto } from './dto/flight-booking-summary-response.dto';
 import { HoldFlightBookingDto } from './dto/hold-flight-booking.dto';
 import { FlightBookingProvider } from './flight-booking.provider';
@@ -32,6 +36,8 @@ import {
   BookingPassenger,
   FlightBooking,
   FlightBookingLean,
+  FlightBookingSegment,
+  getFlightBookingSegments,
 } from './schemas/flight-booking.schema';
 import { Flight, FlightLean } from './schemas/flight.schema';
 import { toFlightResponse } from './dto/flight-response.dto';
@@ -84,6 +90,17 @@ function passengerTypeFor(
   return PassengerType.ADULT;
 }
 
+interface RequestedSegment {
+  flightId: string;
+  cabinClass: CabinClass;
+}
+
+interface PreparedSegment {
+  flight: FlightLean;
+  cabinClass: CabinClass;
+  baggageFeeCents: number;
+}
+
 @Injectable()
 export class FlightBookingsService {
   constructor(
@@ -104,9 +121,38 @@ export class FlightBookingsService {
     dto: CreateFlightBookingDto,
     now: Date = new Date(),
   ): Promise<FlightBookingResponseDto> {
-    const flight = await this.inventory.loadBookableFlight(dto.flightId, now);
+    const requestedSegments = this.requestedSegments(dto);
+    const flights = await Promise.all(
+      requestedSegments.map((segment) =>
+        this.inventory.loadBookableFlight(segment.flightId, now),
+      ),
+    );
+    if (flights.length === 2) {
+      const [outbound, returning] = flights;
+      if (
+        outbound.departureAirport !== returning.arrivalAirport ||
+        outbound.arrivalAirport !== returning.departureAirport
+      ) {
+        throw inputError(
+          'segments.1.flightId',
+          'return flight must reverse the outbound route',
+        );
+      }
+      if (returning.departureAt.getTime() <= outbound.arrivalAt.getTime()) {
+        throw inputError(
+          'segments.1.flightId',
+          'return flight must depart after the outbound flight arrives',
+        );
+      }
+    }
+
+    const outbound = flights[0];
     const passengerTypes = dto.passengers.map((passenger, index) =>
-      passengerTypeFor(passenger.dateOfBirth, flight.departureLocalDate, index),
+      passengerTypeFor(
+        passenger.dateOfBirth,
+        outbound.departureLocalDate,
+        index,
+      ),
     );
     const passengerCounts: PassengerCountsInput = {
       adults: passengerTypes.filter((type) => type === PassengerType.ADULT)
@@ -132,23 +178,39 @@ export class FlightBookingsService {
     const hasExtraBags = dto.passengers.some(
       (passenger) => (passenger.extraBags?.length ?? 0) > 0,
     );
-    const baggagePolicy = hasExtraBags
-      ? await this.airlines.getBaggagePolicy(flight.airlineId.toString())
-      : null;
-    if (hasExtraBags && !baggagePolicy) {
+    const baggagePolicies = hasExtraBags
+      ? await Promise.all(
+          flights.map((flight) =>
+            this.airlines.getBaggagePolicy(flight.airlineId.toString()),
+          ),
+        )
+      : flights.map(() => null);
+    if (hasExtraBags && baggagePolicies.some((policy) => policy === null)) {
       throw inputError(
         'passengers',
-        'extra baggage is not available for this airline',
+        'extra baggage must be available for every flight segment',
       );
     }
 
     const passengers: BookingPassenger[] = dto.passengers.map(
       (passenger, index) => {
         const extraBags = passenger.extraBags ?? [];
-        if (baggagePolicy && extraBags.length > baggagePolicy.maxExtraBags) {
+        let baggageFeeCents = 0;
+        baggagePolicies.forEach((policy) => {
+          if (!policy) return;
+          if (extraBags.length > policy.maxExtraBags) {
+            throw inputError(
+              `passengers.${index}.extraBags`,
+              `no more than ${policy.maxExtraBags} extra bags may be added per passenger on each flight segment`,
+            );
+          }
+          baggageFeeCents +=
+            extraBags.length * policy.extraBagPriceCents;
+        });
+        if (!Number.isSafeInteger(baggageFeeCents)) {
           throw inputError(
             `passengers.${index}.extraBags`,
-            `no more than ${baggagePolicy.maxExtraBags} extra bags may be added per passenger`,
+            'the baggage fee exceeds the supported amount',
           );
         }
         return {
@@ -157,8 +219,7 @@ export class FlightBookingsService {
           passportOrIdNumber: passenger.passportOrIdNumber,
           passengerType: passengerTypes[index],
           extraBags,
-          baggageFeeCents:
-            extraBags.length * (baggagePolicy?.extraBagPriceCents ?? 0),
+          baggageFeeCents,
         };
       },
     );
@@ -173,15 +234,50 @@ export class FlightBookingsService {
       );
     }
 
+    const segments: PreparedSegment[] = flights.map((flight, index) => ({
+      flight,
+      cabinClass: requestedSegments[index].cabinClass,
+      baggageFeeCents: passengers.reduce(
+        (total, passenger) =>
+          total +
+          passenger.extraBags.length *
+            (baggagePolicies[index]?.extraBagPriceCents ?? 0),
+        0,
+      ),
+    }));
     return this.createPendingBooking(
       user,
-      flight,
-      dto.cabinClass,
+      segments,
       passengerCounts,
       passengers,
-      baggageFeeCents,
       now,
     );
+  }
+
+  private requestedSegments(dto: CreateFlightBookingDto): RequestedSegment[] {
+    if (dto.segments !== undefined) {
+      if (dto.flightId !== undefined || dto.cabinClass !== undefined) {
+        throw inputError(
+          'segments',
+          'use either segments or the one-way flightId and cabinClass fields',
+        );
+      }
+      if (dto.segments.length !== 2) {
+        throw inputError(
+          'segments',
+          'a round-trip booking must contain outbound and return legs',
+        );
+      }
+      return dto.segments;
+    }
+
+    if (dto.flightId === undefined || dto.cabinClass === undefined) {
+      throw inputError(
+        'flightId',
+        'provide flightId and cabinClass for a one-way booking, or two segments for a round trip',
+      );
+    }
+    return [{ flightId: dto.flightId, cabinClass: dto.cabinClass }];
   }
 
   /** FLT-21: show the pending summary only to its owner, resolving an overdue hold before returning it. */
@@ -219,15 +315,33 @@ export class FlightBookingsService {
       );
     }
 
-    const flight = await this.flights
-      .findById(booking.flightId)
-      .lean<FlightLean>()
-      .exec();
-    if (!flight) throw new NotFoundException('Flight not found');
+    const segments = getFlightBookingSegments(booking);
+    const segmentFlights = await Promise.all(
+      segments.map((segment) =>
+        this.flights.findById(segment.flightId).lean<FlightLean>().exec(),
+      ),
+    );
+    const summarySegments = segments.map((segment, index) => {
+      const flight = segmentFlights[index];
+      if (!flight) {
+        throw new NotFoundException('A booked flight segment was not found');
+      }
+      return {
+        ...toFlightBookingSegmentResponse(segment),
+        flight: toFlightResponse(flight),
+      };
+    });
+    const outboundSummary = summarySegments[0];
+    if (!outboundSummary) {
+      throw new InternalServerErrorException(
+        'The flight booking has no outbound segment',
+      );
+    }
 
     return {
       id: booking._id.toString(),
-      flight: toFlightResponse(flight),
+      flight: outboundSummary.flight,
+      segments: summarySegments,
       cabinClass: booking.cabinClass,
       passengerCounts: {
         adults: booking.passengerCounts.adults,
@@ -240,6 +354,89 @@ export class FlightBookingsService {
       currency: payable.currency,
       status: payable.status,
       holdExpiresAt: payable.holdExpiresAt?.toISOString() ?? null,
+    };
+  }
+
+  /** FLT-12: cancel every confirmed segment; cancellation terms always come from the outbound airline. */
+  async cancel(
+    user: AuthenticatedUser,
+    id: string,
+    now: Date = new Date(),
+  ): Promise<FlightBookingCancellationResponseDto> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new NotFoundException('Flight booking not found');
+    }
+    const booking = await this.model
+      .findOne({
+        _id: new Types.ObjectId(id),
+        userId: new Types.ObjectId(user.userId),
+      })
+      .lean<FlightBookingLean>()
+      .exec();
+    if (!booking) throw new NotFoundException('Flight booking not found');
+    if (booking.status !== BookingStatus.CONFIRMED) {
+      throw new ConflictException(
+        'Only confirmed flight bookings can be cancelled',
+      );
+    }
+
+    const segments = getFlightBookingSegments(booking);
+    const outbound = segments[0];
+    if (!outbound) {
+      throw new InternalServerErrorException(
+        'The flight booking has no outbound segment',
+      );
+    }
+    const outboundFlight = await this.flights
+      .findById(outbound.flightId)
+      .lean<FlightLean>()
+      .exec();
+    if (!outboundFlight) {
+      throw new NotFoundException('The outbound flight was not found');
+    }
+    if (outboundFlight.departureAt.getTime() <= now.getTime()) {
+      throw new ConflictException(
+        'A flight booking cannot be cancelled after the outbound flight departs',
+      );
+    }
+
+    const daysBefore =
+      (outboundFlight.departureAt.getTime() - now.getTime()) / 86_400_000;
+    const tiers = await this.airlines.getCancellationTiers(
+      outbound.airlineId.toString(),
+    );
+    const refundAmountCents = RefundCalculator.compute({
+      tiers,
+      daysBefore,
+      totalCents: booking.totalCents,
+    });
+
+    if (refundAmountCents > 0) {
+      throw new ServiceUnavailableException({
+        message:
+          'Cancellation refund issuance is unavailable; the booking was not cancelled',
+        details: [
+          {
+            field: 'refundAmountCents',
+            message:
+              'Payments RefundsService.issue must be integrated before positive-refund cancellations can complete',
+          },
+        ],
+      });
+    }
+
+    await this.bookingLifecycle.transition(
+      BookingType.FLIGHT,
+      id,
+      BookingStatus.CANCELLED,
+    );
+
+    return {
+      id,
+      status: BookingStatus.CANCELLED,
+      refundAmountCents,
+      currency: booking.currency,
+      segments: segments.map(toFlightBookingSegmentResponse),
     };
   }
 
@@ -270,77 +467,113 @@ export class FlightBookingsService {
     };
     return this.createPendingBooking(
       user,
-      flight,
-      dto.cabinClass,
+      [{ flight, cabinClass: dto.cabinClass, baggageFeeCents: 0 }],
       counts,
       undefined,
-      0,
       now,
     );
   }
 
   private async createPendingBooking(
     user: AuthenticatedUser,
-    flight: Awaited<ReturnType<FlightInventoryService['loadBookableFlight']>>,
-    cabinClass: HoldFlightBookingDto['cabinClass'],
+    requestedSegments: PreparedSegment[],
     passengerCounts: PassengerCountsInput,
     passengers: BookingPassenger[] | undefined,
-    baggageFeeCents: number,
     now: Date,
   ): Promise<FlightBookingResponseDto> {
     const seats = seatsNeeded(passengerCounts);
     const holdExpiresAt = new Date(now.getTime() + HOLD_MINUTES * 60_000);
 
-    // connection.transaction() commits on success, aborts when the callback throws, and retries on the
-    // transient errors MongoDB raises when parallel requests collide.
+    // Both legs and their seat counters commit together; any failed hold aborts the transaction.
     let booking: FlightBookingLean | undefined;
     await this.connection.transaction(async (session) => {
-      const cabin = await this.inventory.holdSeats(
-        flight._id,
-        cabinClass,
-        seats,
-        session,
-      );
-      if (!cabin) {
-        if (
-          !(await this.inventory.cabinExists(flight._id, cabinClass, session))
-        ) {
-          throw new NotFoundException('This flight has no such cabin');
-        }
-        throw new ConflictException('Not enough seats left in this cabin');
-      }
-
-      passengers?.forEach((passenger, passengerIndex) => {
-        passenger.extraBags.forEach((bag, bagIndex) => {
-          if (bag.weightKg > cabin.maxBagWeightKg) {
-            throw inputError(
-              `passengers.${passengerIndex}.extraBags.${bagIndex}.weightKg`,
-              `weightKg must be at most ${cabin.maxBagWeightKg} kg for this cabin`,
+      const segments: FlightBookingSegment[] = [];
+      let totalCents = 0;
+      for (const [index, requested] of requestedSegments.entries()) {
+        const cabin = await this.inventory.holdSeats(
+          requested.flight._id,
+          requested.cabinClass,
+          seats,
+          session,
+        );
+        if (!cabin) {
+          if (
+            !(await this.inventory.cabinExists(
+              requested.flight._id,
+              requested.cabinClass,
+              session,
+            ))
+          ) {
+            throw new NotFoundException(
+              `Flight segment ${index + 1} has no such cabin`,
             );
           }
-        });
-      });
+          throw new ConflictException(
+            `Not enough seats left in flight segment ${index + 1}`,
+          );
+        }
 
-      // The fare comes from the cabin document the hold just updated, so price and seats always agree.
-      const fare = cabin.priceCents;
+        passengers?.forEach((passenger, passengerIndex) => {
+          passenger.extraBags.forEach((bag, bagIndex) => {
+            if (bag.weightKg > cabin.maxBagWeightKg) {
+              throw inputError(
+                `passengers.${passengerIndex}.extraBags.${bagIndex}.weightKg`,
+                `weightKg must be at most ${cabin.maxBagWeightKg} kg for flight segment ${index + 1}`,
+              );
+            }
+          });
+        });
+
+        const fare = cabin.priceCents;
+        const infantFare = infantFareCents(fare);
+        segments.push({
+          flightId: requested.flight._id,
+          airlineId: requested.flight.airlineId,
+          cabinClass: requested.cabinClass,
+          seats,
+          farePerPassengerCents: fare,
+          infantFareCents: infantFare,
+          baggageFeeCents: requested.baggageFeeCents,
+        });
+        totalCents += bookingTotalCents(
+          fare,
+          passengerCounts,
+          requested.baggageFeeCents,
+        );
+      }
+
+      const outbound = segments[0];
+      if (!outbound || !Number.isSafeInteger(totalCents)) {
+        throw new InternalServerErrorException(
+          'The booking has invalid segment pricing',
+        );
+      }
+      const baggageFeeCents = segments.reduce(
+        (total, segment) => total + segment.baggageFeeCents,
+        0,
+      );
+      if (!Number.isSafeInteger(baggageFeeCents)) {
+        throw inputError(
+          'passengers',
+          'the baggage fee exceeds the supported amount',
+        );
+      }
+
       const [created] = await this.model.create(
         [
           {
             userId: new Types.ObjectId(user.userId),
-            airlineId: flight.airlineId,
-            flightId: flight._id,
-            cabinClass,
+            airlineId: outbound.airlineId,
+            flightId: outbound.flightId,
+            segments,
+            cabinClass: outbound.cabinClass,
             passengerCounts,
             ...(passengers ? { passengers } : {}),
             seats,
-            farePerPassengerCents: fare,
-            infantFareCents: infantFareCents(fare),
+            farePerPassengerCents: outbound.farePerPassengerCents,
+            infantFareCents: outbound.infantFareCents,
             baggageFeeCents,
-            totalCents: bookingTotalCents(
-              fare,
-              passengerCounts,
-              baggageFeeCents,
-            ),
+            totalCents,
             currency: PLATFORM_CURRENCY,
             status: BookingStatus.PENDING_PAYMENT,
             holdExpiresAt,
