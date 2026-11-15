@@ -1,9 +1,25 @@
 import { BookingStatus } from '../common';
+import type { BaggagePolicyResponseDto } from '../airlines/dto/baggage-policy.dto';
+import type { CancellationTier } from './refund-calculator';
 
 export interface BookingStatusSnapshot {
   status: BookingStatus;
   /** Only set while the booking waits for payment. */
   holdExpiresAt?: Date | null;
+}
+
+/**
+ * PAY-02: the provider's policies for one booking, plus who owns it so the caller can enforce
+ * "only the booking's owner may view/accept" (ACC-11) before returning anything. A FLIGHT
+ * booking's response has `baggagePolicy` and no check-in/out times; a HOTEL booking's has
+ * `checkInTime`/`checkOutTime` and no `baggagePolicy`.
+ */
+export interface BookingPolicies {
+  ownerId: string;
+  cancellationTiers: CancellationTier[];
+  baggagePolicy?: BaggagePolicyResponseDto | null;
+  checkInTime?: string | null;
+  checkOutTime?: string | null;
 }
 
 /**
@@ -52,4 +68,12 @@ export interface BookingProvider {
     limit: number,
     afterId?: string,
   ): Promise<string[]>;
+
+  /**
+   * PAY-02: the booking's owner id and its provider's policies (cancellation tiers, plus
+   * baggage for a flight or check-in/out times for a hotel), or null if the booking does
+   * not exist. Owners assemble this from their own airline/hotel policy getters — Payments
+   * never fetches policy content itself.
+   */
+  getPolicies(id: string): Promise<BookingPolicies | null>;
 }
