@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { PLATFORM_CURRENCY } from '../../common';
 import { BudgetCategory } from '../schemas/budget.schema';
 import { ActivityDto } from './activity.dto';
@@ -71,6 +71,25 @@ export class BudgetCurrencyTotalDto {
   byDay: BudgetDayTotalDto[];
 }
 
+export class ConvertedBudgetTotalDto {
+  @ApiProperty({ example: 'EUR' })
+  currency: string;
+
+  @ApiProperty({
+    example: 14500,
+    description:
+      'Every currency block in `totals` converted into this currency and summed, in integer cents.',
+  })
+  totalCents: number;
+
+  @ApiProperty({
+    example: '2026-11-15',
+    description:
+      'The date of the exchange rate(s) used (the oldest one, if more than one currency was converted and some rates were stale).',
+  })
+  rateDate: string;
+}
+
 export class BudgetSummaryDto {
   @ApiProperty({ example: '674a1b2c3d4e5f6a7b8c9d0e' })
   itineraryId: string;
@@ -88,6 +107,13 @@ export class BudgetSummaryDto {
       'One block per currency used. Amounts in different currencies are NOT added together here: the raw totals and their currency are exposed so the FX service (ITN-18) can convert them. Empty when the itinerary has no cost yet.',
   })
   totals: BudgetCurrencyTotalDto[];
+
+  @ApiPropertyOptional({
+    type: ConvertedBudgetTotalDto,
+    description:
+      "ITN-18: the grand total converted into the requested (or caller's preferred) currency.",
+  })
+  convertedTotal?: ConvertedBudgetTotalDto;
 }
 
 /** The part of a day the summary needs. `ItineraryDayDto` fits. */
