@@ -20,12 +20,13 @@ import {
   Role,
 } from '../common';
 import { NotificationsService } from '../notifications';
-import { BookingProvider, BookingStatusSnapshot } from '../payments/booking-provider.interface';
+import { BookingPolicies, BookingProvider, BookingStatusSnapshot } from '../payments/booking-provider.interface';
 import { BookingProviderRegistry } from '../payments/booking-provider.registry';
 import { UpcomingBookingsChecker, UpcomingBookingsRegistry } from '../users/upcoming-bookings';
 import { CreateHotelBookingDto } from './dto/create-hotel-booking.dto';
 import { HotelBookingResponseDto } from './dto/hotel-booking-response.dto';
 import { coversStay, nightsBetween, stayTotalCents, todayUtc } from './hotel-availability.rules';
+import { HotelsService } from './hotels.service';
 import { RoomReservations } from './room-reservations';
 import { Hotel } from './schemas/hotel.schema';
 import { HotelBooking, HotelBookingLean } from './schemas/hotel-booking.schema';
@@ -48,6 +49,7 @@ export class HotelBookingsService implements RoomReservations, BookingProvider, 
     private readonly bookingProviders: BookingProviderRegistry,
     private readonly upcomingBookings: UpcomingBookingsRegistry,
     private readonly notifications: NotificationsService,
+    private readonly hotelsService: HotelsService,
   ) {}
 
   onModuleInit(): void {
@@ -234,10 +236,27 @@ export class HotelBookingsService implements RoomReservations, BookingProvider, 
         type: NotificationType.BOOKING_CONFIRMED,
         title: 'Hotel reservation confirmed',
         message: 'Your payment was received and your hotel reservation is confirmed.',
-        link: `/hotel-bookings/${id}`,
       });
     }
     return outcome.kind !== 'REFUSED';
+  }
+
+  async getPolicies(id: string): Promise<BookingPolicies | null> {
+    if (!Types.ObjectId.isValid(id)) return null;
+    const booking = await this.bookings
+      .findById(id)
+      .select('userId hotelId')
+      .lean<Pick<HotelBookingLean, 'userId' | 'hotelId'>>()
+      .exec();
+    if (!booking) return null;
+
+    const policies = await this.hotelsService.getPolicies(booking.hotelId.toString());
+    return {
+      ownerId: booking.userId.toString(),
+      cancellationTiers: policies.cancellationTiers,
+      checkInTime: policies.checkInTime,
+      checkOutTime: policies.checkOutTime,
+    };
   }
 
   async findExpiredHolds(now: Date, limit: number, afterId?: string): Promise<string[]> {
@@ -310,6 +329,7 @@ export class HotelBookingsService implements RoomReservations, BookingProvider, 
    * a retried transaction then observes the committed reservation before it creates another hold.
    */
   private async serializeRoomUpdates(roomIds: Types.ObjectId[], session: ClientSession): Promise<void> {
+    // This uses the room version key to serialize competing holds; enabling optimistic concurrency on Room would also affect room edits.
     for (const roomId of [...roomIds].sort((a, b) => a.toString().localeCompare(b.toString()))) {
       const result = await this.rooms.updateOne({ _id: roomId }, { $inc: { __v: 1 } }, { session }).exec();
       if (result.matchedCount !== 1) {

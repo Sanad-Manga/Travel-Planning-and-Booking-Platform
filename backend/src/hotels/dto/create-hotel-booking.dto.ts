@@ -1,7 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import { ArrayMinSize, ArrayUnique, IsArray, IsInt, IsMongoId, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, ArrayUnique, IsArray, IsInt, IsMongoId, Min, ValidateNested } from 'class-validator';
 import { IsCalendarDate } from '../../common';
+import { HOTEL_SEARCH_MAX_ROOMS } from '../hotels.constants';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 
@@ -35,9 +36,10 @@ export class CreateHotelBookingDto {
   @IsCalendarDate()
   checkOut: string;
 
-  @ApiProperty({ type: [HotelBookingRoomDto], minItems: 1 })
+  @ApiProperty({ type: [HotelBookingRoomDto], minItems: 1, maxItems: HOTEL_SEARCH_MAX_ROOMS })
   @IsArray()
   @ArrayMinSize(1)
+  @ArrayMaxSize(HOTEL_SEARCH_MAX_ROOMS)
   @ArrayUnique((room: HotelBookingRoomDto) => room.roomId)
   @ValidateNested({ each: true })
   @Type(() => HotelBookingRoomDto)

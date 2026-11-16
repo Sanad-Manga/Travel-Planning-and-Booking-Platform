@@ -9,6 +9,7 @@ import request from 'supertest';
 import { AuthModule } from '../src/auth/auth.module';
 import { BookingStatus, BookingType, HOLD_MINUTES, Role } from '../src/common';
 import configuration from '../src/config/configuration';
+import { HOTEL_SEARCH_MAX_ROOMS } from '../src/hotels/hotels.constants';
 import { HotelBookingsService } from '../src/hotels/hotel-bookings.service';
 import { HotelBooking } from '../src/hotels/schemas/hotel-booking.schema';
 import { BookingLifecycle, BookingProviderRegistry } from '../src/payments';
@@ -74,6 +75,9 @@ describe('hotel bookings (HTL-16) over HTTP', () => {
     photos: [],
     starRating: 4,
     amenities: [],
+    cancellationTiers: [{ daysBeforeThreshold: 7, refundPercent: 50 }],
+    checkInTime: '15:00',
+    checkOutTime: '11:00',
     isActive: true,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -208,6 +212,27 @@ describe('hotel bookings (HTL-16) over HTTP', () => {
     expect(await bookingCount()).toBe(0);
   });
 
+  it('rejects more rooms than the hotel search limit', async () => {
+    const response = await http()
+      .post('/api/hotel-bookings')
+      .set('Cookie', travelerCookie)
+      .send({
+        checkIn: day(2),
+        checkOut: day(5),
+        rooms: Array.from({ length: HOTEL_SEARCH_MAX_ROOMS + 1 }, () => ({
+          roomId: new Types.ObjectId().toHexString(),
+          adults: 1,
+          children: 0,
+        })),
+      })
+      .expect(400);
+
+    expect(response.body.details).toContainEqual(
+      expect.objectContaining({ field: 'rooms', message: expect.stringContaining(`${HOTEL_SEARCH_MAX_ROOMS}`) }),
+    );
+    expect(await bookingCount()).toBe(0);
+  });
+
   it('rejects rooms from different hotels and inactive or unavailable rooms', async () => {
     const differentHotels = await http()
       .post('/api/hotel-bookings')
@@ -319,6 +344,24 @@ describe('hotel bookings (HTL-16) over HTTP', () => {
     expect(await provider.hasUpcomingConfirmedBookings(travelerId, new Date())).toBe(true);
     expect(await provider.hasUpcomingConfirmedBookings(travelerId, new Date(`${day(3)}T00:00:00.000Z`))).toBe(false);
     expect(await db.collection('notifications').countDocuments({ userId: new Types.ObjectId(travelerId) })).toBe(1);
+  });
+
+  it('provides booking ownership and hotel policies to Payments, and returns null for unknown ids', async () => {
+    const response = await http()
+      .post('/api/hotel-bookings')
+      .set('Cookie', travelerCookie)
+      .send(requestBody(roomIds.standard))
+      .expect(201);
+    const provider = app.get(HotelBookingsService);
+
+    await expect(provider.getPolicies(response.body.id)).resolves.toEqual({
+      ownerId: travelerId,
+      cancellationTiers: [{ daysBeforeThreshold: 7, refundPercent: 50 }],
+      checkInTime: '15:00',
+      checkOutTime: '11:00',
+    });
+    await expect(provider.getPolicies('not-an-object-id')).resolves.toBeNull();
+    await expect(provider.getPolicies(new Types.ObjectId().toHexString())).resolves.toBeNull();
   });
 
   it('documents the endpoint in Swagger', async () => {
