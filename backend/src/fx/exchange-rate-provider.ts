@@ -45,9 +45,17 @@ export class HttpExchangeRateProvider implements ExchangeRateProvider {
     url.searchParams.set('base', base);
     if (apiKey) url.searchParams.set('api_key', apiKey);
 
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(HttpExchangeRateProvider.TIMEOUT_MS),
-    });
+    // The request itself carries FX_API_KEY in its query string. A network-level failure from
+    // `fetch` (DNS, connection reset, timeout) can embed the request URL in its own message, so
+    // that error is never rethrown or logged as-is — only this safe, key-free message is.
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        signal: AbortSignal.timeout(HttpExchangeRateProvider.TIMEOUT_MS),
+      });
+    } catch {
+      throw new Error(`FXRatesAPI request failed for base ${base}`);
+    }
     if (!res.ok) {
       throw new Error(`FXRatesAPI responded ${res.status} ${res.statusText}`);
     }

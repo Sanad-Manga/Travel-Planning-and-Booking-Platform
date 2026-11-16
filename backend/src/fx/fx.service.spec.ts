@@ -188,4 +188,38 @@ describe('FxService', () => {
     );
     expect(provider.calls).toBe(0);
   });
+
+  it('caches under today even when the provider reports a different date, so a second call hits the cache', async () => {
+    provider.queue({ base: USD, rateDate: YESTERDAY, rates: { EUR: 0.85 } });
+    const first = await service.convert(100, USD, EUR);
+    expect(first.rateDate).toBe(TODAY);
+
+    await service.convert(100, USD, EUR);
+    expect(provider.calls).toBe(1); // the second call found the row cached under TODAY, not a miss
+  });
+
+  it('backs off from retrying a failed fetch for a few minutes, then tries again', async () => {
+    jest.useFakeTimers();
+    try {
+      provider.queue(new Error('FXRatesAPI is down'));
+      await expect(service.convert(1000, USD, EUR)).rejects.toBeInstanceOf(
+        ServiceUnavailableException,
+      );
+      expect(provider.calls).toBe(1);
+
+      // Still within the backoff window: goes straight to "nothing cached" without another fetch.
+      await expect(service.convert(1000, USD, EUR)).rejects.toBeInstanceOf(
+        ServiceUnavailableException,
+      );
+      expect(provider.calls).toBe(1);
+
+      jest.advanceTimersByTime(5 * 60_000 + 1);
+      provider.queue({ base: USD, rateDate: TODAY, rates: { EUR: 0.9 } });
+      const result = await service.convert(1000, USD, EUR);
+      expect(result).toEqual({ amount: 900, rateDate: TODAY });
+      expect(provider.calls).toBe(2);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });

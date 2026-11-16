@@ -14,7 +14,9 @@ export class FxRateRefreshJob {
 
   constructor(private readonly fx: FxService) {}
 
-  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
+  // The cache day (ExchangeRate.rateDate) is a UTC calendar date; run at UTC midnight so the cron
+  // and the lazy check in FxService.ensureTodaysRates always agree on what "today" means.
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT, { timeZone: 'UTC' })
   async handleCron(): Promise<void> {
     try {
       await this.fx.ensureTodaysRates(PLATFORM_CURRENCY);

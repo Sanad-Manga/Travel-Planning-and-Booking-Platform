@@ -29,9 +29,7 @@ import { UploadsModule } from './uploads';
     }),
     MongooseModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        uri: config.getOrThrow<string>('MONGODB_URI'),
-      }),
+      useFactory: (config: ConfigService) => ({ uri: config.getOrThrow<string>('MONGODB_URI') }),
     }),
     PaymentsModule,
     FxModule,
