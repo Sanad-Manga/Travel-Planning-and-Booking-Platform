@@ -25,4 +25,14 @@ export class BookingProviderRegistry {
       throw new Error(`No booking provider registered for ${type}`);
     return provider;
   }
+
+  /**
+   * Same lookup as {@link get}, but returns undefined instead of throwing. For a caller to
+   * whom an unregistered type is an expected, routine condition (PAY-02: HOTEL has no
+   * provider until HTL-16 lands) rather than a bug — it must turn this into its own clean
+   * 4xx, not let the global filter turn a thrown Error into a 500.
+   */
+  tryGet(type: BookingType): BookingProvider | undefined {
+    return this.providers.get(type);
+  }
 }
