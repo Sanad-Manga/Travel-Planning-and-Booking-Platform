@@ -149,21 +149,6 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       .expect(200);
   }
 
-  async function setCancellationPolicy(
-    airlineId: string,
-    moderatorCookie: string,
-    cancellationTiers: Array<{
-      daysBeforeThreshold: number;
-      refundPercent: number;
-    }>,
-  ) {
-    await http()
-      .put(`/api/airlines/${airlineId}/cancellation-policy`)
-      .set('Cookie', moderatorCookie)
-      .send({ cancellationTiers })
-      .expect(200);
-  }
-
   const expireNow = (bookingId: string) =>
     connection
       .collection('flightBookings')
@@ -702,6 +687,27 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 2 });
     });
 
+    it("documents that passenger type uses the outbound local departure date and publishes no cancellation route", async () => {
+      const docs = await http().get('/api/docs-json').expect(200);
+
+      const operation = docs.body.paths['/api/flight-bookings'].post;
+      expect(operation.description).toContain(
+        "outbound flight's local departure date",
+      );
+      expect(operation.description).toContain('ADULT 12+');
+      expect(operation.description).toContain('CHILD 2-11');
+      expect(operation.description).toContain('INFANT under 2');
+
+      expect(
+        docs.body.components.schemas.BookingPassengerDto.properties.dateOfBirth
+          .description,
+      ).toContain("outbound flight's local departure date");
+
+      expect(
+        docs.body.paths['/api/flight-bookings/{id}/cancel'],
+      ).toBeUndefined();
+    });
+
     it('creates one payable booking with two segments and holds/confirms both legs atomically', async () => {
       await setBaggagePolicy(3000, 2);
       await setBaggagePolicy(5000, 2, returnAirline.id, returnModerator);
@@ -1209,133 +1215,6 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       expect(docs.body.paths['/api/flight-bookings/{id}'].get.operationId).toBe(
         'FlightBookingsController_getSummary',
       );
-    });
-  });
-
-  describe('POST /api/flight-bookings/:id/cancel (FLT-12)', () => {
-    async function createConfirmedRoundTrip() {
-      const outboundId = await createFlight();
-      const returnId = await createFlight(
-        {
-          flightNumber: 'BB778',
-          departureAirport: 'JFK',
-          arrivalAirport: 'CAI',
-          departureLocalTime: '2090-12-02T10:00',
-          arrivalLocalTime: '2090-12-02T18:30',
-        },
-        returnModerator,
-      );
-      await addCabin(outboundId, 'ECONOMY', 10);
-      await addCabin(returnId, 'BUSINESS', 10);
-      const created = await http()
-        .post(BOOKING)
-        .set('Cookie', traveler)
-        .send({
-          segments: [
-            { flightId: outboundId, cabinClass: 'ECONOMY' },
-            { flightId: returnId, cabinClass: 'BUSINESS' },
-          ],
-          passengers: [
-            {
-              fullName: 'Adult Passenger',
-              dateOfBirth: '2078-12-01',
-              passportOrIdNumber: 'A123',
-            },
-          ],
-        })
-        .expect(201);
-      await lifecycle.confirmPaid(
-        BookingType.FLIGHT,
-        created.body.id,
-        'pi_cancel_round_trip',
-      );
-      return { id: created.body.id as string, outboundId, returnId };
-    }
-
-    it('uses the outbound policy and leaves the booking unchanged when a positive refund needs the missing Payments service', async () => {
-      const roundTrip = await createConfirmedRoundTrip();
-      await setCancellationPolicy(
-        airline.id,
-        moderator,
-        [{ daysBeforeThreshold: 0, refundPercent: 100 }],
-      );
-      await setCancellationPolicy(
-        returnAirline.id,
-        returnModerator,
-        [{ daysBeforeThreshold: 0, refundPercent: 0 }],
-      );
-
-      const res = await http()
-        .post(`${BOOKING}/${roundTrip.id}/cancel`)
-        .set('Cookie', traveler)
-        .expect(503);
-
-      expect(res.body.details).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ field: 'refundAmountCents' }),
-        ]),
-      );
-      const stored = await connection
-        .collection('flightBookings')
-        .findOne({ _id: new Types.ObjectId(roundTrip.id) });
-      expect(stored?.status).toBe(BookingStatus.CONFIRMED);
-      expect(await cabinOf(roundTrip.outboundId, 'ECONOMY')).toMatchObject({
-        bookedSeats: 1,
-      });
-      expect(await cabinOf(roundTrip.returnId, 'BUSINESS')).toMatchObject({
-        bookedSeats: 1,
-      });
-    });
-
-    it('cancels both legs and releases both inventories when the outbound tier refunds zero', async () => {
-      const roundTrip = await createConfirmedRoundTrip();
-      await setCancellationPolicy(
-        airline.id,
-        moderator,
-        [{ daysBeforeThreshold: 0, refundPercent: 0 }],
-      );
-      await setCancellationPolicy(
-        returnAirline.id,
-        returnModerator,
-        [{ daysBeforeThreshold: 0, refundPercent: 100 }],
-      );
-
-      const res = await http()
-        .post(`${BOOKING}/${roundTrip.id}/cancel`)
-        .set('Cookie', traveler)
-        .expect(200);
-
-      expect(res.body).toMatchObject({
-        id: roundTrip.id,
-        status: BookingStatus.CANCELLED,
-        refundAmountCents: 0,
-        segments: [{ flightId: roundTrip.outboundId }, { flightId: roundTrip.returnId }],
-      });
-      expect(await cabinOf(roundTrip.outboundId, 'ECONOMY')).toMatchObject({
-        bookedSeats: 0,
-      });
-      expect(await cabinOf(roundTrip.returnId, 'BUSINESS')).toMatchObject({
-        bookedSeats: 0,
-      });
-    });
-
-    it("hides another traveler's booking and documents the endpoint and placeholder error in Swagger", async () => {
-      const roundTrip = await createConfirmedRoundTrip();
-      await http()
-        .post(`${BOOKING}/${roundTrip.id}/cancel`)
-        .set('Cookie', otherTraveler)
-        .expect(404);
-      await http()
-        .post(`${BOOKING}/${roundTrip.id}/cancel`)
-        .set('Cookie', admin)
-        .expect(403);
-
-      const docs = await http().get('/api/docs-json').expect(200);
-      const operation =
-        docs.body.paths['/api/flight-bookings/{id}/cancel'].post;
-      expect(operation.responses['200']).toBeDefined();
-      expect(operation.responses['409']).toBeDefined();
-      expect(operation.responses['503']).toBeDefined();
     });
   });
 

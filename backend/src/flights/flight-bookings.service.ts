@@ -4,7 +4,6 @@ import {
   InternalServerErrorException,
   Injectable,
   NotFoundException,
-  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model, Types } from 'mongoose';
@@ -19,7 +18,7 @@ import {
   PLATFORM_CURRENCY,
 } from '../common';
 import { AirlinesService } from '../airlines';
-import { BookingLifecycle, RefundCalculator } from '../payments';
+import { BookingLifecycle } from '../payments';
 import { FlightInventoryService } from './flight-inventory.service';
 import {
   FlightBookingResponseDto,
@@ -28,7 +27,6 @@ import {
   toFlightBookingResponse,
 } from './dto/flight-booking-response.dto';
 import { CreateFlightBookingDto } from './dto/create-flight-booking.dto';
-import { FlightBookingCancellationResponseDto } from './dto/flight-booking-cancellation-response.dto';
 import { FlightBookingSummaryResponseDto } from './dto/flight-booking-summary-response.dto';
 import { HoldFlightBookingDto } from './dto/hold-flight-booking.dto';
 import { FlightBookingProvider } from './flight-booking.provider';
@@ -354,89 +352,6 @@ export class FlightBookingsService {
       currency: payable.currency,
       status: payable.status,
       holdExpiresAt: payable.holdExpiresAt?.toISOString() ?? null,
-    };
-  }
-
-  /** FLT-12: cancel every confirmed segment; cancellation terms always come from the outbound airline. */
-  async cancel(
-    user: AuthenticatedUser,
-    id: string,
-    now: Date = new Date(),
-  ): Promise<FlightBookingCancellationResponseDto> {
-    if (!Types.ObjectId.isValid(id)) {
-      throw new NotFoundException('Flight booking not found');
-    }
-    const booking = await this.model
-      .findOne({
-        _id: new Types.ObjectId(id),
-        userId: new Types.ObjectId(user.userId),
-      })
-      .lean<FlightBookingLean>()
-      .exec();
-    if (!booking) throw new NotFoundException('Flight booking not found');
-    if (booking.status !== BookingStatus.CONFIRMED) {
-      throw new ConflictException(
-        'Only confirmed flight bookings can be cancelled',
-      );
-    }
-
-    const segments = getFlightBookingSegments(booking);
-    const outbound = segments[0];
-    if (!outbound) {
-      throw new InternalServerErrorException(
-        'The flight booking has no outbound segment',
-      );
-    }
-    const outboundFlight = await this.flights
-      .findById(outbound.flightId)
-      .lean<FlightLean>()
-      .exec();
-    if (!outboundFlight) {
-      throw new NotFoundException('The outbound flight was not found');
-    }
-    if (outboundFlight.departureAt.getTime() <= now.getTime()) {
-      throw new ConflictException(
-        'A flight booking cannot be cancelled after the outbound flight departs',
-      );
-    }
-
-    const daysBefore =
-      (outboundFlight.departureAt.getTime() - now.getTime()) / 86_400_000;
-    const tiers = await this.airlines.getCancellationTiers(
-      outbound.airlineId.toString(),
-    );
-    const refundAmountCents = RefundCalculator.compute({
-      tiers,
-      daysBefore,
-      totalCents: booking.totalCents,
-    });
-
-    if (refundAmountCents > 0) {
-      throw new ServiceUnavailableException({
-        message:
-          'Cancellation refund issuance is unavailable; the booking was not cancelled',
-        details: [
-          {
-            field: 'refundAmountCents',
-            message:
-              'Payments RefundsService.issue must be integrated before positive-refund cancellations can complete',
-          },
-        ],
-      });
-    }
-
-    await this.bookingLifecycle.transition(
-      BookingType.FLIGHT,
-      id,
-      BookingStatus.CANCELLED,
-    );
-
-    return {
-      id,
-      status: BookingStatus.CANCELLED,
-      refundAmountCents,
-      currency: booking.currency,
-      segments: segments.map(toFlightBookingSegmentResponse),
     };
   }
 
