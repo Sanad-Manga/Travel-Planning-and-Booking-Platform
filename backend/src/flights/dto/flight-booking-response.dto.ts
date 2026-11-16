@@ -27,7 +27,12 @@ export class BookingPassengerResponseDto {
   })
   dateOfBirth: string;
 
-  @ApiProperty({ enum: PassengerType, example: PassengerType.CHILD })
+  @ApiProperty({
+    enum: PassengerType,
+    example: PassengerType.CHILD,
+    description:
+      "Age group on the outbound flight's local departure date: ADULT 12+, CHILD 2-11, INFANT under 2",
+  })
   passengerType: PassengerType;
 
   @ApiProperty({ type: [ExtraBagResponseDto] })

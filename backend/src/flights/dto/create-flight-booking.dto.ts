@@ -45,7 +45,8 @@ export class BookingPassengerDto {
 
   @ApiProperty({
     example: '2010-05-21',
-    description: 'Date of birth in YYYY-MM-DD format',
+    description:
+      "Date of birth in YYYY-MM-DD format. Passenger type is derived from age on the outbound flight's local departure date: ADULT 12+, CHILD 2-11, INFANT under 2.",
   })
   @IsCalendarDate()
   dateOfBirth: string;
