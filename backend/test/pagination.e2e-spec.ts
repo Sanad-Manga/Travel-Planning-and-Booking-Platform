@@ -82,8 +82,10 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
   /**
    * GETs that take page and limit but are NOT lists. The post page pages only its embedded first batch of
    * comments; the real comment list is /api/posts/{id}/comments, which is in the table above.
+   * Likewise the hotel page (HTL-02) pages only its embedded free rooms; the real list is
+   * /api/hotels/{id}/rooms/available, which is in the table above.
    */
-  const NOT_LISTS = ['/api/posts/{id}'];
+  const NOT_LISTS = ['/api/posts/{id}', '/api/hotels/{id}'];
 
   const ROUTES: ListRoute[] = [
     { swagger: '/api/admin/accounts', url: '/api/admin/accounts', auth: 'admin', total: 2 },
