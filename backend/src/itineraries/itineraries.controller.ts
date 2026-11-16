@@ -35,6 +35,7 @@ import { ActivitiesService } from './activities.service';
 import { ActivityDto } from './dto/activity.dto';
 import { BudgetsService } from './budgets.service';
 import { BudgetSummaryDto } from './dto/budget-summary.dto';
+import { BudgetSummaryQueryDto } from './dto/budget-summary-query.dto';
 import { BudgetDto } from './dto/budget.dto';
 import { CreateBudgetDto } from './dto/create-budget.dto';
 import { CreateActivityDto } from './dto/create-activity.dto';
@@ -296,12 +297,15 @@ export class ItinerariesController {
   @Get(':id/budget-summary')
   @ApiOperation({
     summary:
-      'Total budget of my itinerary by category and by day, per currency: budget entries, activity costs and intercity transport - ITN-14',
+      'Total budget of my itinerary by category and by day, per currency: budget entries, activity costs and intercity transport - ITN-14/ITN-18',
+    description:
+      "Also returns convertedTotal, the grand total converted into ?currency= (or the caller's preferred currency) via daily cached exchange rates (ITN-18).",
   })
   @ApiOkResponse({ type: BudgetSummaryDto })
   @ApiBadRequestResponse({
     type: ErrorResponseDto,
-    description: 'id is not a valid id',
+    description:
+      'id is not a valid id, or currency is not a 3-letter code / is unsupported',
   })
   @ApiNotFoundResponse({
     type: ErrorResponseDto,
@@ -310,8 +314,9 @@ export class ItinerariesController {
   budgetSummary(
     @CurrentUser() user: AuthenticatedUser,
     @Param() params: ItineraryIdParamDto,
+    @Query() query: BudgetSummaryQueryDto,
   ) {
-    return this.budgets.summary(user, params.id);
+    return this.budgets.summary(user, params.id, query.currency);
   }
 
   @Get(':id/hotels')

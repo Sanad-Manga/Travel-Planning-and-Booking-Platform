@@ -7,6 +7,13 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { Connection, Model, Types } from 'mongoose';
 import { AuthenticatedUser, PLATFORM_CURRENCY, Role } from '../common';
+import {
+  EXCHANGE_RATE_PROVIDER,
+  ExchangeRateProvider,
+  FetchedRates,
+} from '../fx/exchange-rate-provider';
+import { User } from '../users/schemas/user.schema';
+import { UsersService } from '../users/users.service';
 import { ActivitiesService } from './activities.service';
 import { BudgetsService } from './budgets.service';
 import { ItinerariesModule } from './itineraries.module';
@@ -14,6 +21,22 @@ import { ItinerariesService } from './itineraries.service';
 import { Budget, BudgetCategory } from './schemas/budget.schema';
 import { TransportMode } from './schemas/transport-cost.schema';
 import { TransportCostsService } from './transport-costs.service';
+
+/**
+ * Fixed, deterministic rates (relative to PLATFORM_CURRENCY/USD) so these tests never touch the
+ * real FXRatesAPI. `fx.service.spec.ts` covers the fetch/fallback/error behavior in isolation.
+ */
+class FixedExchangeRateProvider implements ExchangeRateProvider {
+  calls = 0;
+  async fetchLatest(base: string): Promise<FetchedRates> {
+    this.calls++;
+    return {
+      base,
+      rateDate: new Date().toISOString().slice(0, 10),
+      rates: { EGP: 48, AED: 3.67, EUR: 0.85 },
+    };
+  }
+}
 
 jest.setTimeout(60000);
 
@@ -25,6 +48,9 @@ describe('BudgetsService (ITN-14) with an isolated MongoDB', () => {
   let activities: ActivitiesService;
   let transport: TransportCostsService;
   let model: Model<Budget>;
+  let users: UsersService;
+  let userModel: Model<User>;
+  let fxProvider: FixedExchangeRateProvider;
 
   const userWithId = (): AuthenticatedUser => ({
     userId: new Types.ObjectId().toString(),
@@ -60,15 +86,21 @@ describe('BudgetsService (ITN-14) with an isolated MongoDB', () => {
     server = await MongoMemoryServer.create({
       instance: { dbName: 'itn14_budgets_disposable_test' },
     });
+    fxProvider = new FixedExchangeRateProvider();
     moduleRef = await Test.createTestingModule({
       imports: [MongooseModule.forRoot(server.getUri()), ItinerariesModule],
-    }).compile();
+    })
+      .overrideProvider(EXCHANGE_RATE_PROVIDER)
+      .useValue(fxProvider)
+      .compile();
     await moduleRef.init();
     budgets = moduleRef.get(BudgetsService);
     itineraries = moduleRef.get(ItinerariesService);
     activities = moduleRef.get(ActivitiesService);
     transport = moduleRef.get(TransportCostsService);
+    users = moduleRef.get(UsersService);
     model = moduleRef.get<Model<Budget>>(getModelToken(Budget.name));
+    userModel = moduleRef.get<Model<User>>(getModelToken(User.name));
     await model.init();
 
     const connection = moduleRef.get<Connection>(getConnectionToken());
@@ -81,7 +113,7 @@ describe('BudgetsService (ITN-14) with an isolated MongoDB', () => {
       { city_id: 'dubai', name: 'Dubai', country_code: 'AE' },
     ]);
     await connection.collection('currencies').insertMany(
-      [...new Set([PLATFORM_CURRENCY, 'EGP', 'AED'])].map((code) => ({
+      [...new Set([PLATFORM_CURRENCY, 'EGP', 'AED', 'EUR'])].map((code) => ({
         code,
       })),
     );
@@ -452,6 +484,81 @@ describe('BudgetsService (ITN-14) with an isolated MongoDB', () => {
 
       // cairo (day 1): 2500 + 9000 + 3500 = 15000; dubai (day 2): 700. The 25000 EGP flight is another currency.
       expect(cityGroups.map((g) => g.subtotalCents)).toEqual([15000, 700]);
+    });
+
+    describe('convertedTotal (ITN-18)', () => {
+      it('defaults to the platform currency when the caller has no preferred currency on record', async () => {
+        const { id, first } = await withTwoDays();
+        await budgets.create(owner, id, first.id, food(100));
+        const summary = await budgets.summary(owner, id);
+        expect(summary.convertedTotal).toEqual({
+          currency: PLATFORM_CURRENCY,
+          totalCents: 100,
+          rateDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+        });
+      });
+
+      it('converts and sums every currency block into an explicit ?currency= override', async () => {
+        const { id } = await filled();
+        const summary = await budgets.summary(owner, id, 'USD');
+        // platform (USD) block 15700 unchanged + EGP block 25000 / 48 = 520.83 -> 521.
+        expect(summary.convertedTotal).toEqual({
+          currency: 'USD',
+          totalCents: 15700 + 521,
+          rateDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+        });
+      });
+
+      it("falls back to the caller's preferred currency when none is given", async () => {
+        const user = await users.create({
+          name: 'Preferred Currency User',
+          email: `preferred-${Date.now()}@example.com`,
+          passwordHash: 'x',
+          consentAcceptedAt: new Date(),
+        });
+        await userModel.updateOne(
+          { _id: user._id },
+          { $set: { preferredCurrency: 'EUR' } },
+        );
+        const withPreference: AuthenticatedUser = {
+          userId: user._id.toString(),
+          role: Role.USER,
+        };
+
+        const { id } = await itineraries.create(withPreference, validItinerary);
+        const day = await itineraries.addDay(withPreference, id, {
+          cityId: 'cairo',
+        });
+        await budgets.create(withPreference, id, day.id, food(1000));
+
+        const summary = await budgets.summary(withPreference, id);
+        // 1000 platform-currency cents -> EUR at 0.85: 850.
+        expect(summary.convertedTotal).toEqual({
+          currency: 'EUR',
+          totalCents: 850,
+          rateDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+        });
+      });
+
+      it('rejects an unsupported ?currency= with 400, naming the field', async () => {
+        const { id } = await filled();
+        await expect(budgets.summary(owner, id, 'ZZZ')).rejects.toMatchObject({
+          status: 400,
+          response: { details: [{ field: 'currency' }] },
+        });
+      });
+
+      it('makes no FX call at all when the itinerary has no cost yet', async () => {
+        const { id } = await withTwoDays();
+        const callsBefore = fxProvider.calls;
+        const summary = await budgets.summary(owner, id, 'EUR');
+        expect(summary.convertedTotal).toEqual({
+          currency: 'EUR',
+          totalCents: 0,
+          rateDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+        });
+        expect(fxProvider.calls).toBe(callsBefore);
+      });
     });
   });
 });

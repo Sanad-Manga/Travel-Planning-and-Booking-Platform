@@ -6,10 +6,16 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { AuthenticatedUser, PLATFORM_CURRENCY } from '../common';
+import { FxService } from '../fx';
 import { ReferenceDataService } from '../reference-data/reference-data.service';
+import { UsersService } from '../users/users.service';
 import { ActivitiesService } from './activities.service';
 import { BudgetDto, toBudgetDto } from './dto/budget.dto';
-import { buildBudgetSummary, BudgetSummaryDto } from './dto/budget-summary.dto';
+import {
+  buildBudgetSummary,
+  BudgetSummaryDto,
+  ConvertedBudgetTotalDto,
+} from './dto/budget-summary.dto';
 import { CreateBudgetDto } from './dto/create-budget.dto';
 import { toItineraryDay } from './dto/itinerary-day.dto';
 import { UpdateBudgetDto } from './dto/update-budget.dto';
@@ -30,6 +36,8 @@ export class BudgetsService {
     private readonly referenceData: ReferenceDataService,
     private readonly activities: ActivitiesService,
     private readonly transportCosts: TransportCostsService,
+    private readonly fx: FxService,
+    private readonly users: UsersService,
   ) {}
 
   /**
@@ -119,10 +127,14 @@ export class BudgetsService {
   /**
    * The owner's budget summary: the total of everything that costs money on the itinerary, by category and by day,
    * per currency. Someone else's or an unknown itinerary answers 404.
+   *
+   * ITN-18: also attaches `convertedTotal`, the grand total converted into `currency` (validated if given) or
+   * the caller's preferred currency (ACC-09) otherwise, falling back to the platform currency as a last resort.
    */
   async summary(
     user: AuthenticatedUser,
     itineraryId: string,
+    currency?: string,
   ): Promise<BudgetSummaryDto> {
     const itinerary = await this.itineraries
       .findOne({
@@ -132,7 +144,15 @@ export class BudgetsService {
       .lean<ItineraryLean>()
       .exec();
     if (!itinerary) throw new NotFoundException('Itinerary not found');
-    return this.summaryOf(itinerary);
+    const summary = await this.summaryOf(itinerary);
+
+    if (currency !== undefined) await this.assertCurrency(currency);
+    const target =
+      currency ??
+      (await this.users.findById(user.userId))?.preferredCurrency ??
+      PLATFORM_CURRENCY;
+    summary.convertedTotal = await this.convertGrandTotal(summary, target);
+    return summary;
   }
 
   /** The summary of an itinerary the caller may already read (own, or public for the read-only view). */
@@ -207,6 +227,39 @@ export class BudgetsService {
     dayId: Types.ObjectId,
   ): Promise<void> {
     await this.model.deleteMany({ itineraryId, dayId }).exec();
+  }
+
+  /**
+   * ITN-18: converts every currency block's totalCents into `target` and sums them. Skips the FX
+   * call entirely for a block already in `target`. `rateDate` is the oldest among the conversions
+   * actually used, so a partially-stale cache is reported honestly rather than arbitrarily.
+   */
+  private async convertGrandTotal(
+    summary: BudgetSummaryDto,
+    target: string,
+  ): Promise<ConvertedBudgetTotalDto> {
+    let totalCents = 0;
+    let rateDate: string | null = null;
+    for (const block of summary.totals) {
+      if (block.currency === target) {
+        totalCents += block.totalCents;
+        continue;
+      }
+      const converted = await this.fx.convert(
+        block.totalCents,
+        block.currency,
+        target,
+      );
+      totalCents += converted.amount;
+      if (rateDate === null || converted.rateDate < rateDate) {
+        rateDate = converted.rateDate;
+      }
+    }
+    return {
+      currency: target,
+      totalCents,
+      rateDate: rateDate ?? new Date().toISOString().slice(0, 10),
+    };
   }
 
   /** The currency must be a supported code (GEN-12). */
