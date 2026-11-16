@@ -1596,3 +1596,30 @@ How the output was used:
 Extended `BookingProvider` (backend/src/payments/booking-provider.interface.ts) with `getPolicies(id)`, matching the signature docs/contracts.md section 7 already named — rejected a design-pass proposal to add a separate `getPolicySubject` method and import AirlinesModule/HotelsModule into Payments, since FlightsModule already imports AirlinesModule and the contract already specifies the simpler shape. Added `BookingProviderRegistry.tryGet` (non-throwing lookup) so PAY-02's HOTEL path returns a clean 404 instead of a 500 while HTL-16/HTL-18 (Hessain Elrefaey's hotel-booking module) don't exist yet. Implemented `FlightBookingProvider.getPolicies` (backend/src/flights/flight-booking.provider.ts — a file in Flights B/Abdulrahman Hosny's module; flagging for his sign-off) by delegating to AirlinesService.getCancellationTiers/getBaggagePolicy. Added a new Payments-owned `PolicyAcceptance` Mongoose collection, `PolicyAcceptanceService` (getPolicies, acceptPolicies, and an assertAccepted seam for the not-yet-built PAY-01), its response DTOs, and `BookingPoliciesController` exposing GET/POST /api/bookings/:type/:id/policies and /accept-policies, all wired into the existing `payments.module.ts`/`index.ts`. Updated the FakeBookingProvider test double and docs/contracts.md section 7 to match. Added backend/src/payments/policy-acceptance.service.spec.ts (ownership, idempotent acceptance, bad :type, missing-provider cases) and fixed the pre-existing payments.module.spec.ts wiring test, which now needs the new Mongoose model token stubbed since it builds the real PaymentsModule without a database connection.
 Verification: ran the full backend Jest suite (serially, to avoid mongodb-memory-server resource contention) — 730 passed; all 29 remaining failures are pre-existing and unrelated (missing `sharp` native dependency in this environment, one tsc/CLI integration test), none in payments/flights/airlines/hotels. `tsc --noEmit` and `eslint` on every new/changed file are clean. Hotel-side policies remain untestable end-to-end until HTL-16/HTL-18 register a real `HotelBookingProvider` — flagged as a cross-team dependency for the PR description, not a blocker to opening it.
 ================================================
+Date: 2026-11-16
+Student: Yassin Yahya
+Tool: Claude (Claude Code)
+Related Requirement: HTL-20 (SCRUM-87)
+Prompt:
+Show me my current tickets and implement any unblocked features. My teammate says HTL-20 (My hotel reservations:
+Upcoming / Past / Cancelled) is unblocked now: a traveler sees their own reservations grouped Upcoming, Past and Cancelled,
+each with reference, hotel, rooms, dates, guests, total and status, can open the full details including refund status, and
+it is owner-only. Endpoints GET /api/hotel-bookings and GET /api/hotel-bookings/:id. Branch cut from develop, no stacking.
+How the output was used:
+Checked first that the blockers are really merged: ACC-11 is Done and HTL-16 (PR #89) put markConfirmed on develop, even
+though HTL-17 still says To Do in Jira. I decided what the three groups mean and kept that in one pure file
+(hotels/hotel-booking-groups.ts: groupOf for a row, groupFilter for the Mongo query, groupSort for the page order) so a row
+and a list page can never disagree: UPCOMING is a CONFIRMED stay whose check-out day is after today (a stay in progress
+is still upcoming) or a PENDING_PAYMENT reservation with a live hold; PAST is COMPLETED or a CONFIRMED stay whose
+check-out day is today or earlier (BookingLifecycle may not have completed it yet, so the date decides); CANCELLED is
+CANCELLED, EXPIRED and a pending hold that ran out. The tests were written first and watched failing: 14 unit tests for the
+rules and 19 HTTP tests (my-hotel-bookings.e2e-spec.ts) for roles, ownership, grouping, ordering, paging, validation and
+Swagger. A mutation check (owner removed from the list filter) made the ownership test fail, as it should.
+HotelBookingsService.findMine and findMineById read through the shared assertOwner helper (ACC-11); someone else's
+reservation is a 404 like an unknown id. Hotel names are joined with one query (hidden hotels included, and a missing
+hotel record gives a placeholder name instead of a 500). paymentRef is never returned.
+Refund status: PAY-03 (refunds) is not merged and there is no refund record to read, so the details answer has a
+`refund` field that is null until PAY-03 exists. I did not invent a refunds schema; this is flagged in the PR.
+A first prettier run reformatted another developer's hotel-bookings service; I reverted that file and applied only my
+own lines. The shared GEN-05 pagination test got one row for the new list route.
+================================================

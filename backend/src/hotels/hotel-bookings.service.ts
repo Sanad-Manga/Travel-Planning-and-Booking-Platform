@@ -16,16 +16,23 @@ import {
   HOLD_MINUTES,
   isCalendarDate,
   NotificationType,
+  PaginatedResponse,
   PLATFORM_CURRENCY,
   Role,
+  toPaginated,
 } from '../common';
+import { assertOwner } from '../common/ownership';
 import { NotificationsService } from '../notifications';
 import { BookingPolicies, BookingProvider, BookingStatusSnapshot } from '../payments/booking-provider.interface';
 import { BookingProviderRegistry } from '../payments/booking-provider.registry';
 import { UpcomingBookingsChecker, UpcomingBookingsRegistry } from '../users/upcoming-bookings';
 import { CreateHotelBookingDto } from './dto/create-hotel-booking.dto';
+import { HotelBookingDetailsDto } from './dto/hotel-booking-details.dto';
 import { HotelBookingResponseDto } from './dto/hotel-booking-response.dto';
+import { HotelBookingSummaryDto, HotelOfBooking } from './dto/hotel-booking-summary.dto';
+import { MyHotelBookingsQueryDto } from './dto/my-hotel-bookings-query.dto';
 import { coversStay, nightsBetween, stayTotalCents, todayUtc } from './hotel-availability.rules';
+import { groupFilter, groupSort } from './hotel-booking-groups';
 import { HotelsService } from './hotels.service';
 import { RoomReservations } from './room-reservations';
 import { Hotel } from './schemas/hotel.schema';
@@ -145,6 +152,54 @@ export class HotelBookingsService implements RoomReservations, BookingProvider, 
     });
 
     return HotelBookingResponseDto.from(booking);
+  }
+
+  /**
+   * HTL-20: the traveler's own reservations, one page, optionally one group (see hotel-booking-groups.ts).
+   * The owner is part of the query, so another traveler's reservation can never be in the page or in the total.
+   */
+  async findMine(
+    user: AuthenticatedUser,
+    query: MyHotelBookingsQueryDto,
+    now: Date = new Date(),
+  ): Promise<PaginatedResponse<HotelBookingSummaryDto>> {
+    const filter = { userId: new Types.ObjectId(user.userId), ...(query.group ? groupFilter(query.group, now) : {}) };
+    const [rows, total] = await Promise.all([
+      this.bookings
+        .find(filter)
+        .sort(groupSort(query.group))
+        .skip((query.page - 1) * query.limit)
+        .limit(query.limit)
+        .lean<HotelBookingLean[]>()
+        .exec(),
+      this.bookings.countDocuments(filter).exec(),
+    ]);
+
+    const hotelsById = await this.hotelsOf(rows.map((row) => row.hotelId));
+    const items = rows.map((row) => HotelBookingSummaryDto.from(row, hotelsById.get(row.hotelId.toString()), now));
+    return toPaginated(items, total, query.page, query.limit);
+  }
+
+  /** HTL-20: one of the traveler's own reservations. Someone else's is a 404, like an unknown id (ACC-11). */
+  async findMineById(user: AuthenticatedUser, id: string, now: Date = new Date()): Promise<HotelBookingDetailsDto> {
+    const notFound = 'Reservation not found';
+    const booking = await this.bookings.findById(id).lean<HotelBookingLean>().exec();
+    if (!booking) throw new NotFoundException(notFound);
+    assertOwner(user, { ownerId: booking.userId }, notFound);
+
+    const hotel = (await this.hotelsOf([booking.hotelId])).get(booking.hotelId.toString());
+    return HotelBookingDetailsDto.from(booking, hotel, now);
+  }
+
+  /** The hotels of some reservations in one query, hidden (inactive) hotels included: a stay outlives its listing. */
+  private async hotelsOf(hotelIds: Types.ObjectId[]): Promise<Map<string, NonNullable<HotelOfBooking>>> {
+    if (hotelIds.length === 0) return new Map();
+    const hotels = await this.hotels
+      .find({ _id: { $in: hotelIds } })
+      .select('name address cityId checkInTime checkOutTime')
+      .lean<(NonNullable<HotelOfBooking> & { _id: Types.ObjectId })[]>()
+      .exec();
+    return new Map(hotels.map((hotel) => [hotel._id.toString(), hotel]));
   }
 
   /** RoomReservations: one query for all rooms that overlap a confirmed stay or a live hold. */

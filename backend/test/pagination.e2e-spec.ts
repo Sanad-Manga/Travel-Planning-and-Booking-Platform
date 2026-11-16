@@ -162,6 +162,12 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
       query: 'checkIn=2099-01-05&checkOut=2099-01-07',
       total: 25,
     },
+    {
+      // HTL-20: the traveler's own reservations; this test only proves the envelope and the limits (rows are proven in my-hotel-bookings.e2e-spec.ts)
+      swagger: '/api/hotel-bookings',
+      url: '/api/hotel-bookings',
+      auth: 'user',
+    },
   ];
 
   const get = (route: ListRoute, params: string) => {
