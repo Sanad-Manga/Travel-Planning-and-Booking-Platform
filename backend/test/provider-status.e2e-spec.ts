@@ -438,6 +438,33 @@ describe('ACC-15 suspend/reactivate moderators and deactivate/reactivate provide
         expect(JSON.stringify(audits)).not.toMatch(/password|token|secret/i);
       });
 
+      it('finds linked moderators whether the link is stored as an ObjectId or as a string (User.airlineId/hotelId are Mixed)', async () => {
+        const provider =
+          type === 'hotel'
+            ? await makeHotel('Forms Hotel')
+            : await makeAirline('FM');
+        const linkField = type === 'hotel' ? 'hotelId' : 'airlineId';
+        const role =
+          type === 'hotel' ? Role.HOTEL_MODERATOR : Role.AIRLINE_MODERATOR;
+        const asString = await insertUser(role, { [linkField]: provider.id });
+        expect(
+          typeof (await db
+            .collection('users')
+            .findOne({ _id: oid(asString.id) }))![linkField],
+        ).toBe('string');
+        expect(
+          (await db
+            .collection('users')
+            .findOne({ _id: oid(provider.moderator.id) }))![linkField],
+        ).toBeInstanceOf(Types.ObjectId);
+        await providerPatch('deactivate', type, provider.id).expect(200);
+        for (const moderator of [provider.moderator, asString])
+          expect(await noticesFor(moderator.id)).toHaveLength(1);
+        expect(
+          (await auditsFor(provider.id))[0].details.moderatorsNotified,
+        ).toBe(2);
+      });
+
       it('succeeds for a provider that has no moderators', async () => {
         let id: string;
         if (type === 'hotel') {
