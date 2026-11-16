@@ -16,8 +16,9 @@ import { BCRYPT_SALT_ROUNDS } from '../auth/auth.service';
 import { AccountStatus, AuthenticatedUser, Role } from '../common';
 import { HotelsService } from '../hotels/hotels.service';
 import { User } from '../users/schemas/user.schema';
-import { AccountResponseDto, toAccountResponse } from './dto/account-response.dto';
+import { toAccountResponse } from './dto/account-response.dto';
 import { CreateModeratorDto } from './dto/create-moderator.dto';
+import { ModeratorResponseDto } from './dto/moderator-response.dto';
 
 const MONGO_DUPLICATE_KEY = 11000;
 // Same lifetime as the temporary password of the admin reset (ACC-07a): one login within 24 hours.
@@ -41,7 +42,7 @@ export class ModeratorAccountsService {
     private readonly audit: AuditService,
   ) {}
 
-  async create(actor: AuthenticatedUser, dto: CreateModeratorDto): Promise<AccountResponseDto> {
+  async create(actor: AuthenticatedUser, dto: CreateModeratorDto): Promise<ModeratorResponseDto> {
     if (!actor?.userId) throw new UnauthorizedException('Authentication required');
     if (actor.role !== Role.ADMIN) throw new ForbiddenException('Administrator role required');
 
@@ -90,14 +91,17 @@ export class ModeratorAccountsService {
         'Moderator account was created but the audit record failed. Do not create it again; tell the lead.',
       );
     }
-    return toAccountResponse({
-      _id: created._id,
-      name: created.name,
-      email: created.email,
-      role: created.role,
-      status: created.status,
-      createdAt: created.createdAt as Date,
-    });
+    return {
+      ...toAccountResponse({
+        _id: created._id,
+        name: created.name,
+        email: created.email,
+        role: created.role,
+        status: created.status,
+        createdAt: created.createdAt as Date,
+      }),
+      [linkField]: link.id,
+    };
   }
 
   /** Exactly one provider id, of the kind that matches the role; otherwise a 400 naming each wrong field. */
