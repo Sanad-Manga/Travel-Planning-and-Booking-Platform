@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
@@ -22,12 +22,18 @@ import {
 import { CreateFlightDto } from './dto/create-flight.dto';
 import { FlightDetailsResponseDto } from './dto/flight-details-response.dto';
 import { FlightResponseDto } from './dto/flight-response.dto';
+import { FlightIdParamDto } from './dto/cabin-params.dto';
+import { UpdateFlightDto } from './dto/update-flight.dto';
+import { FlightEditService } from './flight-edit.service';
 import { FlightsService } from './flights.service';
 
 @ApiTags('flights')
 @Controller('flights')
 export class FlightsController {
-  constructor(private readonly flights: FlightsService) {}
+  constructor(
+    private readonly flights: FlightsService,
+    private readonly edit: FlightEditService,
+  ) {}
 
   @Get(':id')
   @Public()
@@ -76,5 +82,45 @@ export class FlightsController {
   })
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreateFlightDto) {
     return this.flights.create(user, dto);
+  }
+
+  @Patch(':id')
+  @Roles(Role.AIRLINE_MODERATOR)
+  @ApiCookieAuth()
+  @ApiUnauthorizedResponse({
+    type: ErrorResponseDto,
+    description: 'Not logged in',
+  })
+  @ApiOperation({
+    summary: 'Edit the times or airports of your own SCHEDULED flight - FLT-05',
+    description:
+      'Send any of departureLocalTime, arrivalLocalTime (LOCAL time of each airport, no offset), departureAirport, arrivalAirport. The airports can only change while the flight has no active booking. A change of time notifies every passenger with a CONFIRMED booking (FLIGHT_SCHEDULE_CHANGED). Cabin prices and seat counts are edited with PATCH /api/flights/:id/cabins/:cabinId; prices never change existing bookings.',
+  })
+  @ApiOkResponse({ type: FlightResponseDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description:
+      'Empty body, unknown field (including flightNumber), unknown airport, same departure and arrival airport, arrival not after departure, or departure in the past (field-level details)',
+  })
+  @ApiForbiddenResponse({
+    type: ErrorResponseDto,
+    description:
+      'Caller is not an airline moderator, or the flight belongs to another airline',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'Flight not found',
+  })
+  @ApiConflictResponse({
+    type: ErrorResponseDto,
+    description:
+      'The flight is not SCHEDULED (cancelled or departed), the airports cannot change because the flight is booked, or the flight number is already used on the new departure date',
+  })
+  update(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: FlightIdParamDto,
+    @Body() dto: UpdateFlightDto,
+  ) {
+    return this.edit.update(user, params.id, dto);
   }
 }
