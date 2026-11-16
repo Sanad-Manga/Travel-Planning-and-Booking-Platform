@@ -95,6 +95,7 @@ describe('ModeratorAccountsService (ACC-13, collaborators are test doubles)', ()
       role: (over as { role?: Role }).role ?? Role.HOTEL_MODERATOR,
       status: AccountStatus.ACTIVE,
       createdAt: '2026-11-16T10:00:00.000Z',
+      [field]: id,
     });
     expect(users.create).toHaveBeenCalledTimes(1);
     const doc = created[0];

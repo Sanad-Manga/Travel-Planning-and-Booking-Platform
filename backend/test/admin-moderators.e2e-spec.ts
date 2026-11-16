@@ -167,7 +167,9 @@ describe('ACC-13 admin creates moderator accounts (actual AppModule)', () => {
         const start = Date.now();
         const res = await create(body).expect(201);
         const finish = Date.now();
-        expect(Object.keys(res.body).sort()).toEqual(['createdAt', 'email', 'id', 'name', 'role', 'status']);
+        expect(Object.keys(res.body).sort()).toEqual(['createdAt', 'email', linkField, 'id', 'name', 'role', 'status'].sort());
+        expect(res.body[linkField]).toBe(body[linkField]);
+        expect(res.body).not.toHaveProperty(otherField);
         expect(res.body).toMatchObject({ email: targetEmail, role, status: 'ACTIVE' });
         expect(JSON.stringify(res.body)).not.toContain(temp);
 

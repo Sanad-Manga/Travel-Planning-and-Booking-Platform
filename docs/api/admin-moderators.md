@@ -37,13 +37,15 @@ Any other field (for example `status` or `passwordHash`) is a 400.
 
 | Status | When | Notes |
 |---|---|---|
-| 201 | Created | The account shape of `GET /api/admin/accounts`: `{ id, name, email, role, status: "ACTIVE", createdAt }`. No password, hash or temporary-password field |
+| 201 | Created | The account shape of `GET /api/admin/accounts` plus the linked provider: `{ id, name, email, role, status: "ACTIVE", createdAt, airlineId }` for an airline moderator or `{ ..., hotelId }` for a hotel moderator (the other one is absent). No password, hash or temporary-password field |
 | 400 | Invalid body, role not a moderator role, weak password, or the ids do not match the role (both, neither, or the wrong kind) | Standard shape, one `details` entry per field. A missing or extra provider id names `airlineId` / `hotelId` |
 | 401 | Not logged in | |
 | 403 | Caller is not an `ADMIN` (USER and both moderator roles) | Nothing is created |
 | 404 | The airline or hotel does not exist | `details: [{ "field": "airlineId" \| "hotelId", ... }]`. Admin routes answer 404 for an unknown id |
 | 409 | Email already registered (any letter case), including two simultaneous requests with the same email | `details: [{ "field": "email", "message": "email already exists" }]`. Exactly one of the simultaneous requests wins: the unique email index decides, there is no check-then-insert |
 | 500 | The insert or the audit write failed | Sanitized message. After an audit failure the account already exists: do not create it again |
+
+Example 201 for a hotel moderator: `{ "id": "6730a1f2c3d4e5f607182940", "name": "Hala Hotel", "email": "hala.hotel@example.com", "role": "HOTEL_MODERATOR", "status": "ACTIVE", "createdAt": "2026-11-16T10:00:00.000Z", "hotelId": "6730a1f2c3d4e5f607182932" }`.
 
 Examples of 400 details: hotel moderator sent with an airline id only gives
 `[{ "field": "airlineId", "message": "airlineId must not be set for HOTEL_MODERATOR" }, { "field": "hotelId", "message": "hotelId is required for HOTEL_MODERATOR" }]`.
@@ -86,7 +88,7 @@ account id, `actorId` = the admin, `details: { role, airlineId | hotelId }`. Nev
 - An unknown provider id is a 404 (not a 400), consistent with the other admin routes.
 - Provider existence is checked through `AirlinesService.exists` and `HotelsService.getPolicies` (HotelsService has no `exists`;
   a small `exists(id)` there would be cleaner, owner: Yusuf).
-- The response keeps the ACC-14 account shape and therefore does not include `airlineId` / `hotelId`.
+- The response is the ACC-14 account shape plus the linked `airlineId` or `hotelId` (own response class `ModeratorResponseDto`; the shared account DTO is unchanged).
 
 ## Known limits (not part of ACC-13)
 
