@@ -22,7 +22,7 @@ import {
  * answers with a bare array. So a new list endpoint cannot ship without being added here.
  */
 
-type Auth = 'none' | 'user' | 'admin';
+type Auth = 'none' | 'user' | 'admin' | 'hotelModerator';
 interface ListRoute {
   /** Swagger-style path, e.g. /api/tags/{tag}/posts */
   swagger: string;
@@ -40,11 +40,12 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
   let mongo: MongoMemoryServer;
   let db: Connection;
   const jwt = new JwtService({ secret: TEST_ACCESS_SECRET });
-  const cookies: Record<'user' | 'admin', string> = { user: '', admin: '' };
+  const cookies: Record<'user' | 'admin' | 'hotelModerator', string> = { user: '', admin: '', hotelModerator: '' };
   let userId: Types.ObjectId;
 
   async function account(
     role: Role,
+    claims: Record<string, string> = {},
   ): Promise<{ id: Types.ObjectId; cookie: string }> {
     const _id = new Types.ObjectId();
     await db.collection('users').insertOne({
@@ -60,7 +61,7 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
       updatedAt: new Date(),
     });
     const token = await jwt.signAsync(
-      { sub: _id.toHexString(), role },
+      { sub: _id.toHexString(), role, ...claims },
       { expiresIn: '30m' },
     );
     return { id: _id, cookie: `access_token=${token}` };
@@ -86,7 +87,8 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
   const NOT_LISTS = ['/api/posts/{id}'];
 
   const ROUTES: ListRoute[] = [
-    { swagger: '/api/admin/accounts', url: '/api/admin/accounts', auth: 'admin', total: 2 },
+    // user + admin + hotel moderator (the moderator pages the HTL-08 row below)
+    { swagger: '/api/admin/accounts', url: '/api/admin/accounts', auth: 'admin', total: 3 },
     // 25 plain posts + the one post that carries the comments below
     { swagger: '/api/posts', url: '/api/posts', auth: 'none', total: 26 },
     {
@@ -162,6 +164,14 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
       query: 'checkIn=2099-01-05&checkOut=2099-01-07',
       total: 25,
     },
+    {
+      // HTL-08: the moderator's own hotel (the same hotel and 25 rooms as the row above), paged over the rooms
+      swagger: '/api/hotels/{id}/availability',
+      url: `/api/hotels/${roomsHotelId.toHexString()}/availability`,
+      auth: 'hotelModerator',
+      query: 'from=2099-01-05&to=2099-01-07',
+      total: 25,
+    },
   ];
 
   const get = (route: ListRoute, params: string) => {
@@ -195,6 +205,7 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
     const admin = await account(Role.ADMIN);
     cookies.user = user.cookie;
     cookies.admin = admin.cookie;
+    cookies.hotelModerator = (await account(Role.HOTEL_MODERATOR, { hotelId: roomsHotelId.toHexString() })).cookie;
     userId = user.id;
 
     await db.collection('posts').insertMany(

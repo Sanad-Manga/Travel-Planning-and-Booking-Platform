@@ -28,3 +28,7 @@ export const ROOM_MAX_AVAILABILITY_RANGES = 100;
 // HTL-11 search input limits: module-local, they only keep the room-combination check small (the ticket sets none).
 export const HOTEL_SEARCH_MAX_GUESTS = 100;
 export const HOTEL_SEARCH_MAX_ROOMS = 10;
+
+// HTL-08: longest date range the room-status view may cover (inclusive days). Module-local: the ticket sets no limit,
+// this only bounds rooms x days in one response.
+export const ROOM_STATUS_MAX_DAYS = 62;
