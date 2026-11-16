@@ -1,18 +1,22 @@
-import { Body, Controller, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, HttpCode, HttpStatus, Param, Patch, Post } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
   ApiCookieAuth,
   ApiCreatedResponse,
+  ApiExtraModels,
   ApiForbiddenResponse,
+  ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
   ApiUnauthorizedResponse,
+  getSchemaPath,
 } from '@nestjs/swagger';
 import { AuthenticatedUser, CurrentUser, ErrorResponseDto, Role, Roles } from '../common';
 import { AvailabilityResponseDto } from './dto/availability-response.dto';
+import { BlockedRangeResponseDto } from './dto/blocked-range-response.dto';
 import { CreateAvailabilityDto } from './dto/create-availability.dto';
 import { CreateRoomDto } from './dto/create-room.dto';
 import { UpdateAvailabilityDto } from './dto/update-availability.dto';
@@ -85,22 +89,56 @@ export class RoomsController {
 
   @Patch(':id/rooms/:roomId/availability')
   @Roles(Role.HOTEL_MODERATOR)
+  @ApiExtraModels(AvailabilityResponseDto, BlockedRangeResponseDto, RoomResponseDto)
   @ApiOperation({
     summary:
-      'Change the dates of one availability range of a room (hotel moderator, own hotel only). Send rangeId plus startDate and/or endDate. Dates that stop being available must have no confirmed reservation.',
+      'One of three actions per request (hotel moderator, own hotel only). (1) HTL-05, change a range: rangeId plus startDate and/or endDate; dates that stop being available must have no confirmed reservation. (2) HTL-06, block dates: block { startDate, endDate }; rejected if a CONFIRMED reservation or an unexpired PENDING_PAYMENT hold overlaps them. (3) HTL-06, take the room out of sale or back: isActive false/true; deactivating is rejected while such a reservation has not ended yet; inactive rooms are skipped by search.',
   })
-  @ApiOkResponse({ type: AvailabilityResponseDto })
-  @ApiBadRequestResponse({ type: ErrorResponseDto, description: 'Invalid or missing rangeId/date, endDate not after startDate, no date sent, unknown field' })
+  @ApiOkResponse({
+    description: '(1) the changed range, (2) the new blocked range, (3) the room.',
+    schema: {
+      oneOf: [
+        { $ref: getSchemaPath(AvailabilityResponseDto) },
+        { $ref: getSchemaPath(BlockedRangeResponseDto) },
+        { $ref: getSchemaPath(RoomResponseDto) },
+      ],
+    },
+  })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description:
+      'Not exactly one action in the body, invalid or missing rangeId/date, endDate not after startDate, no date sent, isActive not a boolean, unknown field',
+  })
   @ApiUnauthorizedResponse({ type: ErrorResponseDto, description: 'Not logged in' })
   @ApiForbiddenResponse({ type: ErrorResponseDto, description: "Not a hotel moderator, or not the moderator's own hotel" })
   @ApiNotFoundResponse({ type: ErrorResponseDto, description: 'The room or the range does not exist in the moderator’s hotel' })
-  @ApiConflictResponse({ type: ErrorResponseDto, description: 'The new dates overlap another range of the room, or remove dates that have a confirmed reservation' })
+  @ApiConflictResponse({
+    type: ErrorResponseDto,
+    description:
+      'Range edit: overlaps another range, or removes dates that have a confirmed reservation. Block: overlaps a CONFIRMED reservation, an unexpired PENDING_PAYMENT hold or another block. Deactivate: a CONFIRMED reservation or unexpired PENDING_PAYMENT hold has not ended yet',
+  })
   updateAvailability(
     @Param('id') id: string,
     @Param('roomId') roomId: string,
     @Body() dto: UpdateAvailabilityDto,
     @CurrentUser() user: AuthenticatedUser,
-  ): Promise<AvailabilityResponseDto> {
+  ): Promise<AvailabilityResponseDto | BlockedRangeResponseDto | RoomResponseDto> {
     return this.roomsService.updateAvailability(id, roomId, dto, user);
+  }
+
+  @Delete(':id/rooms/:roomId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Roles(Role.HOTEL_MODERATOR)
+  @ApiOperation({
+    summary:
+      'Delete a room (hotel moderator, own hotel only). Allowed only for a room that was never reserved (no reservation of any status mentions it); otherwise deactivate it with PATCH .../availability { isActive: false }.',
+  })
+  @ApiNoContentResponse({ description: 'The room is deleted' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto, description: 'Not logged in' })
+  @ApiForbiddenResponse({ type: ErrorResponseDto, description: "Not a hotel moderator, or not the moderator's own hotel" })
+  @ApiNotFoundResponse({ type: ErrorResponseDto, description: 'The room does not exist in the moderator’s hotel' })
+  @ApiConflictResponse({ type: ErrorResponseDto, description: 'The room has been reserved before (any status)' })
+  remove(@Param('id') id: string, @Param('roomId') roomId: string, @CurrentUser() user: AuthenticatedUser): Promise<void> {
+    return this.roomsService.remove(id, roomId, user);
   }
 }
