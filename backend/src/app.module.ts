@@ -9,6 +9,7 @@ import { BlogModule } from './blog/blog.module';
 import configuration from './config/configuration';
 import { validateEnv } from './config/env.validation';
 import { FlightsModule } from './flights';
+import { FxModule } from './fx';
 import { ItinerariesModule } from './itineraries';
 import { NotificationsModule } from './notifications';
 import { HotelsModule } from './hotels/hotels.module';
@@ -31,6 +32,7 @@ import { UploadsModule } from './uploads';
       useFactory: (config: ConfigService) => ({ uri: config.getOrThrow<string>('MONGODB_URI') }),
     }),
     PaymentsModule,
+    FxModule,
     BlogModule,
     AuthModule,
     NotificationsModule,

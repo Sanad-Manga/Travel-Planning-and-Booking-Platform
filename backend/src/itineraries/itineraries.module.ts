@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { FxModule } from '../fx';
 import { HotelSearchService } from '../hotels/hotel-search.service';
 import { HotelsModule } from '../hotels/hotels.module';
 import { ReferenceDataModule } from '../reference-data/reference-data.module';
@@ -38,6 +39,8 @@ import { TransportCostsService } from './transport-costs.service';
     UploadsModule,
     // ITN-25: the hotel search (HTL-11) needs the hotel models and HotelAvailabilityService, which HotelsModule exports.
     HotelsModule,
+    // ITN-18: the budget summary's grand total is converted into the caller's preferred currency.
+    FxModule,
   ],
   // The public controller comes first so its static paths win over ItinerariesController's /:id.
   controllers: [

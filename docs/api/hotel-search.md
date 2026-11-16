@@ -49,9 +49,10 @@ abstract findReservedRoomIds(roomIds: string[], startDate: string, endDate: stri
 
 Return the ids (strings) of the rooms that **cannot be sold** for `[startDate, endDate)`: a CONFIRMED reservation or an
 unexpired PENDING_PAYMENT hold overlaps it (`checkIn < endDate AND checkOut > startDate`; contracts section 8). Answer for
-all rooms in **one** query. `HotelsModule` binds a stub (`NoRoomReservations`, nothing reserved); replace it with
-`{ provide: RoomReservations, useClass: ... }` as for `hasConfirmedReservation`. Until then search shows rooms that a
-booking may already hold.
+all rooms in **one** query. `HotelBookingsService` implements this contract and is bound by `HotelsModule`. Its one
+query includes overlapping CONFIRMED reservations and only unexpired PENDING_PAYMENT holds. The same overlap rule is
+checked inside the transaction that creates a reservation, so a room selected from the list is not trusted as still
+available.
 
 ## Free rooms of one hotel (HTL-15)
 

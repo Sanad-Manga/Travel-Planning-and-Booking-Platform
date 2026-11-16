@@ -1,5 +1,6 @@
 import { BookingStatus } from '../common';
 import {
+  BookingPolicies,
   BookingProvider,
   BookingStatusSnapshot,
 } from './booking-provider.interface';
@@ -14,6 +15,7 @@ export class FakeBookingProvider implements BookingProvider {
   readonly bookings = new Map<string, BookingStatusSnapshot>();
   readonly failApplyFor = new Set<string>();
   readonly paymentRefs = new Map<string, string>();
+  readonly policies = new Map<string, BookingPolicies>();
   findCalls = 0;
 
   add(
@@ -22,6 +24,16 @@ export class FakeBookingProvider implements BookingProvider {
     holdExpiresAt: Date | null = null,
   ): void {
     this.bookings.set(id, { status, holdExpiresAt });
+  }
+
+  /** Seed what `getPolicies(id)` returns for `id` (PAY-02 test double). */
+  setPolicies(id: string, policies: BookingPolicies): void {
+    this.policies.set(id, policies);
+  }
+
+  async getPolicies(id: string): Promise<BookingPolicies | null> {
+    const policies = this.policies.get(id);
+    return policies ? { ...policies } : null;
   }
 
   status(id: string): BookingStatus | undefined {

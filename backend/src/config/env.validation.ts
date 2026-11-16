@@ -10,6 +10,8 @@ export interface EnvVars {
   COOKIE_SECURE: boolean;
   HOLD_MINUTES: number;
   PLATFORM_CURRENCY: string;
+  /** ITN-18: FXRatesAPI has a usable free tier, so this is optional — no fail-fast check below. */
+  FX_API_KEY?: string;
 }
 
 export function validateEnv(raw: Record<string, unknown>): Record<string, unknown> & EnvVars {

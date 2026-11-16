@@ -2,9 +2,11 @@ import { Injectable, OnModuleInit } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model, Types } from 'mongoose';
 import { BookingStatus, BookingType, NotificationType } from '../common';
+import { AirlinesService } from '../airlines';
 import { FlightInventoryService } from './flight-inventory.service';
 import { NotificationsService } from '../notifications';
 import {
+  BookingPolicies,
   BookingProvider,
   BookingStatusSnapshot,
 } from '../payments/booking-provider.interface';
@@ -36,6 +38,7 @@ export class FlightBookingProvider implements BookingProvider, OnModuleInit {
     private readonly inventory: FlightInventoryService,
     private readonly notifications: NotificationsService,
     private readonly registry: BookingProviderRegistry,
+    private readonly airlines: AirlinesService,
   ) {}
 
   onModuleInit(): void {
@@ -204,6 +207,32 @@ export class FlightBookingProvider implements BookingProvider, OnModuleInit {
       });
     }
     return outcome.kind !== 'REFUSED';
+  }
+
+  /**
+   * PAY-02: this booking's owner plus its airline's cancellation tiers and baggage policy,
+   * fetched through Airlines' own exported getters (FLT-09/FLT-08) — Payments never reads
+   * airline data directly.
+   */
+  async getPolicies(id: string): Promise<BookingPolicies | null> {
+    if (!Types.ObjectId.isValid(id)) return null;
+    const booking = await this.model
+      .findById(id)
+      .select('userId airlineId')
+      .lean<Pick<FlightBookingLean, 'userId' | 'airlineId'>>()
+      .exec();
+    if (!booking) return null;
+
+    const airlineId = booking.airlineId.toString();
+    const [cancellationTiers, baggagePolicy] = await Promise.all([
+      this.airlines.getCancellationTiers(airlineId),
+      this.airlines.getBaggagePolicy(airlineId),
+    ]);
+    return {
+      ownerId: booking.userId.toString(),
+      cancellationTiers,
+      baggagePolicy,
+    };
   }
 
   async findExpiredHolds(
