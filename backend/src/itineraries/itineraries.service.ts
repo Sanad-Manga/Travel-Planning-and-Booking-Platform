@@ -5,34 +5,20 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { FilterQuery } from 'mongoose';
 import {
-  AccountStatus,
   AuthenticatedUser,
+  ITINERARY_MAX_DAYS,
   paginate,
   PaginatedResponse,
-  ITINERARY_MAX_DAYS,
   PaginationDto,
-  Visibility,
 } from '../common';
-import { todayUtc } from '../hotels/hotel-availability.rules';
-import { HotelSearchPageDto } from '../hotels/dto/hotel-search-response.dto';
-import { HotelSearchService } from '../hotels/hotel-search.service';
 import { ReferenceDataService } from '../reference-data/reference-data.service';
 import { ActivitiesService } from './activities.service';
 import { BudgetsService } from './budgets.service';
-import { TransportCostsService } from './transport-costs.service';
-import { UsersService } from '../users/users.service';
 import { ActivityDto } from './dto/activity.dto';
-import { groupDaysByCity } from './dto/city-group.dto';
 import { CreateItineraryDayDto } from './dto/create-itinerary-day.dto';
 import { CreateItineraryDto } from './dto/create-itinerary.dto';
-import { GroupHotelsQueryDto } from './dto/group-hotels-query.dto';
-import {
-  addDays,
-  ItineraryDayDto,
-  toItineraryDay,
-} from './dto/itinerary-day.dto';
+import { ItineraryDayDto, toItineraryDay } from './dto/itinerary-day.dto';
 import {
   ItineraryResponseDto,
   toItineraryResponse,
@@ -42,31 +28,20 @@ import {
   ItineraryRowDto,
   toItineraryRow,
 } from './dto/itinerary-row.dto';
-import {
-  PublicItineraryRowDto,
-  toPublicItineraryRow,
-} from './dto/public-itinerary-row.dto';
-import {
-  PublicItineraryDto,
-  toPublicItinerary,
-} from './dto/public-itinerary.dto';
-import { PublicSearchQueryDto } from './dto/public-search-query.dto';
 import { ReorderDaysDto } from './dto/reorder-days.dto';
 import { UpdateItineraryDayDto } from './dto/update-itinerary-day.dto';
 import { UpdateItineraryDto } from './dto/update-itinerary.dto';
 import { Itinerary, ItineraryLean } from './schemas/itinerary.schema';
+import { TransportCostsService } from './transport-costs.service';
 
 @Injectable()
 export class ItinerariesService {
   constructor(
     @InjectModel(Itinerary.name) private readonly model: Model<Itinerary>,
     private readonly referenceData: ReferenceDataService,
-    private readonly users: UsersService,
     private readonly activities: ActivitiesService,
     private readonly transportCosts: TransportCostsService,
     private readonly budgets: BudgetsService,
-    // ITN-25: the HTL-11 hotel search, reused as it is (see ItinerariesModule for how it is provided).
-    private readonly hotelSearch: HotelSearchService,
   ) {}
 
   /**
@@ -114,7 +89,7 @@ export class ItinerariesService {
   /**
    * ITN-03: the owner opens one itinerary. Someone else's (even a public one) answers 404 here,
    * like a missing one (ACC-11): this is a private itinerary endpoint. Others find public itineraries
-   * through searchPublic (ITN-20) and open them through the public view (ITN-21).
+   * through ItinerariesPublicService.searchPublic (ITN-20) and open them through the public view (ITN-21).
    */
   async findMine(
     user: AuthenticatedUser,
@@ -126,224 +101,6 @@ export class ItinerariesService {
       .exec();
     if (!itinerary) throw new NotFoundException('Itinerary not found');
     return this.withActivities(itinerary);
-  }
-
-  /**
-   * ITN-20, ITN-21: the shared search: PUBLIC itineraries that an admin has not hidden and whose author's account
-   * is still ACTIVE (ACC-12 hides a suspended or deactivated author's public itineraries), most recently
-   * updated first, paginated. Visibility is read on every request, so setting PRIVATE removes an itinerary
-   * from the next search on.
-   *
-   * ITN-21 filters (all that are sent must match): `q`, a plain-text keyword (never a pattern) found in the title,
-   * in the name of one of its countries or in the name of a city it visits; `minDays` and `maxDays`, the number of
-   * days; `countryCode`; `cityId`. The base conditions are always part of the filter, so no combination of
-   * filters can show a private, hidden or inactive-author itinerary.
-   *
-   * The author check goes through UsersService.isActive (the Users module's exported method), once per
-   * distinct author with public itineraries, so the page and the total count only what is shown.
-   */
-  async searchPublic(
-    query: PublicSearchQueryDto,
-  ): Promise<PaginatedResponse<PublicItineraryRowDto>> {
-    const { q, minDays, maxDays, countryCode, cityId } = query;
-    if (minDays !== undefined && maxDays !== undefined && minDays > maxDays) {
-      throw new BadRequestException({
-        message: 'Validation failed',
-        details: [
-          {
-            field: 'minDays',
-            message: 'minDays must not be greater than maxDays',
-          },
-        ],
-      });
-    }
-
-    const shared = { visibility: Visibility.PUBLIC, isHidden: false };
-    const authorIds = (await this.model
-      .distinct('authorId', shared)
-      .exec()) as Types.ObjectId[];
-    const active = await Promise.all(
-      authorIds.map((authorId) => this.users.isActive(authorId.toString())),
-    );
-    const activeAuthorIds = authorIds.filter((_, index) => active[index]);
-
-    const clauses: FilterQuery<Itinerary>[] = [
-      { ...shared, authorId: { $in: activeAuthorIds } },
-    ];
-    if (q) clauses.push(await this.keywordClause(q, shared));
-    if (countryCode) clauses.push({ countryCodes: countryCode });
-    if (cityId) clauses.push({ 'days.cityId': cityId });
-    if (minDays !== undefined || maxDays !== undefined) {
-      const dayCount = { $size: { $ifNull: ['$days', []] } };
-      clauses.push({
-        $expr: {
-          $and: [
-            ...(minDays !== undefined ? [{ $gte: [dayCount, minDays] }] : []),
-            ...(maxDays !== undefined ? [{ $lte: [dayCount, maxDays] }] : []),
-          ],
-        },
-      });
-    }
-
-    return paginate(this.model, { $and: clauses }, query, {
-      map: toPublicItineraryRow,
-      sort: { updatedAt: -1, _id: -1 },
-    });
-  }
-
-  /**
-   * ITN-21: the read-only view of one public itinerary, open to guests: author name, days with their activities, the
-   * budget totals and, on a clone, the credit to the original author. It
-   * answers 404 for anything that search would not list (private, hidden by an admin, author not ACTIVE, unknown
-   * id), so nothing reveals that a private itinerary exists. The author's account is read here too, because the
-   * view shows the name.
-   */
-  async findPublic(id: string): Promise<PublicItineraryDto> {
-    const { itinerary, author } = await this.loadPublic(id);
-    const [activities, transportCosts, budgets] = await Promise.all([
-      this.activities.listByItinerary(itinerary._id),
-      this.transportCosts.listByItinerary(itinerary._id),
-      this.budgets.listByItinerary(itinerary._id),
-    ]);
-    return toPublicItinerary(
-      itinerary,
-      { id: itinerary.authorId.toString(), name: author.name },
-      activities,
-      transportCosts,
-      budgets,
-    );
-  }
-
-  /**
-   * ITN-21: a registered user copies a public itinerary into a new one of their own. The copy is PRIVATE, belongs to
-   * the caller and has its own id, its own days (new ids) and its own activities, transport costs and daily budget
-   * entries, so editing or deleting either one never touches the other. It carries the credit (`clonedFrom`): the
-   * original itinerary and its author's name, as they were at that moment. Images of activities are not copied (see
-   * ActivitiesService.copyForClone).
-   *
-   * Only what the public view shows can be cloned: anything else (private, hidden by an admin, author not active,
-   * unknown id) answers 404, like the view. The author may copy their own public itinerary too.
-   *
-   * The copy is made in steps, not in one transaction: the new itinerary first, then its rows. If copying the rows
-   * fails, the new itinerary and whatever was copied are removed again, so a failed clone leaves nothing behind.
-   */
-  async clone(
-    user: AuthenticatedUser,
-    id: string,
-  ): Promise<ItineraryResponseDto> {
-    const { itinerary: source, author } = await this.loadPublic(id);
-    const ownerId = new Types.ObjectId(user.userId);
-
-    // Each embedded day gets a new id; the rows that hang on a day are moved onto the matching new day.
-    const dayIds = new Map(
-      (source.days ?? []).map((day) => [
-        day._id.toString(),
-        new Types.ObjectId(),
-      ]),
-    );
-    const created = await this.model.create({
-      authorId: ownerId,
-      title: source.title,
-      countryCodes: source.countryCodes,
-      startDate: source.startDate,
-      visibility: Visibility.PRIVATE,
-      days: (source.days ?? []).map((day) => ({
-        _id: dayIds.get(day._id.toString()),
-        cityId: day.cityId,
-        notes: day.notes,
-      })),
-      clonedFrom: {
-        itineraryId: source._id,
-        authorId: source.authorId,
-        authorName: author.name,
-      },
-    });
-
-    // Wait for ALL three copies to finish, even when one fails: with Promise.all the clean-up below could run while
-    // another copy is still inserting, and those rows would be left behind with no itinerary.
-    const copies = await Promise.allSettled([
-      this.activities.copyForClone(source._id, created._id, ownerId, dayIds),
-      this.transportCosts.copyForClone(
-        source._id,
-        created._id,
-        ownerId,
-        dayIds,
-      ),
-      this.budgets.copyForClone(source._id, created._id, ownerId, dayIds),
-    ]);
-    const failed = copies.find((copy) => copy.status === 'rejected');
-    if (failed) {
-      await Promise.allSettled([
-        this.activities.removeForItinerary(created._id),
-        this.transportCosts.removeForItinerary(created._id),
-        this.budgets.removeForItinerary(created._id),
-        this.model.deleteOne({ _id: created._id }).exec(),
-      ]);
-      throw failed.reason;
-    }
-    return this.withActivities(created.toObject<ItineraryLean>());
-  }
-
-  /**
-   * The public itinerary that the read-only view and the clone work from, with its author's account: 404 for
-   * anything search would not list (private, hidden by an admin, author not ACTIVE, unknown id).
-   */
-  private async loadPublic(
-    id: string,
-  ): Promise<{ itinerary: ItineraryLean; author: { name: string } }> {
-    const itinerary = await this.model
-      .findOne({ _id: id, visibility: Visibility.PUBLIC, isHidden: false })
-      .lean<ItineraryLean>()
-      .exec();
-    if (!itinerary) throw new NotFoundException('Itinerary not found');
-
-    const author = await this.users.findById(itinerary.authorId.toString());
-    if (!author || author.status !== AccountStatus.ACTIVE) {
-      throw new NotFoundException('Itinerary not found');
-    }
-    return { itinerary, author };
-  }
-
-  /**
-   * The filter for the keyword: it matches when the title contains it, one of the itinerary's countries has a name
-   * containing it, or it visits a city whose name contains it. Country and city names come from the reference
-   * data (never read from its collections here); only the cities that public itineraries actually use are
-   * looked up. The keyword is escaped, so it is always plain text.
-   */
-  private async keywordClause(
-    keyword: string,
-    shared: { visibility: Visibility; isHidden: boolean },
-  ): Promise<FilterQuery<Itinerary>> {
-    const pattern = new RegExp(
-      keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
-      'i',
-    );
-    const [countries, usedCityIds] = await Promise.all([
-      this.referenceData.listCountries(),
-      this.model.distinct('days.cityId', shared).exec() as Promise<string[]>,
-    ]);
-    const cities = await Promise.all(
-      usedCityIds.map((cityId) => this.referenceData.findCityById(cityId)),
-    );
-    return {
-      $or: [
-        { title: pattern },
-        {
-          countryCodes: {
-            $in: countries
-              .filter((country) => pattern.test(country.name))
-              .map((country) => country.code),
-          },
-        },
-        {
-          'days.cityId': {
-            $in: cities.flatMap((city) =>
-              city && pattern.test(city.name) ? [city.city_id] : [],
-            ),
-          },
-        },
-      ],
-    };
   }
 
   /**
@@ -507,9 +264,9 @@ export class ItinerariesService {
 
   /**
    * The itinerary response with every day's activities (ITN-10), its transport costs (ITN-16) and its budget
-   * entries (ITN-14) filled in.
+   * entries (ITN-14) filled in. Public because ItineraryCloneService answers with the same shape.
    */
-  private async withActivities(
+  async withActivities(
     itinerary: ItineraryLean,
   ): Promise<ItineraryResponseDto> {
     const [activities, transportCosts, budgets] = await Promise.all([
@@ -659,71 +416,6 @@ export class ItinerariesService {
     await this.activities.removeForDay(updated._id, dayObjectId);
     await this.transportCosts.removeForDay(updated._id, dayObjectId);
     await this.budgets.removeForDay(updated._id, dayObjectId);
-  }
-
-  /**
-   * ITN-25: the owner picks one city group of their itinerary and sees the hotels that are free for it. The group is
-   * the run of consecutive days in one city that starts on `fromDayNumber` (derived on every read, as in ITN-09), so
-   * the stay is: check-in = the date of the group's first day, check-out = the day AFTER its last day (the last
-   * night is the one of the last day). The search itself is the HTL-11 `HotelSearchService`, called as it is: this
-   * method only turns the group into a city and two dates, so the search rules (guests and rooms fit, free for every
-   * night, ACTIVE hotels, order, paging) are not written a second time here.
-   *
-   * Someone else's or an unknown itinerary answers 404. A `fromDayNumber` where no group starts (or an itinerary
-   * without days) is a 400 on that field that lists the days where a group does start. A group that is already over
-   * is a 400 on the same field too: the hotel search refuses a check-in in the past, and that message would name a
-   * parameter the user never sent.
-   */
-  async hotelsForGroup(
-    user: AuthenticatedUser,
-    id: string,
-    query: GroupHotelsQueryDto,
-  ): Promise<HotelSearchPageDto> {
-    const itinerary = await this.model
-      .findOne({ _id: id, authorId: new Types.ObjectId(user.userId) })
-      .lean<ItineraryLean>()
-      .exec();
-    if (!itinerary) throw new NotFoundException('Itinerary not found');
-
-    const groups = groupDaysByCity(
-      (itinerary.days ?? []).map((day, index) =>
-        toItineraryDay(day, index, itinerary.startDate),
-      ),
-    );
-    const group = groups.find(
-      (candidate) => candidate.fromDayNumber === query.fromDayNumber,
-    );
-    if (!group) {
-      throw this.badGroup(
-        groups.length === 0
-          ? 'the itinerary has no days yet'
-          : `no city group starts on day ${query.fromDayNumber}; groups start on days ${groups
-              .map((candidate) => candidate.fromDayNumber)
-              .join(', ')}`,
-      );
-    }
-    if (group.startDate < todayUtc()) {
-      throw this.badGroup(
-        `the city group that starts on day ${group.fromDayNumber} began on ${group.startDate}, so its dates are in the past`,
-      );
-    }
-
-    return this.hotelSearch.search({
-      cityId: group.cityId,
-      checkIn: group.startDate,
-      checkOut: addDays(group.endDate, 1),
-      guests: query.guests,
-      rooms: query.rooms ?? 1,
-      page: query.page,
-      limit: query.limit,
-    });
-  }
-
-  private badGroup(message: string): BadRequestException {
-    return new BadRequestException({
-      message: 'Validation failed',
-      details: [{ field: 'fromDayNumber', message }],
-    });
   }
 
   /** The DTO of one day, numbered by its current position in the saved itinerary. */
