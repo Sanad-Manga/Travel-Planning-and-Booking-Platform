@@ -1,6 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { BookingStatus, CabinClass, PassengerType } from '../../common';
-import { FlightBookingLean } from '../schemas/flight-booking.schema';
+import {
+  FlightBookingLean,
+  FlightBookingSegment,
+  getFlightBookingSegments,
+} from '../schemas/flight-booking.schema';
 
 export class PassengerCountsDto {
   @ApiProperty({ example: 2 }) adults: number;
@@ -23,7 +27,12 @@ export class BookingPassengerResponseDto {
   })
   dateOfBirth: string;
 
-  @ApiProperty({ enum: PassengerType, example: PassengerType.CHILD })
+  @ApiProperty({
+    enum: PassengerType,
+    example: PassengerType.CHILD,
+    description:
+      "Age group on the outbound flight's local departure date: ADULT 12+, CHILD 2-11, INFANT under 2",
+  })
   passengerType: PassengerType;
 
   @ApiProperty({ type: [ExtraBagResponseDto] })
@@ -36,11 +45,42 @@ export class BookingPassengerResponseDto {
   baggageFeeCents: number;
 }
 
+export class FlightBookingSegmentResponseDto {
+  @ApiProperty({ example: '674a1b2c3d4e5f6a7b8c9d0e' })
+  flightId: string;
+
+  @ApiProperty({ enum: CabinClass, example: CabinClass.ECONOMY })
+  cabinClass: CabinClass;
+
+  @ApiProperty({
+    example: 3,
+    description: 'Seats held for this segment; infants take no seat',
+  })
+  seats: number;
+
+  @ApiProperty({ example: 45000, description: 'Fare per adult/child in cents' })
+  farePerPassengerCents: number;
+
+  @ApiProperty({ example: 4500, description: 'Fare per infant in cents' })
+  infantFareCents: number;
+
+  @ApiProperty({
+    example: 3000,
+    description: 'Extra-baggage fees for this segment in cents',
+  })
+  baggageFeeCents: number;
+}
+
 export class FlightBookingResponseDto {
   @ApiProperty({ example: '674a1b2c3d4e5f6a7b8c9d0f' }) id: string;
   @ApiProperty({ example: '674a1b2c3d4e5f6a7b8c9d0e' }) flightId: string;
   @ApiProperty({ enum: CabinClass, example: CabinClass.ECONOMY })
   cabinClass: CabinClass;
+  @ApiProperty({
+    type: [FlightBookingSegmentResponseDto],
+    description: 'Outbound then return; a one-way booking has one segment',
+  })
+  segments: FlightBookingSegmentResponseDto[];
   @ApiProperty({ type: PassengerCountsDto })
   passengerCounts: PassengerCountsDto;
   @ApiPropertyOptional({ type: [BookingPassengerResponseDto] })
@@ -93,10 +133,12 @@ export function toBookingPassengerResponse(
 export function toFlightBookingResponse(
   doc: FlightBookingLean,
 ): FlightBookingResponseDto {
+  const segments = getFlightBookingSegments(doc);
   return {
     id: doc._id.toString(),
     flightId: doc.flightId.toString(),
     cabinClass: doc.cabinClass,
+    segments: segments.map(toFlightBookingSegmentResponse),
     passengerCounts: {
       adults: doc.passengerCounts.adults,
       children: doc.passengerCounts.children,
@@ -114,5 +156,18 @@ export function toFlightBookingResponse(
     status: doc.status,
     holdExpiresAt: doc.holdExpiresAt ? doc.holdExpiresAt.toISOString() : null,
     createdAt: doc.createdAt.toISOString(),
+  };
+}
+
+export function toFlightBookingSegmentResponse(
+  segment: FlightBookingSegment,
+): FlightBookingSegmentResponseDto {
+  return {
+    flightId: segment.flightId.toString(),
+    cabinClass: segment.cabinClass,
+    seats: segment.seats,
+    farePerPassengerCents: segment.farePerPassengerCents,
+    infantFareCents: segment.infantFareCents,
+    baggageFeeCents: segment.baggageFeeCents,
   };
 }

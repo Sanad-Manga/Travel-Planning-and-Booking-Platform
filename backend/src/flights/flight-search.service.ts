@@ -11,6 +11,7 @@ import {
   FlightSortOrder,
 } from './dto/flight-search-query.dto';
 import {
+  FlightRoundTripSearchResponseDto,
   FlightSearchPageDto,
   SearchAirlineDto,
   toFlightSearchItem,
@@ -53,11 +54,28 @@ export class FlightSearchService {
   async search(
     query: FlightSearchQueryDto,
     now: Date = new Date(),
+  ): Promise<FlightSearchPageDto | FlightRoundTripSearchResponseDto> {
+    await this.validate(query);
+
+    const outbound = await this.searchOneWay(query, now);
+    if (query.returnDate === undefined) return outbound;
+
+    const returnQuery: FlightSearchQueryDto = {
+      ...query,
+      departureAirport: query.arrivalAirport,
+      arrivalAirport: query.departureAirport,
+      departureDate: query.returnDate,
+    };
+    const returnOptions = await this.searchOneWay(returnQuery, now);
+    return { outbound, return: returnOptions };
+  }
+
+  private async searchOneWay(
+    query: FlightSearchQueryDto,
+    now: Date,
   ): Promise<FlightSearchPageDto> {
     const { departureAirport, arrivalAirport, departureDate, passengers } = query;
     const { page, limit } = query;
-    await this.validate(query);
-
     const flights = await this.model
       .find({
         status: FlightStatus.SCHEDULED,
@@ -78,6 +96,7 @@ export class FlightSearchService {
     const cabinsWithSeats = await this.cabins.findWithSeats(
       ofActiveAirlines.map((f) => f._id),
       passengers,
+      query.cabinClass,
     );
     const cabinsByFlight = this.inPriceRange(
       cabinsWithSeats,
@@ -177,11 +196,26 @@ export class FlightSearchService {
 
   private async validate(query: FlightSearchQueryDto): Promise<void> {
     const errors: FieldError[] = [];
-    if (!isRealDate(query.departureDate)) {
+    const validDepartureDate = isRealDate(query.departureDate);
+    if (!validDepartureDate) {
       errors.push({
         field: 'departureDate',
         message: 'departureDate must be a real calendar date (YYYY-MM-DD)',
       });
+    }
+    if (query.returnDate !== undefined) {
+      const validReturnDate = isRealDate(query.returnDate);
+      if (!validReturnDate) {
+        errors.push({
+          field: 'returnDate',
+          message: 'returnDate must be a real calendar date (YYYY-MM-DD)',
+        });
+      } else if (validDepartureDate && query.returnDate < query.departureDate) {
+        errors.push({
+          field: 'returnDate',
+          message: 'returnDate must be on or after departureDate',
+        });
+      }
     }
     if (query.departureAirport === query.arrivalAirport) {
       errors.push({

@@ -14,6 +14,7 @@ import { BookingProviderRegistry } from '../payments/booking-provider.registry';
 import {
   FlightBooking,
   FlightBookingLean,
+  getFlightBookingSegments,
 } from './schemas/flight-booking.schema';
 
 export interface FlightPayable {
@@ -110,20 +111,27 @@ export class FlightBookingProvider implements BookingProvider, OnModuleInit {
         .exec();
       if (!before) return;
 
-      if (to === BookingStatus.EXPIRED) {
-        await this.inventory.releaseHeldSeats(
-          before.flightId,
-          before.cabinClass,
-          before.seats,
-          session,
-        );
-      } else if (to === BookingStatus.CANCELLED) {
-        await this.inventory.returnBookedSeats(
-          before.flightId,
-          before.cabinClass,
-          before.seats,
-          session,
-        );
+      if (
+        to === BookingStatus.EXPIRED ||
+        to === BookingStatus.CANCELLED
+      ) {
+        for (const segment of getFlightBookingSegments(before)) {
+          if (to === BookingStatus.EXPIRED) {
+            await this.inventory.releaseHeldSeats(
+              segment.flightId,
+              segment.cabinClass,
+              segment.seats,
+              session,
+            );
+          } else {
+            await this.inventory.returnBookedSeats(
+              segment.flightId,
+              segment.cabinClass,
+              segment.seats,
+              session,
+            );
+          }
+        }
       }
       applied = true;
     });
@@ -160,12 +168,14 @@ export class FlightBookingProvider implements BookingProvider, OnModuleInit {
         .exec();
 
       if (before) {
-        await this.inventory.confirmHeldSeats(
-          before.flightId,
-          before.cabinClass,
-          before.seats,
-          session,
-        );
+        for (const segment of getFlightBookingSegments(before)) {
+          await this.inventory.confirmHeldSeats(
+            segment.flightId,
+            segment.cabinClass,
+            segment.seats,
+            session,
+          );
+        }
         outcome.booking = before;
         outcome.kind = 'CONFIRMED_NOW';
         return;
