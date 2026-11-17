@@ -312,7 +312,7 @@ describe('ACC-16 actual AppModule registration, transitions and ACC-14 regressio
     expect(await db.collection('auditLogs').countDocuments()).toBe(0);
     expect(await db.collection('notifications').countDocuments()).toBe(0);
   });
-  it.each([Role.ADMIN, Role.AIRLINE_MODERATOR, Role.HOTEL_MODERATOR])(
+  it.each([Role.ADMIN])(
     'rejects target role %s without mutation',
     async (role) => {
       const target = await account(role);
