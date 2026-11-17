@@ -1,5 +1,10 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { AirlinesModule } from '../airlines';
+import { FlightCabinsReader } from '../flights/flight-cabins.reader';
+import { FlightSearchService } from '../flights/flight-search.service';
+import { Cabin, CabinSchema } from '../flights/schemas/cabin.schema';
+import { Flight, FlightSchema } from '../flights/schemas/flight.schema';
 import { FxModule } from '../fx';
 import { HotelSearchService } from '../hotels/hotel-search.service';
 import { HotelsModule } from '../hotels/hotels.module';
@@ -16,6 +21,8 @@ import { ItinerariesController } from './itineraries.controller';
 import { ItinerariesService } from './itineraries.service';
 import { ItineraryCloneController } from './itinerary-clone.controller';
 import { ItineraryCloneService } from './itinerary-clone.service';
+import { ItineraryFlightsController } from './itinerary-flights.controller';
+import { ItineraryFlightsService } from './itinerary-flights.service';
 import { ItineraryHotelsController } from './itinerary-hotels.controller';
 import { ItineraryHotelsService } from './itinerary-hotels.service';
 import { ItineraryItemsController } from './itinerary-items.controller';
@@ -36,6 +43,9 @@ import { TransportCostsService } from './transport-costs.service';
       { name: Activity.name, schema: ActivitySchema },
       { name: TransportCost.name, schema: TransportCostSchema },
       { name: Budget.name, schema: BudgetSchema },
+      // ITN-26: the flight search (FLT-11) reads these two collections; see the providers below.
+      { name: Flight.name, schema: FlightSchema },
+      { name: Cabin.name, schema: CabinSchema },
     ]),
     // Countries are validated through ReferenceDataService, never by reading the collection directly.
     ReferenceDataModule,
@@ -47,6 +57,8 @@ import { TransportCostsService } from './transport-costs.service';
     HotelsModule,
     // ITN-18: the budget summary's grand total is converted into the caller's preferred currency.
     FxModule,
+    // ITN-26: the flight search looks airlines up through AirlinesService.
+    AirlinesModule,
   ],
   // The public controller comes first so its static paths win over ItinerariesController's /:id.
   controllers: [
@@ -54,6 +66,7 @@ import { TransportCostsService } from './transport-costs.service';
     ItinerariesController,
     ItineraryItemsController,
     ItineraryHotelsController,
+    ItineraryFlightsController,
     ItineraryCloneController,
     ActivitiesController,
     TransportCostsController,
@@ -64,6 +77,7 @@ import { TransportCostsService } from './transport-costs.service';
     ItinerariesPublicService,
     ItineraryCloneService,
     ItineraryHotelsService,
+    ItineraryFlightsService,
     ActivitiesService,
     TransportCostsService,
     BudgetsService,
@@ -71,6 +85,12 @@ import { TransportCostsService } from './transport-costs.service';
     // the SAME class (not a copy of its logic) here; it is stateless and takes only what is imported above. If the
     // hotels owner adds it to the exports of HotelsModule, delete this line.
     HotelSearchService,
+    // ITN-26: the same situation for the flight search: FlightsModule exports only FlightsService, and its module is
+    // not mine to change. This provides the SAME classes (not a copy of their logic) here, with the models and the
+    // airline lookup imported above. If the flights owner adds FlightSearchService to the exports of FlightsModule,
+    // delete these two lines, the Flight and Cabin entries of forFeature and the AirlinesModule import.
+    FlightSearchService,
+    FlightCabinsReader,
   ],
   // Blog (author page) and Reports (hide/delete) look itineraries up through the service, never the model.
   exports: [ItinerariesService, ItinerariesPublicService],
