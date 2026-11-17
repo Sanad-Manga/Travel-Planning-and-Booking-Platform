@@ -58,7 +58,17 @@ export class UploadStorage {
       try {
         await fs.unlink(file);
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        // Windows can report EPERM instead of ENOENT when another deleter just
+        // removed this generated path. Confirm absence; an existing/unreadable
+        // file remains an error, so genuine permission failures are never hidden.
+        if ((error as NodeJS.ErrnoException).code === 'EPERM') {
+          try { await fs.lstat(file); }
+          catch (checkError) {
+            if ((checkError as NodeJS.ErrnoException).code === 'ENOENT') continue;
+          }
+        }
+        throw error;
       }
     }
   }

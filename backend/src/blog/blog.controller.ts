@@ -14,8 +14,10 @@ import {
 import {
   ApiBadRequestResponse,
   ApiCookieAuth,
+  ApiConflictResponse,
   ApiCreatedResponse,
   ApiNoContentResponse,
+  ApiInternalServerErrorResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
@@ -52,12 +54,13 @@ export class BlogController {
   @ApiOperation({
     summary:
       'Create a blog post as DRAFT (default, private) or PUBLISHED (any logged-in user)',
+    description: 'Create accepts omitted images or images: [] only. Nonempty direct image references are rejected. Attach images through POST /api/posts/:id/images and remove them through DELETE /api/posts/:id/images/:imageId.',
   })
   @ApiCreatedResponse({ type: PostResponseDto })
   @ApiBadRequestResponse({
     type: ErrorResponseDto,
     description:
-      'Missing title/body, invalid field, more than 5 tags or images',
+      'Missing title/body, invalid field, more than 5 tags, or nonempty direct image references; create accepts only omitted/empty images',
   })
   @ApiUnauthorizedResponse({
     type: ErrorResponseDto,
@@ -178,12 +181,13 @@ export class BlogController {
   @Patch(':id')
   @ApiOperation({
     summary:
-      'Edit my own post (partial update of title, body, tags, images, status)',
+      'Edit my own post (partial update of title, body, tags, status; use image endpoints for attachments)',
+    description: 'PATCH rejects every supplied images field, including an empty array. Use the dedicated POST/DELETE image endpoints; other post fields retain their existing behavior.',
   })
   @ApiOkResponse({ type: PostResponseDto })
   @ApiBadRequestResponse({
     type: ErrorResponseDto,
-    description: 'Empty body, invalid field, more than 5 tags or images',
+    description: 'Empty body, invalid field, more than 5 tags, or any supplied images field; use the dedicated image endpoints',
   })
   @ApiUnauthorizedResponse({
     type: ErrorResponseDto,
@@ -204,9 +208,11 @@ export class BlogController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
-    summary: 'Delete my own post together with its comments and likes',
+    summary: 'Delete my own post together with its managed images, comments and likes',
   })
   @ApiNoContentResponse({ description: 'Deleted' })
+  @ApiConflictResponse({ type: ErrorResponseDto, description: 'Post images changed during cleanup; retry deletion.' })
+  @ApiInternalServerErrorResponse({ type: ErrorResponseDto, description: 'Image/database cleanup failed. Retry; references may temporarily point to deleted files.' })
   @ApiUnauthorizedResponse({
     type: ErrorResponseDto,
     description: 'Not logged in',

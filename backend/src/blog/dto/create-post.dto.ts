@@ -21,20 +21,20 @@ const cleanTags = ({ value }: { value: unknown }) => {
 };
 
 export class PostImageDto {
-  @ApiProperty({ description: 'Id returned by the Upload service (GEN-08). Not verified yet (see BLG-10).', example: '6730a1f2c3d4e5f607182931' })
+  @ApiProperty({ description: 'Server-generated upload ID returned by the post image endpoint (BLG-10).', example: '6730a1f2c3d4e5f607182931' })
   @IsString()
   @IsNotEmpty()
   @MaxLength(100)
   id: string;
 
   @ApiProperty({
-    description: 'Url returned by the Upload service (GEN-08). Must be an upload path (/uploads/...) until the service exists.',
-    example: '/uploads/posts/6730a1f2.jpg',
+    description: 'Backend-relative public image URL returned by the shared UploadService.',
+    example: '/uploads/6730a1f2c3d4e5f607182931.jpg',
   })
   @IsString()
   @IsNotEmpty()
   @MaxLength(500)
-  // Stub until the Upload service (GEN-08) can vouch for ids (BLG-10): only a local /uploads/ path, no scheme, host or "..".
+  // Retained response/legacy representation; create/update cannot attach client-provided references.
   @Matches(/^\/uploads\/(?!.*\.\.)[\w\-./]+$/, { message: 'url must be an upload path such as /uploads/posts/photo.jpg' })
   url: string;
 }
@@ -68,7 +68,7 @@ export class CreatePostDto {
   @MaxLength(TAG_MAX_LENGTH, { each: true })
   tags?: string[];
 
-  @ApiPropertyOptional({ type: [PostImageDto], maxItems: MAX_IMAGES_PER_ENTITY, description: 'References to uploaded images (BLG-10).' })
+  @ApiPropertyOptional({ type: [PostImageDto], maxItems: 0, deprecated: true, description: 'Legacy input: only omitted/empty on create; any provided images field is rejected on PATCH. Use POST/DELETE /posts/:id/images instead.' })
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(MAX_IMAGES_PER_ENTITY)

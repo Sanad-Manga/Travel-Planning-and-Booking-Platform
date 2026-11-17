@@ -74,6 +74,44 @@ describe('UploadService real MongoDB, filesystem, concurrency and recovery', () 
     if (root) await fs.rm(root, { recursive: true, force: true });
   });
 
+  it('scoped removal never removes another entity/kind, and retries missing records idempotently', async () => {
+    const ref = await service.save(file, { kind: 'post', ownerId: 'postA' });
+    await service.removeForTarget(ref.id, { kind: 'post', ownerId: 'postB' });
+    await service.removeForTarget(ref.id, { kind: 'hotel', ownerId: 'postA' });
+    expect(await model.findById(ref.id).lean()).toMatchObject({ state: 'ready', ownerId: 'postA' });
+    expect(await fs.readFile(join(root, 'public', `${ref.id}.png`))).toEqual(file.buffer);
+    await service.removeForTarget(ref.id, { kind: 'post', ownerId: 'postA' });
+    await service.removeForTarget(ref.id, { kind: 'post', ownerId: 'postA' });
+    expect(await model.findById(ref.id)).toBeNull();
+    await expect(service.removeForTarget('invalid', target)).rejects.toMatchObject({ status: 400 });
+    await expect(service.removeForTarget(ref.id, { kind: 'post', ownerId: '../bad' })).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('accepts Windows concurrent-unlink EPERM only when the generated path is already absent', async () => {
+    const ref = await service.save(file, target);
+    const publicPath = join(root, 'public', `${ref.id}.png`);
+    const unlink = fs.unlink.bind(fs);
+    jest.spyOn(fs, 'unlink').mockImplementation(async path => {
+      await unlink(path);
+      if (String(path) === publicPath) throw Object.assign(new Error('synthetic concurrent unlink'), { code: 'EPERM' });
+    });
+    await service.removeForTarget(ref.id, target);
+    expect(await model.findById(ref.id)).toBeNull();
+  });
+
+  it('does not swallow a genuine EPERM while the generated file still exists', async () => {
+    const ref = await service.save(file, target);
+    const publicPath = join(root, 'public', `${ref.id}.png`);
+    const unlink = fs.unlink.bind(fs);
+    jest.spyOn(fs, 'unlink').mockImplementation(async path => {
+      if (String(path) === publicPath) throw Object.assign(new Error('synthetic permission failure'), { code: 'EPERM' });
+      await unlink(path);
+    });
+    await expect(service.removeForTarget(ref.id, target)).rejects.toMatchObject({ status: 500 });
+    expect(await model.findById(ref.id).lean()).toMatchObject({ state: 'deleting' });
+    expect(await fs.readFile(publicPath)).toEqual(file.buffer);
+  });
+
   it('persists verified metadata and original bytes with safe filenames, then removes idempotently', async () => {
     const result = await service.save(
       { ...file, originalname: '../../secret.png' } as UploadFile,
