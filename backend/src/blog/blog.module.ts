@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { UsersModule } from '../users/users.module';
 import { BlogController } from './blog.controller';
 import { BlogService } from './blog.service';
+import { CommentItemController } from './comment-item.controller';
 import { CommentsController } from './comments.controller';
 import { CommentsService } from './comments.service';
 import { Comment, CommentSchema } from './schemas/comment.schema';
@@ -19,7 +20,7 @@ import { TagsController } from './tags.controller';
     ]),
     UsersModule,
   ],
-  controllers: [BlogController, TagsController, CommentsController],
+  controllers: [BlogController, TagsController, CommentsController, CommentItemController],
   providers: [BlogService, CommentsService],
   // Comments, likes and search (other BLG tickets) will inject BlogService / the Post model from here.
   exports: [BlogService, MongooseModule],

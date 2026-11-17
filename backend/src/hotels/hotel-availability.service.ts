@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { coversStay } from './hotel-availability.rules';
+import { coversStay, rangeOverlaps } from './hotel-availability.rules';
 import { RoomReservations } from './room-reservations';
 import { Room } from './schemas/room.schema';
 
@@ -26,8 +26,7 @@ export interface FreeRoom {
  *  1. room.isActive (HTL-06: not taken out of sale);
  *  2. its availability ranges (HTL-04, half-open [startDate, endDate)) cover EVERY night checkIn ... checkOut-1.
  *     Adjacent ranges (one ends the day the next starts) count together; a gap of one night makes the room not free;
- *  3. it is not blocked: the schema has NO blocked ranges today (HTL-05 only edits ranges and rooms), so there is
- *     nothing to check here yet. If blocked ranges are added, add the filter in this one method;
+ *  3. it is not blocked: no blocked range of the room (HTL-06) overlaps the stay;
  *  4. it is not reserved or held: asked through the abstract RoomReservations (stubbed until Hessain's HTL-16/18).
  *
  * Bounded cost: 2 queries however many hotels or rooms: one on `rooms` and one RoomReservations call for all
@@ -51,7 +50,8 @@ export class HotelAvailabilityService {
       .find({
         hotelId: { $in: validIds.map((id) => new Types.ObjectId(id)) },
         isActive: true,
-        availability: { $elemMatch: { startDate: { $lt: checkOut }, endDate: { $gt: checkIn } } },
+        availability: { $elemMatch: rangeOverlaps(checkIn, checkOut) },
+        blockedRanges: { $not: { $elemMatch: rangeOverlaps(checkIn, checkOut) } },
       })
       .select('hotelId name type beds maxOccupancy pricePerNightCents availability')
       .lean()

@@ -10,6 +10,7 @@ import { AuthenticatedUser, Role } from '../common';
 import { HotelSearchService } from '../hotels/hotel-search.service';
 import { ItinerariesModule } from './itineraries.module';
 import { ItinerariesService } from './itineraries.service';
+import { ItineraryHotelsService } from './itinerary-hotels.service';
 import { Itinerary } from './schemas/itinerary.schema';
 
 jest.setTimeout(60000);
@@ -24,6 +25,7 @@ describe('Hotels for a city group (ITN-25) with an isolated MongoDB', () => {
   let connection: Connection;
   let model: Model<Itinerary>;
   let service: ItinerariesService;
+  let hotels: ItineraryHotelsService;
   let hotelSearch: HotelSearchService;
 
   const userWithId = (): AuthenticatedUser => ({
@@ -96,7 +98,7 @@ describe('Hotels for a city group (ITN-25) with an isolated MongoDB', () => {
     by: AuthenticatedUser = owner,
   ) =>
     (
-      await service.hotelsForGroup(by, id, { guests: 2, ...page, ...query })
+      await hotels.hotelsForGroup(by, id, { guests: 2, ...page, ...query })
     ).items.map((item) => item.name);
 
   beforeAll(async () => {
@@ -109,7 +111,8 @@ describe('Hotels for a city group (ITN-25) with an isolated MongoDB', () => {
     await moduleRef.init();
     model = moduleRef.get<Model<Itinerary>>(getModelToken(Itinerary.name));
     service = moduleRef.get(ItinerariesService);
-    // The instance ItinerariesService uses is the one provided by ItinerariesModule, not HotelsModule's own.
+    hotels = moduleRef.get(ItineraryHotelsService);
+    // The instance ItineraryHotelsService uses is the one provided by ItinerariesModule, not HotelsModule's own.
     hotelSearch = moduleRef
       .select(ItinerariesModule)
       .get(HotelSearchService, { strict: true });
@@ -156,7 +159,7 @@ describe('Hotels for a city group (ITN-25) with an isolated MongoDB', () => {
     it('searches from the first day of the group to the day after its last day', async () => {
       const id = await planned();
 
-      const result = await service.hotelsForGroup(owner, id, {
+      const result = await hotels.hotelsForGroup(owner, id, {
         fromDayNumber: 1,
         guests: 2,
         ...page,
@@ -176,7 +179,7 @@ describe('Hotels for a city group (ITN-25) with an isolated MongoDB', () => {
       const id = await planned();
       const spy = jest.spyOn(hotelSearch, 'search');
 
-      await service.hotelsForGroup(owner, id, {
+      await hotels.hotelsForGroup(owner, id, {
         fromDayNumber: 3,
         guests: 3,
         rooms: 2,
@@ -238,7 +241,7 @@ describe('Hotels for a city group (ITN-25) with an isolated MongoDB', () => {
     it('defaults to one room', async () => {
       const id = await planned();
       const spy = jest.spyOn(hotelSearch, 'search');
-      await service.hotelsForGroup(owner, id, {
+      await hotels.hotelsForGroup(owner, id, {
         fromDayNumber: 1,
         guests: 2,
         ...page,
@@ -256,7 +259,7 @@ describe('Hotels for a city group (ITN-25) with an isolated MongoDB', () => {
         [owner, new Types.ObjectId().toString()],
       ] as const) {
         await expect(
-          service.hotelsForGroup(by, itineraryId, {
+          hotels.hotelsForGroup(by, itineraryId, {
             fromDayNumber: 1,
             guests: 2,
             ...page,
@@ -273,7 +276,7 @@ describe('Hotels for a city group (ITN-25) with an isolated MongoDB', () => {
       // day 2 is inside the first group, day 9 is past the end
       for (const fromDayNumber of [2, 9]) {
         await expect(
-          service.hotelsForGroup(owner, id, {
+          hotels.hotelsForGroup(owner, id, {
             fromDayNumber,
             guests: 2,
             ...page,
@@ -299,7 +302,7 @@ describe('Hotels for a city group (ITN-25) with an isolated MongoDB', () => {
         startDate: day(10),
       });
       await expect(
-        service.hotelsForGroup(owner, id, {
+        hotels.hotelsForGroup(owner, id, {
           fromDayNumber: 1,
           guests: 2,
           ...page,
@@ -320,7 +323,7 @@ describe('Hotels for a city group (ITN-25) with an isolated MongoDB', () => {
       const spy = jest.spyOn(hotelSearch, 'search');
 
       await expect(
-        service.hotelsForGroup(owner, id, {
+        hotels.hotelsForGroup(owner, id, {
           fromDayNumber: 1,
           guests: 2,
           ...page,
