@@ -25,16 +25,16 @@ export class HotelBookingsController {
   @Post()
   @Roles(Role.USER)
   @ApiOperation({
-    summary: 'Create a hotel reservation and hold its rooms for payment (HTL-16)',
+    summary: 'Create a hotel reservation with an all-or-nothing room hold (HTL-18)',
     description:
       'Send check-in/check-out dates and each selected room with its adult/child counts. All rooms must be in the same hotel. ' +
-      'The API re-checks date availability and existing reservations in one transaction, snapshots the room prices, and creates a PENDING_PAYMENT reservation held for HOLD_MINUTES.',
+      'The API re-checks room availability, blocked ranges, and overlapping reservations in one MongoDB transaction. It creates one PENDING_PAYMENT reservation holding every selected room for HOLD_MINUTES; if any room conflicts, the request returns 409 and holds none.',
   })
   @ApiCreatedResponse({ type: HotelBookingResponseDto })
   @ApiBadRequestResponse({ type: ErrorResponseDto, description: 'Invalid dates, no adult in the reservation, invalid room selection, or a room exceeds its maximum occupancy' })
   @ApiForbiddenResponse({ type: ErrorResponseDto, description: 'Only a registered traveler can create a hotel reservation' })
   @ApiNotFoundResponse({ type: ErrorResponseDto, description: 'A selected hotel is not active' })
-  @ApiConflictResponse({ type: ErrorResponseDto, description: 'A selected room is unavailable, reserved, or held by another reservation' })
+  @ApiConflictResponse({ type: ErrorResponseDto, description: 'A selected room is unavailable, blocked, overlaps a confirmed reservation, or has an unexpired hold' })
   create(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CreateHotelBookingDto,

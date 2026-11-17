@@ -1710,3 +1710,9 @@ Prompt:
 Add getPayable(id, userId) to HotelBookingsService, mirroring FlightBookingProvider: query by booking id and owner id, return the stored total as amountCents with currency/status/holdExpiresAt, and return null for invalid, missing, or not-owned bookings. Add focused happy-path, wrong-owner, and unknown-id coverage. Do not edit Payments or other modules.
 How the output was used:
 Added the owner-scoped getPayable method to backend/src/hotels/hotel-bookings.service.ts and extended backend/test/hotel-bookings.e2e-spec.ts to verify mapped payable fields and null results for a different owner, malformed id, and unknown booking. No Payments files were changed.
+Related Requirement: HTL-18 (All-or-nothing room hold)
+Prompt:
+Continue HTL-18 on the clean branch after HTL-06 merges. Keep this PR limited to HTL-18; do not implement HTL-17 or PAY-01. Verify a multi-room request that includes a blocked room fails as a whole and leaves the other selected room unheld; update the booking Swagger and API documentation for all-or-nothing holds.
+How the output was used:
+The updated develop already contains HTL-16's transactional all-or-nothing room hold and HTL-06's blocked-range checks, so I did not duplicate or alter production booking logic. Added an HTTP E2E test that blocks one of two selected rooms, verifies the request returns 409 and creates no reservation, and verifies the other room remains available; added cleanup so the block does not leak into later tests. Updated the POST booking Swagger summary/conflict description and docs/api/hotel-bookings.md with HTL-18 hold, blocked-range, expiry and conflict behavior. No HTL-17 or PAY-01 code was changed.
+Verification: hotel-bookings E2E 14/14, room-block-deactivate-delete E2E 30/30, Nest build and focused ESLint passed. The first combined run exposed test-fixture leakage from the new blocked-range case; cleanup was added and hotel-bookings E2E was rerun successfully.

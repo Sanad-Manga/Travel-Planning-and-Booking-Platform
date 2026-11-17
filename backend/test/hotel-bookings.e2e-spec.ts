@@ -134,6 +134,7 @@ describe('hotel bookings (HTL-16) over HTTP', () => {
 
   beforeEach(async () => {
     await db.collection('hotelBookings').deleteMany({});
+    await db.collection('rooms').updateOne({ _id: roomIds.standard }, { $unset: { blockedRanges: '' } });
   });
 
   afterAll(async () => {
@@ -300,6 +301,38 @@ describe('hotel bookings (HTL-16) over HTTP', () => {
     expect(available.body.items.map((item: { roomId: string }) => item.roomId)).toContain(roomIds.family.toHexString());
   });
 
+  it('rejects a blocked room and leaves the other selected room unheld (HTL-18)', async () => {
+    await db.collection('rooms').updateOne(
+      { _id: roomIds.standard },
+      {
+        $set: {
+          blockedRanges: [{ _id: new Types.ObjectId(), startDate: day(2), endDate: day(4) }],
+        },
+      },
+    );
+
+    await http()
+      .post('/api/hotel-bookings')
+      .set('Cookie', travelerCookie)
+      .send({
+        checkIn: day(2),
+        checkOut: day(5),
+        rooms: [
+          { roomId: roomIds.standard.toHexString(), adults: 1, children: 0 },
+          { roomId: roomIds.family.toHexString(), adults: 1, children: 0 },
+        ],
+      })
+      .expect(409);
+
+    expect(await bookingCount()).toBe(0);
+    const available = await http()
+      .get(`/api/hotels/${hotelId.toHexString()}/rooms/available`)
+      .query({ checkIn: day(2), checkOut: day(5) })
+      .expect(200);
+    expect(available.body.items.map((item: { roomId: string }) => item.roomId)).toContain(roomIds.family.toHexString());
+    expect(available.body.items.map((item: { roomId: string }) => item.roomId)).not.toContain(roomIds.standard.toHexString());
+  });
+
   it('allows only one of two parallel holds for the same room', async () => {
     const payload = requestBody(roomIds.standard);
     const responses = await Promise.all([
@@ -376,6 +409,6 @@ describe('hotel bookings (HTL-16) over HTTP', () => {
 
   it('documents the endpoint in Swagger', async () => {
     const response = await http().get('/api/docs-json').expect(200);
-    expect(response.body.paths['/api/hotel-bookings'].post).toBeDefined();
+    expect(response.body.paths['/api/hotel-bookings'].post.summary).toContain('HTL-18');
   });
 });

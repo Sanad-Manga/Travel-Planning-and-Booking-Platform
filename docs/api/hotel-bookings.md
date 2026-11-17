@@ -38,6 +38,17 @@ changes do not alter the reservation.
 
 Response: the created reservation DTO (`id`, hotel, dates, room snapshots, total, status and `holdExpiresAt`).
 
+## Atomic room holds (HTL-18)
+
+The same `POST /api/hotel-bookings` request creates one `PENDING_PAYMENT` reservation and holds every selected room
+until `holdExpiresAt` (`HOLD_MINUTES`, 10 minutes by default). Availability, blocked ranges, and overlapping
+reservations are rechecked in one MongoDB transaction. If a selected room overlaps a `CONFIRMED` reservation, an
+unexpired `PENDING_PAYMENT` hold, or a moderator-defined blocked range, the whole request returns 409 and holds no
+rooms. Concurrent attempts for the same room are serialized so only one can succeed.
+
+The `BookingLifecycle` expiry sweep changes due holds to `EXPIRED`; expired reservations no longer count as inventory
+claims, so the rooms become available again. Check-out must be after check-in, and check-in cannot be in the past.
+
 ## Reservation lookups
 
 `RoomReservations.findReservedRoomIds(roomIds, startDate, endDate)` returns rooms with an overlapping `CONFIRMED`
