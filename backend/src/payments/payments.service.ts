@@ -48,7 +48,7 @@ export class PaymentsService {
       userId: user.userId,
     });
 
-    const created = await this.payments.create({
+    const created = await this.savePayment({
       bookingType,
       bookingId: new Types.ObjectId(bookingId),
       userId: new Types.ObjectId(user.userId),
@@ -76,7 +76,7 @@ export class PaymentsService {
       userId: user.userId,
     });
 
-    const created = await this.payments.create({
+    const created = await this.savePayment({
       bookingType: previous.bookingType,
       bookingId: previous.bookingId,
       userId: new Types.ObjectId(user.userId),
@@ -144,6 +144,7 @@ export class PaymentsService {
       .exec();
   }
 
+  /** Cheap fast-fail for the common case; NOT the real guarantee (see savePayment). */
   private async assertNoPaymentInFlight(bookingType: BookingType, bookingId: string): Promise<void> {
     const inFlight = await this.payments
       .exists({
@@ -153,6 +154,31 @@ export class PaymentsService {
       })
       .exec();
     if (inFlight) throw new ConflictException('A payment is already in progress for this booking');
+  }
+
+  /**
+   * The actual atomic "only one in flight per booking" guarantee: `payment.schema.ts`'s unique
+   * partial index rejects a second concurrent insert with Mongo error 11000, which becomes a 409
+   * here. `assertNoPaymentInFlight` above is only a friendlier fast path for the common case —
+   * two requests racing past it and both reaching this insert is exactly what the index prevents.
+   */
+  private async savePayment(doc: {
+    bookingType: BookingType;
+    bookingId: Types.ObjectId;
+    userId: Types.ObjectId;
+    stripePaymentIntentId: string;
+    amountCents: number;
+    currency: string;
+    status: PaymentStatus;
+  }): Promise<PaymentLean> {
+    try {
+      return (await this.payments.create(doc)) as unknown as PaymentLean;
+    } catch (err) {
+      if ((err as { code?: number })?.code === 11000) {
+        throw new ConflictException('A payment is already in progress for this booking');
+      }
+      throw err;
+    }
   }
 
   private async getPayableOrThrow(bookingType: BookingType, bookingId: string, userId: string): Promise<Payable> {
