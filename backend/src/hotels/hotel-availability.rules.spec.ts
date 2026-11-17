@@ -1,4 +1,4 @@
-import { cheapestNightlyCombination, coversStay, nightsBetween, stayTotalCents, todayUtc } from './hotel-availability.rules';
+import { cheapestNightlyCombination, coversStay, nightsBetween, rangeOverlaps, stayTotalCents, todayUtc } from './hotel-availability.rules';
 
 describe('hotel search rules (HTL-11)', () => {
   describe('nightsBetween', () => {
@@ -86,5 +86,27 @@ describe('stayTotalCents (HTL-15)', () => {
   });
   it('matches the nights counted from the dates', () => {
     expect(stayTotalCents(10_000, nightsBetween('2027-03-10', '2027-03-14'))).toBe(40_000);
+  });
+});
+
+describe('rangeOverlaps (HTL-06)', () => {
+  // The condition is {start < end, end > start}; evaluate it on plain values the way Mongo's $elemMatch does.
+  const overlaps = (existing: { startDate: string; endDate: string }, startDate: string, endDate: string): boolean => {
+    const c = rangeOverlaps(startDate, endDate);
+    return existing.startDate < c.startDate.$lt && existing.endDate > c.endDate.$gt;
+  };
+  const block = { startDate: '2027-03-10', endDate: '2027-03-13' };
+
+  it('is true for any shared night: inside, around, and partial overlaps on either side', () => {
+    expect(overlaps(block, '2027-03-11', '2027-03-12')).toBe(true);
+    expect(overlaps(block, '2027-03-09', '2027-03-14')).toBe(true);
+    expect(overlaps(block, '2027-03-08', '2027-03-11')).toBe(true);
+    expect(overlaps(block, '2027-03-12', '2027-03-15')).toBe(true);
+    expect(overlaps(block, '2027-03-10', '2027-03-13')).toBe(true);
+  });
+  it('is false for adjacent ranges (the check-out day is not a night) and for disjoint ones', () => {
+    expect(overlaps(block, '2027-03-07', '2027-03-10')).toBe(false);
+    expect(overlaps(block, '2027-03-13', '2027-03-15')).toBe(false);
+    expect(overlaps(block, '2027-03-01', '2027-03-05')).toBe(false);
   });
 });

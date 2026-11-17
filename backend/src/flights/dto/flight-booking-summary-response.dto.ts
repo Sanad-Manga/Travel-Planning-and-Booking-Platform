@@ -2,9 +2,15 @@ import { ApiProperty } from '@nestjs/swagger';
 import { BookingStatus, CabinClass } from '../../common';
 import {
   BookingPassengerResponseDto,
+  FlightBookingSegmentResponseDto,
   PassengerCountsDto,
 } from './flight-booking-response.dto';
 import { FlightResponseDto } from './flight-response.dto';
+
+export class FlightBookingSummarySegmentDto extends FlightBookingSegmentResponseDto {
+  @ApiProperty({ type: FlightResponseDto })
+  flight: FlightResponseDto;
+}
 
 export class FlightBookingSummaryResponseDto {
   @ApiProperty({ example: '674a1b2c3d4e5f6a7b8c9d0f' })
@@ -12,6 +18,12 @@ export class FlightBookingSummaryResponseDto {
 
   @ApiProperty({ type: FlightResponseDto })
   flight: FlightResponseDto;
+
+  @ApiProperty({
+    type: [FlightBookingSummarySegmentDto],
+    description: 'Outbound then return; a one-way booking has one segment',
+  })
+  segments: FlightBookingSummarySegmentDto[];
 
   @ApiProperty({ enum: CabinClass, example: CabinClass.ECONOMY })
   cabinClass: CabinClass;

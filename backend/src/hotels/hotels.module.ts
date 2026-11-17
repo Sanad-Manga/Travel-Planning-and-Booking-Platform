@@ -7,6 +7,8 @@ import { UsersModule } from '../users/users.module';
 import { HotelBookingsController } from './hotel-bookings.controller';
 import { HotelBookingsService } from './hotel-bookings.service';
 import { HotelAvailabilityService } from './hotel-availability.service';
+import { HotelDetailsController } from './hotel-details.controller';
+import { HotelDetailsService } from './hotel-details.service';
 import { HotelFreeRoomsController } from './hotel-free-rooms.controller';
 import { HotelFreeRoomsService } from './hotel-free-rooms.service';
 import { HotelRoomStatusController } from './hotel-room-status.controller';
@@ -34,10 +36,19 @@ import { Room, RoomSchema } from './schemas/room.schema';
     NotificationsModule,
     UsersModule,
   ],
-  // HotelSearchController first: fixed routes (search) must be matched before any future :id route.
-  controllers: [HotelSearchController, HotelFreeRoomsController, HotelRoomStatusController, HotelBookingsController, HotelsController, RoomsController],
+  // HotelSearchController first: the fixed route (search) must be matched before GET :id (HotelDetailsController).
+  controllers: [
+    HotelSearchController,
+    HotelDetailsController,
+    HotelFreeRoomsController,
+    HotelRoomStatusController,
+    HotelBookingsController,
+    HotelsController,
+    RoomsController,
+  ],
   providers: [
     HotelsService,
+    HotelDetailsService,
     RoomsService,
     HotelAvailabilityService,
     HotelSearchService,

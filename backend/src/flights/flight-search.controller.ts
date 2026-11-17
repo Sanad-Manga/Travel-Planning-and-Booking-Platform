@@ -1,16 +1,22 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
+  ApiExtraModels,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
+  getSchemaPath,
 } from '@nestjs/swagger';
 import { ErrorResponseDto, Public } from '../common';
 import { FlightSearchQueryDto } from './dto/flight-search-query.dto';
-import { FlightSearchPageDto } from './dto/flight-search-response.dto';
+import {
+  FlightRoundTripSearchResponseDto,
+  FlightSearchPageDto,
+} from './dto/flight-search-response.dto';
 import { FlightSearchService } from './flight-search.service';
 
 @ApiTags('flights')
+@ApiExtraModels(FlightSearchPageDto, FlightRoundTripSearchResponseDto)
 @Controller('flights')
 export class FlightSearchController {
   constructor(private readonly search: FlightSearchService) {}
@@ -18,11 +24,18 @@ export class FlightSearchController {
   @Get('search')
   @Public()
   @ApiOperation({
-    summary: 'One-way flight search - FLT-11',
+    summary: 'One-way or round-trip flight search - FLT-11, FLT-12',
     description:
-      'Scheduled flights of active airlines on the local departure date with enough seats (total - booked - held). Each result lists the cabins that can seat all passengers. Optional: minPrice and maxPrice (inclusive, in cents, applied per cabin fare) and sort by price (cheapest matching cabin), duration or departureTime with order asc or desc. No match returns an empty list.',
+      'Without returnDate, returns one-way results. With returnDate, returns separate outbound and reverse-route result pages. Flights must be scheduled, depart in the requested local date, and have enough seats in at least one requested cabin. Optional cabinClass narrows both pages. Price range and sorting apply independently to each page.',
   })
-  @ApiOkResponse({ type: FlightSearchPageDto })
+  @ApiOkResponse({
+    schema: {
+      oneOf: [
+        { $ref: getSchemaPath(FlightSearchPageDto) },
+        { $ref: getSchemaPath(FlightRoundTripSearchResponseDto) },
+      ],
+    },
+  })
   @ApiBadRequestResponse({
     type: ErrorResponseDto,
     description:

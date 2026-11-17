@@ -1,7 +1,14 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsString, Matches, Min } from 'class-validator';
-import { PaginationDto } from '../../common';
+import {
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  Matches,
+  Min,
+} from 'class-validator';
+import { CabinClass, PaginationDto } from '../../common';
 
 const trim = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;
@@ -52,11 +59,35 @@ export class FlightSearchQueryDto extends PaginationDto {
   })
   departureDate: string;
 
+  @ApiPropertyOptional({
+    example: '2026-12-08',
+    description:
+      'Optional local return departure date. When supplied, returns separate outbound and reverse-route result pages.',
+  })
+  @IsOptional()
+  @Transform(trim)
+  @IsString({ message: 'returnDate must be a string' })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'returnDate must be YYYY-MM-DD',
+  })
+  returnDate?: string;
+
   @ApiProperty({ example: 2, minimum: 1, description: 'Number of passengers who need a seat' })
   @Type(() => Number)
   @IsInt({ message: 'passengers must be a whole number' })
   @Min(1, { message: 'passengers must be at least 1' })
   passengers: number;
+
+  @ApiPropertyOptional({
+    enum: CabinClass,
+    description: 'Return only available cabins in this class',
+  })
+  @IsOptional()
+  @IsEnum(CabinClass, {
+    message:
+      'cabinClass must be one of: ECONOMY, PREMIUM_ECONOMY, BUSINESS, FIRST',
+  })
+  cabinClass?: CabinClass;
 
   @ApiPropertyOptional({
     example: 40000,

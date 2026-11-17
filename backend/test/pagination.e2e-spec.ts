@@ -23,6 +23,13 @@ import {
  */
 
 type Auth = 'none' | 'user' | 'admin' | 'hotelModerator';
+interface OpenApiSchema {
+  $ref?: string;
+  properties?: Record<string, OpenApiSchema>;
+  allOf?: OpenApiSchema[];
+  oneOf?: OpenApiSchema[];
+}
+
 interface ListRoute {
   /** Swagger-style path, e.g. /api/tags/{tag}/posts */
   swagger: string;
@@ -83,8 +90,10 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
   /**
    * GETs that take page and limit but are NOT lists. The post page pages only its embedded first batch of
    * comments; the real comment list is /api/posts/{id}/comments, which is in the table above.
+   * Likewise the hotel page (HTL-02) pages only its embedded free rooms; the real list is
+   * /api/hotels/{id}/rooms/available, which is in the table above.
    */
-  const NOT_LISTS = ['/api/posts/{id}'];
+  const NOT_LISTS = ['/api/posts/{id}', '/api/hotels/{id}'];
 
   const ROUTES: ListRoute[] = [
     // user + admin + hotel moderator (the moderator pages the HTL-08 row below)
@@ -416,32 +425,59 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
       }
     });
 
-    it('the paginated 200 schema lists items, page, limit, total and totalPages', () => {
+    it('documents pagination fields for every response page', () => {
       for (const route of ROUTES) {
         const op = operations().find((o) => o.path === route.swagger)!.op;
         const ok = op.responses?.['200'] as {
-          content?: Record<
-            string,
-            { schema?: { properties?: object; $ref?: string } }
-          >;
+          content?: Record<string, { schema?: OpenApiSchema }>;
         };
         const schema = ok.content?.['application/json']?.schema;
         const doc = SwaggerModule.createDocument(
           app,
           new DocumentBuilder().build(),
         );
-        const resolved = schema?.$ref
-          ? (doc.components!.schemas![schema.$ref.split('/').pop()!] as {
-              properties?: object;
-            })
-          : schema;
-        expect({
-          route: route.swagger,
-          keys: Object.keys(resolved?.properties ?? {}).sort(),
-        }).toEqual({
-          route: route.swagger,
-          keys: ['items', 'limit', 'page', 'total', 'totalPages'],
-        });
+        const resolve = (value?: OpenApiSchema): OpenApiSchema | undefined => {
+          if (!value?.$ref) return value;
+          const name = value.$ref.split('/').pop();
+          const component = name ? doc.components?.schemas?.[name] : undefined;
+          return component as OpenApiSchema | undefined;
+        };
+        const propertiesOf = (
+          value?: OpenApiSchema,
+        ): Record<string, OpenApiSchema> => {
+          const resolved = resolve(value);
+          const properties = { ...(resolved?.properties ?? {}) };
+          for (const part of resolved?.allOf ?? []) {
+            Object.assign(properties, propertiesOf(part));
+          }
+          return properties;
+        };
+        const assertPageSchema = (value?: OpenApiSchema) => {
+          expect(Object.keys(propertiesOf(value)).sort()).toEqual([
+            'items',
+            'limit',
+            'page',
+            'total',
+            'totalPages',
+          ]);
+        };
+
+        if (route.swagger === '/api/flights/search' && schema?.oneOf) {
+          const oneWay = schema.oneOf.find(
+            (item) => propertiesOf(item).items !== undefined,
+          );
+          const roundTrip = schema.oneOf.find(
+            (item) => propertiesOf(item).outbound !== undefined,
+          );
+          expect(oneWay).toBeDefined();
+          expect(roundTrip).toBeDefined();
+          assertPageSchema(oneWay);
+          const roundTripProperties = propertiesOf(roundTrip);
+          assertPageSchema(roundTripProperties.outbound);
+          assertPageSchema(roundTripProperties.return);
+        } else {
+          assertPageSchema(schema);
+        }
       }
     });
   });
