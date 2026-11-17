@@ -1670,6 +1670,16 @@ Added CreateModeratorDto (name/email picked from RegisterDto so they follow the 
 Added 21 unit tests (DTO rules, service with test doubles) and 16 real-AppModule e2e tests on mongodb-memory-server: guest 401 and USER/moderator 403, both valid combinations, stored hash and expiry, no plaintext in responses, documents or audit entries, 400 and 404 cases, duplicate email including 6 concurrent requests (exactly one 201), the forced-change login session, a fresh login whose principal carries the provider id (own airline/hotel edit 200, another provider 403), an expired temporary password recovered with the existing admin reset, and Swagger. Verification: lint and build pass, full serial unit 1009/1009 (64 suites), full serial e2e 1128/1128 (43 suites). Only the in-memory MongoDB replaces Atlas; the service unit tests use test doubles for the models and the audit/airline/hotel services. No .env, Atlas, secrets or --no-verify involved.
 Follow-up prompt (same day, same student and tool): asked to also return the linked airlineId or hotelId in the 201 response; added ModeratorResponseDto (new file, extends the ACC-14 account shape, shared account DTO unchanged) and updated the Swagger example, e2e/unit assertions and docs/api/admin-moderators.md.
 
+================================================
+Date: 2026-11-16
+Student: Yusuf Eser
+Tool: Claude Code
+Related Requirement: HTL-08 Room status per date range
+Prompt:
+Implement only HTL-08, GET /api/hotels/:id/availability: a hotel moderator views each room's status for a chosen date range (Available, Booked with the reservation reference, or Blocked), own hotel only, following docs/contracts.md. Reuse the existing reservation logic, do not build HTL-06 here, do not edit other owners' files.
+How the output was used:
+Added HotelRoomStatusController/Service (ownership checked in the service: 401 guest, 403 other role or other hotel, 404 own hotel gone), RoomStatusQueryDto (from/to with IsCalendarDate, shared pagination over rooms), response DTOs, and pure rules (hotel-room-status.rules.ts) that give exactly one status per date: BOOKED (confirmed or unexpired-hold reservation, carries the booking reference, null for a hold) over BLOCKED (room deactivated, blocked range, or date not offered) over AVAILABLE. Reversed, impossible, missing or over-62-day ranges return 400 with details[{field,message}]. Reservations are read read-only from the HotelBooking collection because RoomReservations has no reference lookup; blockedRanges (HTL-06, not on develop yet) is read if present and ignored otherwise. Registered the controller right after HotelFreeRoomsController. Added a unit spec for the rules, an e2e spec (guest 401, other roles 403, other moderator 403, own hotel, each status, exactly-one-per-date, reference on booked entries, 400 cases, 404, paging, route order, Swagger) and docs/api/hotel-room-status.md. No .env, secrets or --no-verify involved.
+================================================
 Date: 2026-11-16
 Student: Yusuf Eser
 Tool: Claude (Claude Code, Sonnet 5.5)

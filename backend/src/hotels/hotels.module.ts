@@ -11,6 +11,8 @@ import { HotelDetailsController } from './hotel-details.controller';
 import { HotelDetailsService } from './hotel-details.service';
 import { HotelFreeRoomsController } from './hotel-free-rooms.controller';
 import { HotelFreeRoomsService } from './hotel-free-rooms.service';
+import { HotelRoomStatusController } from './hotel-room-status.controller';
+import { HotelRoomStatusService } from './hotel-room-status.service';
 import { HotelSearchController } from './hotel-search.controller';
 import { HotelSearchService } from './hotel-search.service';
 import { HotelsController } from './hotels.controller';
@@ -39,6 +41,7 @@ import { Room, RoomSchema } from './schemas/room.schema';
     HotelSearchController,
     HotelDetailsController,
     HotelFreeRoomsController,
+    HotelRoomStatusController,
     HotelBookingsController,
     HotelsController,
     RoomsController,
@@ -50,6 +53,7 @@ import { Room, RoomSchema } from './schemas/room.schema';
     HotelAvailabilityService,
     HotelSearchService,
     HotelFreeRoomsService,
+    HotelRoomStatusService,
     HotelBookingsService,
     { provide: RoomReservations, useExisting: HotelBookingsService },
   ],
