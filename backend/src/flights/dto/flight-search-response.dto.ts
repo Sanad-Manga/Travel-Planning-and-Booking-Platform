@@ -47,6 +47,20 @@ export class FlightSearchPageDto {
   @ApiProperty({ example: 1 }) totalPages: number;
 }
 
+export class FlightRoundTripSearchResponseDto {
+  @ApiProperty({
+    type: FlightSearchPageDto,
+    description: 'Outbound flights from departureAirport to arrivalAirport',
+  })
+  outbound: FlightSearchPageDto;
+
+  @ApiProperty({
+    type: FlightSearchPageDto,
+    description: 'Return flights on returnDate from arrivalAirport to departureAirport',
+  })
+  return: FlightSearchPageDto;
+}
+
 export function toFlightSearchItem(
   flight: FlightLean,
   airline: SearchAirlineDto,

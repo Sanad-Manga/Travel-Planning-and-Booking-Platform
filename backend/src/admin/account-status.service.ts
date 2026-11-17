@@ -22,7 +22,14 @@ import { User } from '../users/schemas/user.schema';
 import { AccountStatusResponseDto } from './dto/account-status.dto';
 import { AccountStatusOperation } from './schemas/account-status-operation.schema';
 
-/** ACC-16 only. Registered with the existing ACC-14 AdminModule. */
+/** Roles whose status an admin may change here (ACC-16 USER, widened by ACC-15). ADMIN is never one of them. */
+const SUSPENDABLE_ROLES: Role[] = [
+  Role.USER,
+  Role.AIRLINE_MODERATOR,
+  Role.HOTEL_MODERATOR,
+];
+
+/** ACC-16 (USER) and ACC-15 (moderators). Registered with the existing ACC-14 AdminModule. */
 @Injectable()
 export class AccountStatusService {
   constructor(
@@ -78,7 +85,7 @@ export class AccountStatusService {
     try {
       updated = await this.users
         .findOneAndUpdate(
-          { _id: id, role: Role.USER, status: from },
+          { _id: id, role: { $in: SUSPENDABLE_ROLES }, status: from },
           { $set: { status: to } },
           { new: true, runValidators: true, projection: { _id: 1, status: 1 } },
         )
@@ -92,9 +99,9 @@ export class AccountStatusService {
     }
     if (!updated) {
       if (!existing) throw new NotFoundException('Account not found');
-      if (existing.role !== Role.USER)
+      if (!SUSPENDABLE_ROLES.includes(existing.role))
         throw new ConflictException(
-          'Only registered USER accounts can be suspended or reactivated here',
+          'Only USER and moderator accounts can be suspended or reactivated here',
         );
       if (existing.status !== to)
         throw new ConflictException(

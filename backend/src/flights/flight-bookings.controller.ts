@@ -66,7 +66,8 @@ export class FlightBookingsController {
     summary:
       'Create a flight booking with passenger and baggage details - FLT-19',
     description:
-      "Derives adult/child/infant types from each passenger's date of birth on the flight's local departure date, " +
+      "Derives adult/child/infant types from each passenger's date of birth using the outbound flight's local departure date " +
+      '(ADULT 12+, CHILD 2-11, INFANT under 2; a round trip does not use the return leg date), ' +
       'then atomically holds the required seats and creates a PENDING_PAYMENT booking. Extra-bag fees are included in totalCents.',
   })
   @ApiCreatedResponse({ type: FlightBookingResponseDto })

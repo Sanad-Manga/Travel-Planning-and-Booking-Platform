@@ -96,12 +96,14 @@ export class BlogController {
   @Public()
   @ApiOperation({
     summary:
-      'Browse published posts, newest first, optionally filtered by tag (BLG-02, public)',
+      'Browse or search published posts (BLG-02, BLG-09, public)',
+    description:
+      'Without q: newest published first, optionally filtered by tag. With q: every word must appear in the title, a tag or the author name (case-insensitive); results are ordered by likes + comments descending, then newest first. Each row has title, author, date and an excerpt. No match returns an empty list, not an error. Drafts and hidden posts never appear. page and limit paginate (default 10).',
   })
   @ApiPaginatedResponse(PostListRowDto)
   @ApiBadRequestResponse({
     type: ErrorResponseDto,
-    description: 'Invalid page, limit or tag',
+    description: 'Invalid page, limit, tag or q (longer than 100 characters)',
   })
   list(
     @Query() query: BrowsePostsQueryDto,

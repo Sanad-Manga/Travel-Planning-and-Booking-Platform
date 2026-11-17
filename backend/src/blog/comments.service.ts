@@ -1,5 +1,7 @@
 import {
   BadRequestException,
+  ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -15,9 +17,11 @@ import {
   PostStatus,
   Role,
 } from '../common';
+import { isOwner } from '../common/ownership';
 import { UsersService } from '../users/users.service';
 import { CommentResponseDto } from './dto/comment-response.dto';
 import { CreateCommentDto } from './dto/create-comment.dto';
+import { UpdateCommentDto } from './dto/update-comment.dto';
 import { Comment } from './schemas/comment.schema';
 import { Post } from './schemas/post.schema';
 
@@ -65,11 +69,7 @@ export class CommentsService {
       throw new NotFoundException('Post not found');
     }
 
-    const author = await this.users.findById(actor.userId);
-    const authorName =
-      !author || author.status === AccountStatus.DEACTIVATED
-        ? 'Deleted user'
-        : author.name;
+    const authorName = await this.authorName(actor.userId);
 
     return this.connection.transaction(async (session) => {
       const result = await this.posts.updateOne(
@@ -179,5 +179,127 @@ export class CommentsService {
         },
       })),
     };
+  }
+
+  /**
+   * BLG-07: the author edits their own comment. The body rules (non-empty, at most COMMENT_MAX_LENGTH,
+   * trimmed, no unknown fields) are the ones of CreateCommentDto, inherited by UpdateCommentDto.
+   * The isHidden flag, the author and the post can never change here.
+   */
+  async update(
+    id: string,
+    dto: UpdateCommentDto,
+    actor: AuthenticatedUser,
+  ): Promise<CommentResponseDto> {
+    const comment = await this.loadOwnComment(id, actor);
+
+    if (comment.isHidden) {
+      throw new ConflictException(
+        'A comment hidden by a moderator cannot be edited',
+      );
+    }
+
+    // The filter repeats the owner and not-hidden conditions, so a moderator hiding the comment between the
+    // read above and this write wins: nothing is updated and the edit is refused.
+    const updated = await this.comments.findOneAndUpdate(
+      {
+        _id: comment._id,
+        authorId: new Types.ObjectId(actor.userId),
+        isHidden: false,
+      },
+      { $set: { body: dto.body } },
+      { new: true, runValidators: true },
+    );
+
+    if (!updated) {
+      throw (await this.comments.exists({ _id: comment._id }))
+        ? new ConflictException(
+            'A comment hidden by a moderator cannot be edited',
+          )
+        : new NotFoundException('Comment not found');
+    }
+
+    return CommentResponseDto.from(updated, await this.authorName(actor.userId));
+  }
+
+  /**
+   * BLG-07: the author deletes their own comment. Hard delete, like deleting a post (BLG-04): the document is
+   * removed and the post's commentCount (which counts every stored comment, hidden or not, see create) goes
+   * down by one in the same transaction, so the counter cannot drift.
+   */
+  async remove(id: string, actor: AuthenticatedUser): Promise<void> {
+    const comment = await this.loadOwnComment(id, actor);
+
+    await this.connection.transaction(async (session) => {
+      const result = await this.comments.deleteOne(
+        { _id: comment._id, authorId: new Types.ObjectId(actor.userId) },
+        { session },
+      );
+
+      // Already deleted by a concurrent request: nothing to count down.
+      if (result.deletedCount === 0) {
+        throw new NotFoundException('Comment not found');
+      }
+
+      await this.posts.updateOne(
+        { _id: comment.postId, commentCount: { $gt: 0 } },
+        { $inc: { commentCount: -1 } },
+        { session },
+      );
+    });
+  }
+
+  /**
+   * Shared by edit and delete: finds the comment and decides who may touch it.
+   *  - malformed or unknown id, or the post is gone, a draft or hidden: 404 (the post rules of create/list);
+   *  - someone else's comment: 403, because comments are public content and there is nothing to hide
+   *    (contracts section 4: 404 is only for resources private to their owner). A hidden comment is only
+   *    visible to its author and admins, so for anyone else it is a 404, which does not reveal it exists.
+   *    An admin gets 403 too: removing others' comments is GEN-10, not this endpoint.
+   */
+  private async loadOwnComment(
+    id: string,
+    actor: AuthenticatedUser,
+  ): Promise<Comment & { _id: Types.ObjectId }> {
+    if (!/^[0-9a-f]{24}$/i.test(id)) {
+      throw new NotFoundException('Comment not found');
+    }
+
+    const comment = await this.comments
+      .findById(id)
+      .lean<Comment & { _id: Types.ObjectId }>()
+      .exec();
+
+    if (!comment) {
+      throw new NotFoundException('Comment not found');
+    }
+
+    const postVisible = await this.posts.exists({
+      _id: comment.postId,
+      status: PostStatus.PUBLISHED,
+      isHidden: false,
+    });
+
+    if (!postVisible) {
+      throw new NotFoundException('Comment not found');
+    }
+
+    if (!isOwner(actor, { ownerId: comment.authorId })) {
+      if (comment.isHidden && actor.role !== Role.ADMIN) {
+        throw new NotFoundException('Comment not found');
+      }
+
+      throw new ForbiddenException('You can only change your own comments');
+    }
+
+    return comment;
+  }
+
+  private async authorName(userId: string): Promise<string> {
+    const author = await this.users.findById(userId);
+
+    return !author || author.status === AccountStatus.DEACTIVATED
+      ? 'Deleted user'
+      : author.name;
   }
 }

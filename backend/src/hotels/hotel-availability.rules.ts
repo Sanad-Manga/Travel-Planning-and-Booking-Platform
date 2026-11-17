@@ -68,3 +68,12 @@ export function cheapestNightlyCombination(free: RoomChoice[], rooms: number, gu
 export function stayTotalCents(pricePerNightCents: number, nights: number): number {
   return pricePerNightCents * nights;
 }
+
+/**
+ * HTL-06: Mongo condition (for `$elemMatch`) that is true for a [startDate, endDate) sub-document overlapping the
+ * half-open range [startDate, endDate): existing.start < end AND existing.end > start. Adjacent ranges do NOT
+ * overlap. One definition of "overlap" for a room's blocked ranges, shared by the block rule, search and the hold.
+ */
+export function rangeOverlaps(startDate: string, endDate: string): { startDate: { $lt: string }; endDate: { $gt: string } } {
+  return { startDate: { $lt: endDate }, endDate: { $gt: startDate } };
+}

@@ -114,7 +114,13 @@ describe('ACC-16 status service guards, atomic filters and partial failures', ()
       });
       expect(await service[method](actor, id)).toEqual({ id, status: to });
       expect(users.findOneAndUpdate).toHaveBeenCalledWith(
-        { _id: id, role: Role.USER, status: from },
+        {
+          _id: id,
+          role: {
+            $in: [Role.USER, Role.AIRLINE_MODERATOR, Role.HOTEL_MODERATOR],
+          },
+          status: from,
+        },
         { $set: { status: to } },
         { new: true, runValidators: true, projection: { _id: 1, status: 1 } },
       );
@@ -167,13 +173,7 @@ describe('ACC-16 status service guards, atomic filters and partial failures', ()
       });
     expect(users.findOneAndUpdate).not.toHaveBeenCalled();
   });
-  it.each([
-    null,
-    { role: Role.USER },
-    { role: Role.ADMIN },
-    { role: Role.AIRLINE_MODERATOR },
-    { role: Role.HOTEL_MODERATOR },
-  ])(
+  it.each([null, { role: Role.USER }, { role: Role.ADMIN }])(
     'classifies unsuccessful updates without side effects %#',
     async (existing) => {
       users.findOneAndUpdate.mockReturnValue({
@@ -191,6 +191,47 @@ describe('ACC-16 status service guards, atomic filters and partial failures', ()
       expect(notifications.notify).not.toHaveBeenCalled();
     },
   );
+  it.each([Role.AIRLINE_MODERATOR, Role.HOTEL_MODERATOR])(
+    'treats a %s target like a USER (ACC-15): wrong source status is 409, no side effects',
+    async (role) => {
+      users.findOneAndUpdate.mockReturnValue({
+        lean: jest.fn().mockResolvedValue(null),
+      });
+      users.findById.mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          lean: jest
+            .fn()
+            .mockResolvedValue({ role, status: AccountStatus.DEACTIVATED }),
+        }),
+      });
+      await expect(service.suspend(actor, id)).rejects.toMatchObject({
+        status: 409,
+        message: 'Account is not in the required source status',
+      });
+      expect(audit.log).not.toHaveBeenCalled();
+      expect(notifications.notify).not.toHaveBeenCalled();
+    },
+  );
+  it('refuses an ADMIN target with the role-scope 409', async () => {
+    users.findOneAndUpdate.mockReturnValue({
+      lean: jest.fn().mockResolvedValue(null),
+    });
+    users.findById.mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        lean: jest
+          .fn()
+          .mockResolvedValue({
+            role: Role.ADMIN,
+            status: AccountStatus.ACTIVE,
+          }),
+      }),
+    });
+    await expect(service.suspend(actor, id)).rejects.toMatchObject({
+      status: 409,
+      message:
+        'Only USER and moderator accounts can be suspended or reactivated here',
+    });
+  });
   it('sanitizes database failures and performs no side effects', async () => {
     users.findOneAndUpdate.mockImplementationOnce(() => {
       throw new Error('synthetic-private-driver-error');
