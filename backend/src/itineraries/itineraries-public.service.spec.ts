@@ -9,6 +9,7 @@ import { Collection, Connection, Model, Types } from 'mongoose';
 import { AuthenticatedUser, Role, Visibility } from '../common';
 import { ActivitiesService } from './activities.service';
 import { ItinerariesModule } from './itineraries.module';
+import { ItinerariesPublicService } from './itineraries-public.service';
 import { ItinerariesService } from './itineraries.service';
 import { Itinerary } from './schemas/itinerary.schema';
 
@@ -19,6 +20,7 @@ describe('Public search and read-only view (ITN-21) with an isolated MongoDB', (
   let moduleRef: TestingModule;
   let model: Model<Itinerary>;
   let service: ItinerariesService;
+  let publicView: ItinerariesPublicService;
   let activities: ActivitiesService;
   let users: Collection;
 
@@ -59,7 +61,7 @@ describe('Public search and read-only view (ITN-21) with an isolated MongoDB', (
     return id;
   };
   const titles = async (query: object) =>
-    (await service.searchPublic({ ...firstPage, ...query })).items.map(
+    (await publicView.searchPublic({ ...firstPage, ...query })).items.map(
       (row) => row.title,
     );
 
@@ -73,6 +75,7 @@ describe('Public search and read-only view (ITN-21) with an isolated MongoDB', (
     await moduleRef.init();
     model = moduleRef.get<Model<Itinerary>>(getModelToken(Itinerary.name));
     service = moduleRef.get(ItinerariesService);
+    publicView = moduleRef.get(ItinerariesPublicService);
     activities = moduleRef.get(ActivitiesService);
     await model.init();
 
@@ -200,12 +203,12 @@ describe('Public search and read-only view (ITN-21) with an isolated MongoDB', (
     });
 
     it('counts only the matches and paginates them', async () => {
-      const page1 = await service.searchPublic({
+      const page1 = await publicView.searchPublic({
         page: 1,
         limit: 1,
         minDays: 2,
       });
-      const page2 = await service.searchPublic({
+      const page2 = await publicView.searchPublic({
         page: 2,
         limit: 1,
         minDays: 2,
@@ -219,7 +222,7 @@ describe('Public search and read-only view (ITN-21) with an isolated MongoDB', (
 
     it('rejects a minimum above the maximum with 400, naming the field', async () => {
       await expect(
-        service.searchPublic({ ...firstPage, minDays: 5, maxDays: 2 }),
+        publicView.searchPublic({ ...firstPage, minDays: 5, maxDays: 2 }),
       ).rejects.toMatchObject({
         status: 400,
         response: { details: [{ field: 'minDays' }] },
@@ -227,7 +230,7 @@ describe('Public search and read-only view (ITN-21) with an isolated MongoDB', (
     });
 
     it('shows the number of days on every row', async () => {
-      const result = await service.searchPublic({ ...firstPage, q: 'Long' });
+      const result = await publicView.searchPublic({ ...firstPage, q: 'Long' });
       expect(result.items[0]).toMatchObject({ title: 'Long', dayCount: 5 });
     });
   });
@@ -251,7 +254,10 @@ describe('Public search and read-only view (ITN-21) with an isolated MongoDB', (
       await setAccount(other, 'Bob Other', 'SUSPENDED');
 
       const filters = { q: 'nile', minDays: 1, maxDays: 60, cityId: 'cairo' };
-      const result = await service.searchPublic({ ...firstPage, ...filters });
+      const result = await publicView.searchPublic({
+        ...firstPage,
+        ...filters,
+      });
 
       expect(result.items.map((row) => row.id)).toEqual([shown]);
       expect(result.total).toBe(1);
@@ -270,7 +276,7 @@ describe('Public search and read-only view (ITN-21) with an isolated MongoDB', (
         costCents: 3500,
       });
 
-      const view = await service.findPublic(id);
+      const view = await publicView.findPublic(id);
 
       expect(view).toMatchObject({
         id,
@@ -299,7 +305,7 @@ describe('Public search and read-only view (ITN-21) with an isolated MongoDB', (
       const id = await createPublic(author, 'Nile cruise', {
         cities: ['cairo'],
       });
-      const view = await service.findPublic(id);
+      const view = await publicView.findPublic(id);
       expect(view).not.toHaveProperty('authorId');
       expect(view).not.toHaveProperty('isHidden');
       expect(view).not.toHaveProperty('visibility');
@@ -328,7 +334,7 @@ describe('Public search and read-only view (ITN-21) with an isolated MongoDB', (
         suspendedId,
         new Types.ObjectId().toString(),
       ]) {
-        await expect(service.findPublic(id)).rejects.toMatchObject({
+        await expect(publicView.findPublic(id)).rejects.toMatchObject({
           status: 404,
         });
       }
@@ -336,11 +342,11 @@ describe('Public search and read-only view (ITN-21) with an isolated MongoDB', (
 
     it('stops showing an itinerary the moment it is made private', async () => {
       const id = await createPublic(author, 'Nile cruise');
-      await expect(service.findPublic(id)).resolves.toMatchObject({ id });
+      await expect(publicView.findPublic(id)).resolves.toMatchObject({ id });
 
       await service.update(author, id, { visibility: Visibility.PRIVATE });
 
-      await expect(service.findPublic(id)).rejects.toMatchObject({
+      await expect(publicView.findPublic(id)).rejects.toMatchObject({
         status: 404,
       });
     });

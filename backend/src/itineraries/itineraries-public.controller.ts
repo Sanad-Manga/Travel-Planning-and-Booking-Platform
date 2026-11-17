@@ -11,7 +11,7 @@ import { ItineraryIdParamDto } from './dto/itinerary-id-param.dto';
 import { PublicItineraryRowDto } from './dto/public-itinerary-row.dto';
 import { PublicItineraryDto } from './dto/public-itinerary.dto';
 import { PublicSearchQueryDto } from './dto/public-search-query.dto';
-import { ItinerariesService } from './itineraries.service';
+import { ItinerariesPublicService } from './itineraries-public.service';
 
 /**
  * Shared, read-only itinerary routes under /api/itineraries/public. Guests may browse public itineraries
@@ -23,7 +23,7 @@ import { ItinerariesService } from './itineraries.service';
 @Public()
 @Controller('itineraries/public')
 export class ItinerariesPublicController {
-  constructor(private readonly itineraries: ItinerariesService) {}
+  constructor(private readonly itineraries: ItinerariesPublicService) {}
 
   @Get('search')
   @ApiOperation({
