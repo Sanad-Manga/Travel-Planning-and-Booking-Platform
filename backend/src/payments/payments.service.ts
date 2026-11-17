@@ -2,6 +2,7 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
@@ -26,6 +27,8 @@ import { STRIPE_GATEWAY, StripeGateway } from './stripe-gateway';
  */
 @Injectable()
 export class PaymentsService {
+  private readonly logger = new Logger(PaymentsService.name);
+
   constructor(
     @InjectModel(Payment.name) private readonly payments: Model<Payment>,
     private readonly registry: BookingProviderRegistry,
@@ -36,10 +39,11 @@ export class PaymentsService {
 
   async create(user: AuthenticatedUser, dto: CreatePaymentDto): Promise<PaymentResponseDto> {
     const { bookingType, bookingId } = dto;
-    await this.assertNoPaymentInFlight(bookingType, bookingId);
-
+    // Ownership first: a stranger probing someone else's bookingId must see 404, never a 409 that
+    // confirms the booking exists and has a payment in flight.
     const payable = await this.getPayableOrThrow(bookingType, bookingId, user.userId);
     this.assertPayable(payable);
+    await this.assertNoPaymentInFlight(bookingType, bookingId);
     await this.policyAcceptance.assertAccepted(bookingType, bookingId);
 
     const intent = await this.stripe.createPaymentIntent(payable.amountCents, payable.currency, {
@@ -48,7 +52,7 @@ export class PaymentsService {
       userId: user.userId,
     });
 
-    const created = await this.savePayment({
+    const created = await this.savePayment(intent.id, {
       bookingType,
       bookingId: new Types.ObjectId(bookingId),
       userId: new Types.ObjectId(user.userId),
@@ -70,13 +74,22 @@ export class PaymentsService {
     const payable = await this.getPayableOrThrow(previous.bookingType, previous.bookingId.toString(), user.userId);
     this.assertPayable(payable);
 
+    // The previous intent may still be payable from the customer's side (e.g. a cached
+    // clientSecret) even though we've marked it FAILED/CANCELLED locally — cancel it for real so
+    // it can never be paid alongside the new one (double charge, with no refund until PAY-03).
+    try {
+      await this.stripe.cancelPaymentIntent(previous.stripePaymentIntentId);
+    } catch {
+      // Already terminal on Stripe's side — fine, that's the outcome we wanted anyway.
+    }
+
     const intent = await this.stripe.createPaymentIntent(payable.amountCents, payable.currency, {
       bookingType: previous.bookingType,
       bookingId: previous.bookingId.toString(),
       userId: user.userId,
     });
 
-    const created = await this.savePayment({
+    const created = await this.savePayment(intent.id, {
       bookingType: previous.bookingType,
       bookingId: previous.bookingId,
       userId: new Types.ObjectId(user.userId),
@@ -101,27 +114,47 @@ export class PaymentsService {
    */
   async handleWebhookEvent(event: Stripe.Event): Promise<void> {
     switch (event.type) {
+      case 'payment_intent.processing':
+        await this.setNonSuccessStatus(event.data.object as Stripe.PaymentIntent, PaymentStatus.PROCESSING);
+        return;
       case 'payment_intent.succeeded':
         await this.onSucceeded(event.data.object as Stripe.PaymentIntent);
         return;
       case 'payment_intent.payment_failed':
-        await this.onTerminal(event.data.object as Stripe.PaymentIntent, PaymentStatus.FAILED);
+        await this.setNonSuccessStatus(event.data.object as Stripe.PaymentIntent, PaymentStatus.FAILED);
         return;
       case 'payment_intent.canceled':
-        await this.onTerminal(event.data.object as Stripe.PaymentIntent, PaymentStatus.CANCELLED);
+        await this.setNonSuccessStatus(event.data.object as Stripe.PaymentIntent, PaymentStatus.CANCELLED);
         return;
       default:
         return; // unhandled event types are acknowledged, not errors (Stripe's own guidance)
     }
   }
 
+  /**
+   * Confirms the booking BEFORE marking the payment SUCCEEDED, not after. If `confirmPaid` throws
+   * a transient error (e.g. a DB hiccup), this method also throws, the controller returns 500,
+   * and Stripe retries the webhook — crucially, `payment.status` is still not SUCCEEDED at that
+   * point, so the retry reaches `confirmPaid` again instead of short-circuiting on the idempotency
+   * check below and leaving the booking stuck PENDING_PAYMENT while the customer was charged.
+   */
   private async onSucceeded(intent: Stripe.PaymentIntent): Promise<void> {
     const payment = await this.payments.findOne({ stripePaymentIntentId: intent.id }).exec();
     if (!payment) return; // an intent we don't recognize — nothing to do
-    if (payment.status === PaymentStatus.SUCCEEDED) return; // idempotent: already handled
+    if (payment.status === PaymentStatus.SUCCEEDED) return; // idempotent: already fully handled
 
-    payment.status = PaymentStatus.SUCCEEDED;
-    await payment.save();
+    if (intent.amount !== payment.amountCents || intent.currency.toUpperCase() !== payment.currency.toUpperCase()) {
+      // Stripe's own charged amount disagrees with what we recorded at creation — something is
+      // wrong (integration bug, or the intent was tampered with outside our flow). The money was
+      // genuinely collected, so it must stay visible for manual resolution/PAY-03, but the booking
+      // must NOT be auto-confirmed for a mismatched amount.
+      this.logger.error(
+        `PaymentIntent ${intent.id} succeeded with amount ${intent.amount} ${intent.currency}, expected ${payment.amountCents} ${payment.currency} — booking NOT confirmed, needs manual review`,
+      );
+      payment.status = PaymentStatus.SUCCEEDED;
+      await payment.save();
+      return;
+    }
 
     try {
       await this.lifecycle.confirmPaid(payment.bookingType, payment.bookingId.toString(), payment.stripePaymentIntentId);
@@ -130,15 +163,24 @@ export class PaymentsService {
         // The booking is no longer PENDING_PAYMENT (e.g. it already expired while this payment
         // was in flight). docs/contracts.md section 8: Payments must refund automatically here
         // and never revive the booking — that's PAY-03's job (not built yet). Recorded as a known
-        // gap, not silently dropped: the Payment row stays SUCCEEDED so the mismatch is visible.
+        // gap, not silently dropped: the payment is still marked SUCCEEDED below so the mismatch
+        // stays visible for a manual/PAY-03 refund, rather than retried forever.
         // TODO(PAY-03): issue a refund for `payment.stripePaymentIntentId` and notify the user.
+        payment.status = PaymentStatus.SUCCEEDED;
+        await payment.save();
         return;
       }
-      throw error;
+      throw error; // transient failure: stays non-SUCCEEDED so Stripe's retry tries confirmPaid again
     }
+
+    payment.status = PaymentStatus.SUCCEEDED;
+    await payment.save();
   }
 
-  private async onTerminal(intent: Stripe.PaymentIntent, status: PaymentStatus.FAILED | PaymentStatus.CANCELLED): Promise<void> {
+  private async setNonSuccessStatus(
+    intent: Stripe.PaymentIntent,
+    status: PaymentStatus.PROCESSING | PaymentStatus.FAILED | PaymentStatus.CANCELLED,
+  ): Promise<void> {
     await this.payments
       .updateOne({ stripePaymentIntentId: intent.id, status: { $ne: PaymentStatus.SUCCEEDED } }, { $set: { status } })
       .exec();
@@ -161,20 +203,31 @@ export class PaymentsService {
    * partial index rejects a second concurrent insert with Mongo error 11000, which becomes a 409
    * here. `assertNoPaymentInFlight` above is only a friendlier fast path for the common case —
    * two requests racing past it and both reaching this insert is exactly what the index prevents.
+   * The losing request has already created a REAL Stripe PaymentIntent before reaching here (the
+   * intent has to exist to even attempt this insert) — on a loss, cancel it so it isn't left
+   * dangling in Stripe forever, untracked by any Payment row.
    */
-  private async savePayment(doc: {
-    bookingType: BookingType;
-    bookingId: Types.ObjectId;
-    userId: Types.ObjectId;
-    stripePaymentIntentId: string;
-    amountCents: number;
-    currency: string;
-    status: PaymentStatus;
-  }): Promise<PaymentLean> {
+  private async savePayment(
+    stripePaymentIntentId: string,
+    doc: {
+      bookingType: BookingType;
+      bookingId: Types.ObjectId;
+      userId: Types.ObjectId;
+      stripePaymentIntentId: string;
+      amountCents: number;
+      currency: string;
+      status: PaymentStatus;
+    },
+  ): Promise<PaymentLean> {
     try {
       return (await this.payments.create(doc)) as unknown as PaymentLean;
     } catch (err) {
       if ((err as { code?: number })?.code === 11000) {
+        try {
+          await this.stripe.cancelPaymentIntent(stripePaymentIntentId);
+        } catch (cancelErr) {
+          this.logger.error(`Failed to cancel orphaned PaymentIntent ${stripePaymentIntentId} after a lost race`, cancelErr as Error);
+        }
         throw new ConflictException('A payment is already in progress for this booking');
       }
       throw err;

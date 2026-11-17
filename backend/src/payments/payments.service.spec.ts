@@ -4,6 +4,7 @@ import Stripe from 'stripe';
 import { BookingStatus, BookingType, PaymentStatus, Role } from '../common';
 import { AuthenticatedUser } from '../common/interfaces/authenticated-user';
 import { BookingLifecycle } from './booking-lifecycle.service';
+import { BookingProvider } from './booking-provider.interface';
 import { BookingProviderRegistry } from './booking-provider.registry';
 import { FakeBookingProvider } from './fake-booking-provider';
 import { FakeStripeGateway } from './fake-stripe-gateway';
@@ -24,7 +25,16 @@ class NeverExpirePaymentActivity implements PaymentActivity {
 class FakePaymentModel {
   private readonly rows: PaymentLean[] = [];
 
+  /** Test helper: make the NEXT create() throw a Mongo duplicate-key error instead of inserting. */
+  forceDuplicateKeyOnce = false;
+
   async create(doc: Omit<Payment, never>): Promise<PaymentLean> {
+    if (this.forceDuplicateKeyOnce) {
+      this.forceDuplicateKeyOnce = false;
+      const err = new Error('duplicate key') as Error & { code: number };
+      err.code = 11000;
+      throw err;
+    }
     const row: PaymentLean = {
       ...doc,
       _id: new Types.ObjectId(),
@@ -82,8 +92,8 @@ function user(userId: string): AuthenticatedUser {
   return { userId, role: Role.USER };
 }
 
-function paymentIntentEvent(type: string, id: string): Stripe.Event {
-  return { type, data: { object: { id } } } as unknown as Stripe.Event;
+function paymentIntentEvent(type: string, id: string, amount = 25_000, currency = 'usd'): Stripe.Event {
+  return { type, data: { object: { id, amount, currency } } } as unknown as Stripe.Event;
 }
 
 describe('PaymentsService', () => {
@@ -158,6 +168,26 @@ describe('PaymentsService', () => {
       ).rejects.toBeInstanceOf(ConflictException);
     });
 
+    it('rejects with 404 (never a 409 leaking that a payment is in flight) for a stranger', async () => {
+      acceptPolicies();
+      await service.create(user(OWNER_ID), { bookingType: BookingType.FLIGHT, bookingId: BOOKING_ID });
+      await expect(
+        service.create(user(OTHER_USER_ID), { bookingType: BookingType.FLIGHT, bookingId: BOOKING_ID }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('cancels its own just-created Stripe PaymentIntent when it loses the in-flight race at the database', async () => {
+      acceptPolicies();
+      paymentModel.forceDuplicateKeyOnce = true;
+      await expect(
+        service.create(user(OWNER_ID), { bookingType: BookingType.FLIGHT, bookingId: BOOKING_ID }),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(stripe.intents.size).toBe(1);
+      const [orphaned] = [...stripe.intents.values()];
+      expect(orphaned.status).toBe('canceled');
+    });
+
     it('rejects with 409 for a booking type whose provider has no getPayable at all (defensive gap handling)', async () => {
       // getPayable is optional on BookingProvider precisely for a type that genuinely has no
       // implementation yet — simulate that with a provider that omits the method entirely,
@@ -204,6 +234,17 @@ describe('PaymentsService', () => {
       acceptPolicies();
       const created = await service.create(user(OWNER_ID), { bookingType: BookingType.FLIGHT, bookingId: BOOKING_ID });
       await expect(service.retry(user(OWNER_ID), created.id)).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('cancels the previous PaymentIntent so it cannot be paid alongside the new one (double charge)', async () => {
+      acceptPolicies();
+      const first = await service.create(user(OWNER_ID), { bookingType: BookingType.FLIGHT, bookingId: BOOKING_ID });
+      const firstRow = (await paymentModel.findById(first.id).lean().exec()) as PaymentLean;
+      await service.handleWebhookEvent(paymentIntentEvent('payment_intent.payment_failed', firstRow.stripePaymentIntentId));
+
+      await service.retry(user(OWNER_ID), first.id);
+
+      expect(stripe.intents.get(firstRow.stripePaymentIntentId)?.status).toBe('canceled');
     });
 
     it('rejects retrying once the booking hold has actually expired', async () => {
@@ -273,6 +314,85 @@ describe('PaymentsService', () => {
       await expect(
         service.handleWebhookEvent(paymentIntentEvent('payment_intent.succeeded', 'pi_unknown')),
       ).resolves.toBeUndefined();
+    });
+
+    it('marks the payment PROCESSING on payment_intent.processing without touching the booking', async () => {
+      acceptPolicies();
+      const created = await service.create(user(OWNER_ID), { bookingType: BookingType.FLIGHT, bookingId: BOOKING_ID });
+      const row = (await paymentModel.findById(created.id).lean().exec()) as PaymentLean;
+
+      await service.handleWebhookEvent(paymentIntentEvent('payment_intent.processing', row.stripePaymentIntentId));
+
+      expect(flights.status(BOOKING_ID)).toBe(BookingStatus.PENDING_PAYMENT);
+      const updated = (await paymentModel.findById(created.id).lean().exec()) as PaymentLean;
+      expect(updated.status).toBe(PaymentStatus.PROCESSING);
+    });
+
+    it('does not confirm the booking when the Stripe amount disagrees with the stored amount', async () => {
+      acceptPolicies();
+      const created = await service.create(user(OWNER_ID), { bookingType: BookingType.FLIGHT, bookingId: BOOKING_ID });
+      const row = (await paymentModel.findById(created.id).lean().exec()) as PaymentLean;
+
+      await service.handleWebhookEvent(paymentIntentEvent('payment_intent.succeeded', row.stripePaymentIntentId, 1, 'usd'));
+
+      expect(flights.status(BOOKING_ID)).toBe(BookingStatus.PENDING_PAYMENT); // not confirmed
+      const updated = (await paymentModel.findById(created.id).lean().exec()) as PaymentLean;
+      expect(updated.status).toBe(PaymentStatus.SUCCEEDED); // money was genuinely collected, stays visible
+    });
+
+    it('does not mark the payment SUCCEEDED when confirmPaid fails transiently, so a retried webhook delivery still confirms the booking', async () => {
+      acceptPolicies();
+      const created = await service.create(user(OWNER_ID), { bookingType: BookingType.FLIGHT, bookingId: BOOKING_ID });
+      const row = (await paymentModel.findById(created.id).lean().exec()) as PaymentLean;
+
+      // A booking provider whose markConfirmed fails once with a transient (non-Conflict/NotFound)
+      // error, then behaves normally — simulates a DB hiccup during the first webhook delivery.
+      let failNext = true;
+      const flaky: BookingProvider = {
+        getStatus: (id) => flights.getStatus(id),
+        applyStatus: (id, from, to) => flights.applyStatus(id, from, to),
+        markConfirmed: async (id, ref) => {
+          if (failNext) {
+            failNext = false;
+            throw new Error('transient database hiccup');
+          }
+          return flights.markConfirmed(id, ref);
+        },
+        findExpiredHolds: (now, limit, afterId) => flights.findExpiredHolds(now, limit, afterId),
+        getPolicies: (id) => flights.getPolicies(id),
+        getPayable: (id, userId) => flights.getPayable(id, userId),
+      };
+      const flakyRegistry = new BookingProviderRegistry();
+      flakyRegistry.register(BookingType.FLIGHT, flaky);
+      // handleWebhookEvent (the only method called on flakyService below) never touches
+      // PolicyAcceptanceService — a throwaway instance is enough to satisfy the constructor.
+      const unusedPolicyAcceptance = new PolicyAcceptanceService(
+        flakyRegistry,
+        { exists: () => ({ exec: async () => null }) } as unknown as Model<PolicyAcceptance>,
+      );
+      const flakyService = new PaymentsService(
+        paymentModel as unknown as Model<Payment>,
+        flakyRegistry,
+        unusedPolicyAcceptance,
+        new BookingLifecycle(flakyRegistry, new NeverExpirePaymentActivity()),
+        stripe,
+      );
+
+      await expect(
+        flakyService.handleWebhookEvent(paymentIntentEvent('payment_intent.succeeded', row.stripePaymentIntentId)),
+      ).rejects.toThrow('transient database hiccup');
+
+      // Not marked SUCCEEDED after the transient failure — Stripe's retry must still reach confirmPaid.
+      const afterFailure = (await paymentModel.findById(created.id).lean().exec()) as PaymentLean;
+      expect(afterFailure.status).toBe(PaymentStatus.REQUIRES_PAYMENT);
+      expect(flights.status(BOOKING_ID)).toBe(BookingStatus.PENDING_PAYMENT);
+
+      // Stripe retries the same webhook delivery; this time confirmPaid succeeds.
+      await flakyService.handleWebhookEvent(paymentIntentEvent('payment_intent.succeeded', row.stripePaymentIntentId));
+
+      expect(flights.status(BOOKING_ID)).toBe(BookingStatus.CONFIRMED);
+      const afterRetry = (await paymentModel.findById(created.id).lean().exec()) as PaymentLean;
+      expect(afterRetry.status).toBe(PaymentStatus.SUCCEEDED);
     });
   });
 });
