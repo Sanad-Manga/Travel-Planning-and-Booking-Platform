@@ -11,8 +11,14 @@ import { ActivitiesService } from './activities.service';
 import { BudgetsController } from './budgets.controller';
 import { BudgetsService } from './budgets.service';
 import { ItinerariesPublicController } from './itineraries-public.controller';
+import { ItinerariesPublicService } from './itineraries-public.service';
 import { ItinerariesController } from './itineraries.controller';
 import { ItinerariesService } from './itineraries.service';
+import { ItineraryCloneController } from './itinerary-clone.controller';
+import { ItineraryCloneService } from './itinerary-clone.service';
+import { ItineraryHotelsController } from './itinerary-hotels.controller';
+import { ItineraryHotelsService } from './itinerary-hotels.service';
+import { ItineraryItemsController } from './itinerary-items.controller';
 import { Activity, ActivitySchema } from './schemas/activity.schema';
 import { Budget, BudgetSchema } from './schemas/budget.schema';
 import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema';
@@ -46,12 +52,18 @@ import { TransportCostsService } from './transport-costs.service';
   controllers: [
     ItinerariesPublicController,
     ItinerariesController,
+    ItineraryItemsController,
+    ItineraryHotelsController,
+    ItineraryCloneController,
     ActivitiesController,
     TransportCostsController,
     BudgetsController,
   ],
   providers: [
     ItinerariesService,
+    ItinerariesPublicService,
+    ItineraryCloneService,
+    ItineraryHotelsService,
     ActivitiesService,
     TransportCostsService,
     BudgetsService,
@@ -61,6 +73,6 @@ import { TransportCostsService } from './transport-costs.service';
     HotelSearchService,
   ],
   // Blog (author page) and Reports (hide/delete) look itineraries up through the service, never the model.
-  exports: [ItinerariesService],
+  exports: [ItinerariesService, ItinerariesPublicService],
 })
 export class ItinerariesModule {}
