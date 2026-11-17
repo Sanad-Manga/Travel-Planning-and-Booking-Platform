@@ -8,6 +8,14 @@ export interface BookingStatusSnapshot {
   holdExpiresAt?: Date | null;
 }
 
+/** PAY-01: what a booking owner charges through Stripe, owner-scoped. */
+export interface Payable {
+  amountCents: number;
+  currency: string;
+  status: BookingStatus;
+  holdExpiresAt: Date | null;
+}
+
 /**
  * PAY-02: the provider's policies for one booking, plus who owns it so the caller can enforce
  * "only the booking's owner may view/accept" (ACC-11) before returning anything. A FLIGHT
@@ -76,4 +84,11 @@ export interface BookingProvider {
    * never fetches policy content itself.
    */
   getPolicies(id: string): Promise<BookingPolicies | null>;
+
+  /**
+   * PAY-01: the amount owed and current hold status, owner-scoped (null if the booking does
+   * not exist or does not belong to `userId`). Optional only until every booking type
+   * implements it; a type without it is a 409 to Payments, never a crash.
+   */
+  getPayable?(id: string, userId: string): Promise<Payable | null>;
 }

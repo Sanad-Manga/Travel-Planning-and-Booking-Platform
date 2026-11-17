@@ -3,6 +3,7 @@ import {
   BookingPolicies,
   BookingProvider,
   BookingStatusSnapshot,
+  Payable,
 } from './booking-provider.interface';
 
 /**
@@ -16,6 +17,7 @@ export class FakeBookingProvider implements BookingProvider {
   readonly failApplyFor = new Set<string>();
   readonly paymentRefs = new Map<string, string>();
   readonly policies = new Map<string, BookingPolicies>();
+  readonly payables = new Map<string, Payable & { ownerId: string }>();
   findCalls = 0;
 
   add(
@@ -29,6 +31,18 @@ export class FakeBookingProvider implements BookingProvider {
   /** Seed what `getPolicies(id)` returns for `id` (PAY-02 test double). */
   setPolicies(id: string, policies: BookingPolicies): void {
     this.policies.set(id, policies);
+  }
+
+  /** Seed what `getPayable(id, ownerId)` returns for `id` (PAY-01 test double). */
+  setPayable(id: string, ownerId: string, amountCents: number, currency = 'USD'): void {
+    this.payables.set(id, { ownerId, amountCents, currency, status: BookingStatus.PENDING_PAYMENT, holdExpiresAt: null });
+  }
+
+  async getPayable(id: string, userId: string): Promise<Payable | null> {
+    const payable = this.payables.get(id);
+    const booking = this.bookings.get(id);
+    if (!payable || !booking || payable.ownerId !== userId) return null;
+    return { amountCents: payable.amountCents, currency: payable.currency, status: booking.status, holdExpiresAt: booking.holdExpiresAt ?? null };
   }
 
   async getPolicies(id: string): Promise<BookingPolicies | null> {
