@@ -7,6 +7,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { Collection, Connection, Model, Types } from 'mongoose';
 import { AuthenticatedUser, Role, Visibility } from '../common';
+import {
+  EXCHANGE_RATE_PROVIDER,
+  ExchangeRateProvider,
+  FetchedRates,
+} from '../fx/exchange-rate-provider';
 import { ActivitiesService } from './activities.service';
 import { BudgetsService } from './budgets.service';
 import { ItinerariesModule } from './itineraries.module';
@@ -17,6 +22,20 @@ import { BudgetCategory } from './schemas/budget.schema';
 import { Itinerary } from './schemas/itinerary.schema';
 import { TransportMode } from './schemas/transport-cost.schema';
 import { TransportCostsService } from './transport-costs.service';
+
+/**
+ * Deterministic stand-in for the real FXRatesAPI call, so this suite never touches the network
+ * (the budget summary converts totals through FxService). Same pattern as budgets.service.spec.ts.
+ */
+class FixedExchangeRateProvider implements ExchangeRateProvider {
+  async fetchLatest(base: string): Promise<FetchedRates> {
+    return {
+      base,
+      rateDate: new Date().toISOString().slice(0, 10),
+      rates: { EGP: 48, AED: 3.67, EUR: 0.85 },
+    };
+  }
+}
 
 jest.setTimeout(60000);
 
@@ -101,7 +120,10 @@ describe('Clone a public itinerary (ITN-21) with an isolated MongoDB', () => {
     });
     moduleRef = await Test.createTestingModule({
       imports: [MongooseModule.forRoot(server.getUri()), ItinerariesModule],
-    }).compile();
+    })
+      .overrideProvider(EXCHANGE_RATE_PROVIDER)
+      .useValue(new FixedExchangeRateProvider())
+      .compile();
     await moduleRef.init();
     model = moduleRef.get<Model<Itinerary>>(getModelToken(Itinerary.name));
     service = moduleRef.get(ItinerariesService);
