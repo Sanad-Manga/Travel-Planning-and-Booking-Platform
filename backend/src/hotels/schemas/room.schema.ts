@@ -4,7 +4,7 @@ import { HydratedDocument, Types } from 'mongoose';
 /**
  * One bookable range of a room (HTL-04). Date-only `YYYY-MM-DD` strings (contracts section 4), half-open:
  * the nights startDate ... endDate-1 are bookable, endDate is the check-out day. Strings of this shape sort
- * like dates, so Mongo can compare them with $lt / $gt. Blocked ranges (HTL-05) are a separate concern.
+ * like dates, so Mongo can compare them with $lt / $gt. Blocked ranges (HTL-06) are a separate concern.
  */
 @Schema({ _id: true })
 export class AvailabilityRange {
@@ -17,6 +17,24 @@ export class AvailabilityRange {
   endDate: string;
 }
 export const AvailabilityRangeSchema = SchemaFactory.createForClass(AvailabilityRange);
+
+/**
+ * HTL-06: dates the moderator took out of sale although the room is otherwise bookable (maintenance, owner use).
+ * Same half-open [startDate, endDate) shape as an availability range, but kept apart on purpose: a block must
+ * survive when the moderator later adds or edits availability (HTL-04/05), so it is an override and not a hole
+ * cut out of `availability`.
+ */
+@Schema({ _id: true })
+export class BlockedRange {
+  _id: Types.ObjectId;
+
+  @Prop({ required: true })
+  startDate: string;
+
+  @Prop({ required: true })
+  endDate: string;
+}
+export const BlockedRangeSchema = SchemaFactory.createForClass(BlockedRange);
 
 /**
  * Collection `rooms`: ONE individually bookable unit of a hotel (HTL-03).
@@ -61,6 +79,11 @@ export class Room {
   // Read by Hotels B's hold (HTL-11/18): a night D is bookable if some range has startDate <= D < endDate.
   @Prop({ type: [AvailabilityRangeSchema], default: [] })
   availability: AvailabilityRange[];
+
+  // HTL-06: a night inside a block is NOT bookable even if an availability range covers it. Search, the free-rooms
+  // list and the hold (HotelBookingsService.create) all filter on it.
+  @Prop({ type: [BlockedRangeSchema], default: [] })
+  blockedRanges: BlockedRange[];
 
   createdAt?: Date;
   updatedAt?: Date;

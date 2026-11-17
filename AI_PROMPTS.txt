@@ -1617,6 +1617,16 @@ barrel because prettier prints one name per line, so it would not have shortened
 three files he meant if more is wanted.
 ================================================
 
+================================================
+Date: 2026-11-16
+Student: Yusuf Eser
+Tool: Claude Code
+Related Requirement: HTL-06
+Prompt:
+Use the travel-platform skill, read the earlier sessions and docs/contracts.md, then implement HTL-06 (Block date ranges; deactivate or delete a room): PATCH /api/hotels/:id/rooms/:roomId/availability and DELETE /api/hotels/:id/rooms/:roomId. A hotel moderator blocks date ranges and deactivates or deletes a room; blocking or deactivating is rejected if it overlaps a CONFIRMED or PENDING_PAYMENT reservation; deactivated rooms are excluded from search; deletion only for never-reserved rooms; reuse Hessain's overlap logic instead of copying it.
+How the output was used:
+Branched from current develop (HTL-04/05 and Hessain's HTL-16 are already there). Kept the shared PATCH route and made the body choose exactly one action (HTL-05 change a range, HTL-06 block, HTL-06 isActive). Added `blockedRanges` to the room schema as an override that survives availability edits. Block and deactivate ask Hessain's `RoomReservations.findReservedRoomIds` (confirmed + unexpired hold); delete asks a new `hasAnyReservation`. Each action runs in one MongoDB transaction with the reservation read, so it conflicts with a parallel hold (HotelBookingsService already updates the room document in its transaction). Search (HotelAvailabilityService) and the hold (HotelBookingsService.create) now skip blocked rooms; they already skipped inactive ones. Rejected: cutting blocked nights out of `availability` (would be undone by the next availability edit). Review caught: `isActive: null` / `block: null` passed `@IsOptional()`, fixed with `@ValidateIf`.
+================================================
 Date: 2026-11-16
 Student: Ahmed Sanad
 Tool: Claude (Claude Code)
