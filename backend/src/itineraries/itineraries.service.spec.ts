@@ -8,6 +8,7 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
 import { Collection, Connection, Model, Types } from 'mongoose';
 import { AuthenticatedUser, Role, Visibility } from '../common';
 import { ItinerariesModule } from './itineraries.module';
+import { ItinerariesPublicService } from './itineraries-public.service';
 import { ItinerariesService } from './itineraries.service';
 import { Itinerary } from './schemas/itinerary.schema';
 
@@ -18,6 +19,7 @@ describe('ItinerariesService (ITN-01) with an isolated MongoDB', () => {
   let moduleRef: TestingModule;
   let model: Model<Itinerary>;
   let service: ItinerariesService;
+  let publicView: ItinerariesPublicService;
   let users: Collection;
 
   const userWithId = (): AuthenticatedUser => ({
@@ -43,6 +45,7 @@ describe('ItinerariesService (ITN-01) with an isolated MongoDB', () => {
     await moduleRef.init();
     model = moduleRef.get<Model<Itinerary>>(getModelToken(Itinerary.name));
     service = moduleRef.get(ItinerariesService);
+    publicView = moduleRef.get(ItinerariesPublicService);
     await model.init();
 
     const connection = moduleRef.get<Connection>(getConnectionToken());
@@ -251,7 +254,7 @@ describe('ItinerariesService (ITN-01) with an isolated MongoDB', () => {
       await setUpdatedAt(older, '2026-11-01T10:00:00.000Z');
       await setUpdatedAt(newer, '2026-11-02T10:00:00.000Z');
 
-      const result = await service.searchPublic(firstPage);
+      const result = await publicView.searchPublic(firstPage);
 
       expect(result).toMatchObject({ page: 1, limit: 10, total: 2 });
       expect(result.items).toEqual([
@@ -271,7 +274,7 @@ describe('ItinerariesService (ITN-01) with an isolated MongoDB', () => {
     it('drops an itinerary as soon as it is set private again', async () => {
       const id = await createPublic(owner, 'Shared');
       await service.update(owner, id, { visibility: Visibility.PRIVATE });
-      await expect(service.searchPublic(firstPage)).resolves.toMatchObject({
+      await expect(publicView.searchPublic(firstPage)).resolves.toMatchObject({
         items: [],
         total: 0,
       });
@@ -280,7 +283,7 @@ describe('ItinerariesService (ITN-01) with an isolated MongoDB', () => {
     it('leaves out a public itinerary hidden by an admin', async () => {
       const id = await createPublic(owner, 'Hidden');
       await model.updateOne({ _id: id }, { isHidden: true });
-      await expect(service.searchPublic(firstPage)).resolves.toMatchObject({
+      await expect(publicView.searchPublic(firstPage)).resolves.toMatchObject({
         items: [],
         total: 0,
       });
@@ -293,7 +296,7 @@ describe('ItinerariesService (ITN-01) with an isolated MongoDB', () => {
         const kept = await createPublic(stranger, 'Kept');
         await setStatus(owner, status);
 
-        const result = await service.searchPublic(firstPage);
+        const result = await publicView.searchPublic(firstPage);
 
         expect(result).toMatchObject({ total: 1, totalPages: 1 });
         expect(result.items.map((row) => row.id)).toEqual([kept]);
@@ -305,8 +308,8 @@ describe('ItinerariesService (ITN-01) with an isolated MongoDB', () => {
         const id = await createPublic(owner, `Trip ${i}`);
         await setUpdatedAt(id, `2026-11-0${i}T10:00:00.000Z`);
       }
-      const page1 = await service.searchPublic({ page: 1, limit: 2 });
-      const page2 = await service.searchPublic({ page: 2, limit: 2 });
+      const page1 = await publicView.searchPublic({ page: 1, limit: 2 });
+      const page2 = await publicView.searchPublic({ page: 2, limit: 2 });
       expect(page1).toMatchObject({ total: 3, totalPages: 2 });
       expect(page1.items.map((row) => row.title)).toEqual(['Trip 3', 'Trip 2']);
       expect(page2.items.map((row) => row.title)).toEqual(['Trip 1']);

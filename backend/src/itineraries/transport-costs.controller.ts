@@ -9,40 +9,21 @@ import {
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
-  ApiCookieAuth,
-  ApiForbiddenResponse,
   ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
-  ApiTags,
-  ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import {
-  AuthenticatedUser,
-  CurrentUser,
-  ErrorResponseDto,
-  Role,
-  Roles,
-} from '../common';
+import { AuthenticatedUser, CurrentUser, ErrorResponseDto } from '../common';
 import { TransportCostIdParamDto } from './dto/transport-cost-id-param.dto';
 import { TransportCostDto } from './dto/transport-cost.dto';
 import { UpdateTransportCostDto } from './dto/update-transport-cost.dto';
 import { TransportCostsService } from './transport-costs.service';
+import { UserRoutes } from './itineraries.swagger';
 
 // Transport costs belong to the owner of the itinerary (ITN-16), so every route needs the USER role. Adding one is
-// POST /api/itineraries/:id/transport-costs, in ItinerariesController. Ownership is checked in the service.
-@ApiTags('transport-costs')
-@ApiCookieAuth()
-@ApiUnauthorizedResponse({
-  type: ErrorResponseDto,
-  description: 'Not logged in',
-})
-@ApiForbiddenResponse({
-  type: ErrorResponseDto,
-  description: 'Caller is not a registered user (admin or moderator)',
-})
-@Roles(Role.USER)
+// POST /api/itineraries/:id/transport-costs, in ItineraryItemsController. Ownership is checked in the service.
+@UserRoutes('transport-costs')
 @Controller('transport-costs')
 export class TransportCostsController {
   constructor(private readonly transportCosts: TransportCostsService) {}

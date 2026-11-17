@@ -25,7 +25,7 @@ import { BookingProviderRegistry } from '../payments/booking-provider.registry';
 import { UpcomingBookingsChecker, UpcomingBookingsRegistry } from '../users/upcoming-bookings';
 import { CreateHotelBookingDto } from './dto/create-hotel-booking.dto';
 import { HotelBookingResponseDto } from './dto/hotel-booking-response.dto';
-import { coversStay, nightsBetween, stayTotalCents, todayUtc } from './hotel-availability.rules';
+import { coversStay, nightsBetween, rangeOverlaps, stayTotalCents, todayUtc } from './hotel-availability.rules';
 import { HotelsService } from './hotels.service';
 import { RoomReservations } from './room-reservations';
 import { Hotel } from './schemas/hotel.schema';
@@ -73,7 +73,12 @@ export class HotelBookingsService implements RoomReservations, BookingProvider, 
 
     const booking = await this.connection.transaction(async (session) => {
       const selectedRooms = await this.rooms
-        .find({ _id: { $in: roomIds }, isActive: true })
+        // HTL-06: a room whose blocked range overlaps the stay is treated like an inactive one (409 below).
+        .find({
+          _id: { $in: roomIds },
+          isActive: true,
+          blockedRanges: { $not: { $elemMatch: rangeOverlaps(dto.checkIn, dto.checkOut) } },
+        })
         .select('hotelId name type maxOccupancy pricePerNightCents availability')
         .session(session)
         .lean<SelectedRoom[]>()
@@ -148,10 +153,18 @@ export class HotelBookingsService implements RoomReservations, BookingProvider, 
   }
 
   /** RoomReservations: one query for all rooms that overlap a confirmed stay or a live hold. */
-  findReservedRoomIds(roomIds: string[], startDate: string, endDate: string): Promise<Set<string>> {
+  findReservedRoomIds(roomIds: string[], startDate: string, endDate: string, session?: ClientSession): Promise<Set<string>> {
     const ids = roomIds.filter((id) => Types.ObjectId.isValid(id)).map((id) => new Types.ObjectId(id));
     if (ids.length === 0) return Promise.resolve(new Set());
-    return this.reservedRoomIds(ids, startDate, endDate, new Date());
+    return this.reservedRoomIds(ids, startDate, endDate, new Date(), session);
+  }
+
+  /** HTL-06 (deleting a room): any reservation record that mentions the room, whatever its status. */
+  async hasAnyReservation(roomId: string, session?: ClientSession): Promise<boolean> {
+    if (!Types.ObjectId.isValid(roomId)) return false;
+    const query = this.bookings.exists({ 'rooms.roomId': new Types.ObjectId(roomId) });
+    if (session) query.session(session);
+    return (await query) !== null;
   }
 
   async hasConfirmedReservation(roomId: string, startDate: string, endDate: string): Promise<boolean> {

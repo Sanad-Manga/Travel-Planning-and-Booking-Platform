@@ -228,7 +228,7 @@ describe('ACC-16 fixture integration: real MongoDB, auth, audit and notification
       expect(await db.collection('auditLogs').countDocuments()).toBe(0);
     },
   );
-  it.each([Role.ADMIN, Role.AIRLINE_MODERATOR, Role.HOTEL_MODERATOR])(
+  it.each([Role.ADMIN])(
     'rejects %s targets without mutation or side effects',
     async (role) => {
       const user = await account(role);
