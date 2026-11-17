@@ -1717,3 +1717,25 @@ Follow-up: verify the ticket checklist: concurrent holds, no partial hold on con
 How the output was used:
 The updated develop already contains HTL-16's transactional all-or-nothing room hold and HTL-06's blocked-range checks, so I did not duplicate or alter production booking logic. Added E2E coverage for confirmed-reservation conflicts, blocked-room conflicts, and all-or-nothing behavior; verified the existing live-hold, parallel-hold, expiry/release, and date-rule cases. Added cleanup so blocked ranges and confirmation notifications do not leak between tests. Updated the POST booking Swagger summary/conflict description and docs/api/hotel-bookings.md with HTL-18 hold, blocked-range, expiry and conflict behavior. No HTL-17 or PAY-01 code was changed.
 Verification: hotel-bookings E2E 15/15; room-block-deactivate-delete E2E 30/30 passed earlier; Nest build and focused ESLint passed. The confirmed-overlap test initially exposed notification fixture leakage; cleanup was added and the hotel-bookings suite rerun successfully.
+================================================
+Date: 2026-11-17
+Student: Yassin Yahya
+Tool: Claude (Claude Code)
+Related Requirement: ITN-26 (SCRUM-109) Flights from itinerary
+Prompt:
+Implement all non-blocked and required tickets. ITN-26 became unblocked when FLT-12 merged: GET /api/itineraries/:id/flights,
+one-way or round trip, to every airport of the city of the first day, outbound date = start date, return date = last day, both
+overridable, reusing FLT-11/FLT-12 with no copied search logic, owner only.
+How the output was used:
+Read the ticket and the flight search (FlightSearchService, one call is one-way or round trip) and followed the ITN-25 pattern.
+Tests first (17 service tests on an in-memory MongoDB, 9 HTTP tests), watched them fail, then wrote ItineraryFlightsService: it loads
+the owner's itinerary (404 otherwise), takes the city of day 1, lists its airports through ReferenceDataService.listAirportsByCity,
+drops the origin airport when it is in that city, and calls FlightSearchService.search once per airport with the dates and the
+caller's filters. The query DTO is OmitType of FlightSearchQueryDto (no arrivalAirport, departureDate, returnDate) plus tripType
+(ONE_WAY or ROUND_TRIP, default ROUND_TRIP) and optional dates, so the flight search's own validation and messages are reused.
+Answer: one entry per airport holding the flight search result as it is. FlightsModule does not export FlightSearchService, and
+that module is not mine, so ItinerariesModule provides the same classes (as ITN-25 does for the hotel search); flagged in the PR.
+One line was added to NOT_LISTS in test/pagination.e2e-spec.ts (the GEN-05 test): the route takes page and limit but answers one
+flight-search page per airport, not one list. Mutation check: removing the owner filter failed the ownership test.
+Verification: lint, build, 1065 unit and 1325 e2e (3 workers) pass. Not done: a manual Swagger click-through against Atlas.
+================================================

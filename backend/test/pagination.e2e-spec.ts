@@ -93,7 +93,14 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
    * Likewise the hotel page (HTL-02) pages only its embedded free rooms; the real list is
    * /api/hotels/{id}/rooms/available, which is in the table above.
    */
-  const NOT_LISTS = ['/api/posts/{id}', '/api/hotels/{id}'];
+  const NOT_LISTS = [
+    '/api/posts/{id}',
+    '/api/hotels/{id}',
+    // ITN-26: page and limit are handed to the flight search for each airport of the city of the first day. The answer
+    // is one flight-search page (or an outbound and a return page) per airport, not one list; the paging of those
+    // pages is the flight search's own (the /api/flights/search row of the flight tests).
+    '/api/itineraries/{id}/flights',
+  ];
 
   const ROUTES: ListRoute[] = [
     // user + admin + hotel moderator (the moderator pages the HTL-08 row below)
