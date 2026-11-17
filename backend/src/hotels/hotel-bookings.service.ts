@@ -178,6 +178,26 @@ export class HotelBookingsService implements RoomReservations, BookingProvider, 
     return exists !== null;
   }
 
+  /** PAY-01: expose the stored reservation total through the documented payable shape. */
+  async getPayable(
+    id: string,
+    userId: string,
+  ): Promise<{ amountCents: number; currency: string; status: BookingStatus; holdExpiresAt: Date | null } | null> {
+    if (!Types.ObjectId.isValid(id) || !Types.ObjectId.isValid(userId)) return null;
+    const booking = await this.bookings
+      .findOne({ _id: new Types.ObjectId(id), userId: new Types.ObjectId(userId) })
+      .select('totalCents currency status holdExpiresAt')
+      .lean<Pick<HotelBookingLean, 'totalCents' | 'currency' | 'status' | 'holdExpiresAt'>>()
+      .exec();
+    if (!booking) return null;
+    return {
+      amountCents: booking.totalCents,
+      currency: booking.currency,
+      status: booking.status,
+      holdExpiresAt: booking.holdExpiresAt ?? null,
+    };
+  }
+
   async getStatus(id: string): Promise<BookingStatusSnapshot | null> {
     if (!Types.ObjectId.isValid(id)) return null;
     const booking = await this.bookings.findById(id).select('status holdExpiresAt').lean().exec();

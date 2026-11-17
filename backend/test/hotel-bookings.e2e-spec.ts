@@ -134,6 +134,8 @@ describe('hotel bookings (HTL-16) over HTTP', () => {
 
   beforeEach(async () => {
     await db.collection('hotelBookings').deleteMany({});
+    await db.collection('notifications').deleteMany({ userId: new Types.ObjectId(travelerId) });
+    await db.collection('rooms').updateOne({ _id: roomIds.standard }, { $unset: { blockedRanges: '' } });
   });
 
   afterAll(async () => {
@@ -300,6 +302,69 @@ describe('hotel bookings (HTL-16) over HTTP', () => {
     expect(available.body.items.map((item: { roomId: string }) => item.roomId)).toContain(roomIds.family.toHexString());
   });
 
+  it('rejects a confirmed-room overlap without holding the other selected room', async () => {
+    const confirmedBooking = await http()
+      .post('/api/hotel-bookings')
+      .set('Cookie', travelerCookie)
+      .send(requestBody(roomIds.standard))
+      .expect(201);
+    const provider = app.get(HotelBookingsService);
+    expect(await provider.markConfirmed(confirmedBooking.body.id, 'pi_confirmed_overlap')).toBe(true);
+
+    await http()
+      .post('/api/hotel-bookings')
+      .set('Cookie', travelerCookie)
+      .send({
+        checkIn: day(2),
+        checkOut: day(5),
+        rooms: [
+          { roomId: roomIds.standard.toHexString(), adults: 1, children: 0 },
+          { roomId: roomIds.family.toHexString(), adults: 1, children: 0 },
+        ],
+      })
+      .expect(409);
+
+    expect(await bookingCount()).toBe(1);
+    const available = await http()
+      .get(`/api/hotels/${hotelId.toHexString()}/rooms/available`)
+      .query({ checkIn: day(2), checkOut: day(5) })
+      .expect(200);
+    expect(available.body.items.map((item: { roomId: string }) => item.roomId)).toContain(roomIds.family.toHexString());
+    expect(available.body.items.map((item: { roomId: string }) => item.roomId)).not.toContain(roomIds.standard.toHexString());
+  });
+
+  it('rejects a blocked room and leaves the other selected room unheld (HTL-18)', async () => {
+    await db.collection('rooms').updateOne(
+      { _id: roomIds.standard },
+      {
+        $set: {
+          blockedRanges: [{ _id: new Types.ObjectId(), startDate: day(2), endDate: day(4) }],
+        },
+      },
+    );
+
+    await http()
+      .post('/api/hotel-bookings')
+      .set('Cookie', travelerCookie)
+      .send({
+        checkIn: day(2),
+        checkOut: day(5),
+        rooms: [
+          { roomId: roomIds.standard.toHexString(), adults: 1, children: 0 },
+          { roomId: roomIds.family.toHexString(), adults: 1, children: 0 },
+        ],
+      })
+      .expect(409);
+
+    expect(await bookingCount()).toBe(0);
+    const available = await http()
+      .get(`/api/hotels/${hotelId.toHexString()}/rooms/available`)
+      .query({ checkIn: day(2), checkOut: day(5) })
+      .expect(200);
+    expect(available.body.items.map((item: { roomId: string }) => item.roomId)).toContain(roomIds.family.toHexString());
+    expect(available.body.items.map((item: { roomId: string }) => item.roomId)).not.toContain(roomIds.standard.toHexString());
+  });
+
   it('allows only one of two parallel holds for the same room', async () => {
     const payload = requestBody(roomIds.standard);
     const responses = await Promise.all([
@@ -346,13 +411,23 @@ describe('hotel bookings (HTL-16) over HTTP', () => {
     expect(await db.collection('notifications').countDocuments({ userId: new Types.ObjectId(travelerId) })).toBe(1);
   });
 
-  it('provides booking ownership and hotel policies to Payments, and returns null for unknown ids', async () => {
+  it('provides payable details and hotel policies to Payments, scoped to the booking owner', async () => {
     const response = await http()
       .post('/api/hotel-bookings')
       .set('Cookie', travelerCookie)
       .send(requestBody(roomIds.standard))
       .expect(201);
     const provider = app.get(HotelBookingsService);
+
+    await expect(provider.getPayable(response.body.id, travelerId)).resolves.toEqual({
+      amountCents: response.body.totalCents,
+      currency: response.body.currency,
+      status: BookingStatus.PENDING_PAYMENT,
+      holdExpiresAt: new Date(response.body.holdExpiresAt),
+    });
+    await expect(provider.getPayable(response.body.id, new Types.ObjectId().toHexString())).resolves.toBeNull();
+    await expect(provider.getPayable('not-an-object-id', travelerId)).resolves.toBeNull();
+    await expect(provider.getPayable(new Types.ObjectId().toHexString(), travelerId)).resolves.toBeNull();
 
     await expect(provider.getPolicies(response.body.id)).resolves.toEqual({
       ownerId: travelerId,
@@ -366,6 +441,6 @@ describe('hotel bookings (HTL-16) over HTTP', () => {
 
   it('documents the endpoint in Swagger', async () => {
     const response = await http().get('/api/docs-json').expect(200);
-    expect(response.body.paths['/api/hotel-bookings'].post).toBeDefined();
+    expect(response.body.paths['/api/hotel-bookings'].post.summary).toContain('HTL-18');
   });
 });
