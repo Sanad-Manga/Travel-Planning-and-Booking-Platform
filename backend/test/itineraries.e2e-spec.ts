@@ -13,6 +13,10 @@ import request from 'supertest';
 import { AuthModule } from '../src/auth/auth.module';
 import { Role } from '../src/common';
 import configuration from '../src/config/configuration';
+import {
+  EXCHANGE_RATE_PROVIDER,
+  FetchedRates,
+} from '../src/fx/exchange-rate-provider';
 import { ItinerariesModule } from '../src/itineraries';
 import { setupApp, setupSwagger } from '../src/setup-app';
 import { UPLOAD_OPTIONS } from '../src/uploads/upload-options';
@@ -96,6 +100,16 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
         ItinerariesModule,
       ],
     })
+      // The budget summary converts totals through FxService; stub the live FXRatesAPI call so this suite never needs the network.
+      .overrideProvider(EXCHANGE_RATE_PROVIDER)
+      .useValue({
+        fetchLatest: (base: string): Promise<FetchedRates> =>
+          Promise.resolve({
+            base,
+            rateDate: new Date().toISOString().slice(0, 10),
+            rates: { EGP: 48, AED: 3.67, GBP: 0.75, EUR: 0.85 },
+          }),
+      })
       .overrideProvider(UPLOAD_OPTIONS)
       .useValue({
         root: uploadRoot,
