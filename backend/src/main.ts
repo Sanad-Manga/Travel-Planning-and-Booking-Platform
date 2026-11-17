@@ -6,7 +6,10 @@ import { AppModule } from './app.module';
 import { setupApp, setupSwagger } from './setup-app';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // rawBody: true stashes the unparsed Buffer on req.rawBody for every route IN ADDITION TO the
+  // normal parsed req.body — nothing else changes. PAY-01's webhook needs the exact raw bytes to
+  // verify Stripe's signature; every other route keeps using req.body as before.
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   const config = app.get(ConfigService);
 
   setupApp(app, config.get<string>('frontendUrl'));
