@@ -342,14 +342,14 @@ title after independent review; PR descriptions/checklists were not edited here.
 
 | Route | Transition |
 | --- | --- |
-| `PATCH /api/admin/accounts/:id/suspend` | `USER`: ACTIVE → SUSPENDED |
-| `PATCH /api/admin/accounts/:id/reactivate` | `USER`: SUSPENDED → ACTIVE |
+| `PATCH /api/admin/accounts/:id/suspend` | `USER` or moderator: ACTIVE → SUSPENDED |
+| `PATCH /api/admin/accounts/:id/reactivate` | `USER` or moderator: SUSPENDED → ACTIVE |
 
 ADMIN only (`@Roles(Role.ADMIN)`), empty body. Response: `{ id, status }`.
 
 ### Rules
 
-- Only registered `USER` accounts. ADMIN and moderator targets are 409 and are never changed.
+- `USER`, `AIRLINE_MODERATOR` and `HOTEL_MODERATOR` accounts (moderators since ACC-15). ADMIN targets are 409 and are never changed. A moderator's hotel/airline link is never touched.
 - An administrator cannot change their own status (409). A DEACTIVATED target is 409. A malformed id is 400 and an unknown
   account 404.
 - Each change is one conditional update on `_id`, role and the exact source status, so parallel requests cannot both
@@ -427,3 +427,7 @@ an ADMIN, suspended or deactivated target 409. A reset never reactivates or reli
 `temporary-password.service.spec.ts`, `password-reset-target.service.spec.ts`, `auth.service.spec.ts`,
 `common/guards/guards.spec.ts`, `test/admin-password-reset.e2e-spec.ts` and `test/auth.e2e-spec.ts` (one-time use, old
 tokens revoked, restricted routes, refresh refused, change-password flow, every excluded target).
+
+## Deactivate and reactivate providers — ACC-15 / SCRUM-76
+
+See [docs/api/admin-account-and-provider-status.md](../../../docs/api/admin-account-and-provider-status.md): `PATCH /api/admin/providers/:type/:id/deactivate|reactivate` (`:type` = `hotel` or `airline`), ADMIN only. It flips `isActive` on the provider in one conditional update, never touches a booking, and is separate from suspending the provider's moderator.

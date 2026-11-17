@@ -3,7 +3,7 @@ import { IsMongoId } from 'class-validator';
 import { AccountStatus } from '../../common';
 
 export class AccountStatusParamsDto {
-  @ApiProperty({ description: 'Registered USER account ObjectId.' })
+  @ApiProperty({ description: 'USER or moderator account ObjectId.' })
   @IsMongoId()
   id: string;
 }
