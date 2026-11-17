@@ -346,13 +346,23 @@ describe('hotel bookings (HTL-16) over HTTP', () => {
     expect(await db.collection('notifications').countDocuments({ userId: new Types.ObjectId(travelerId) })).toBe(1);
   });
 
-  it('provides booking ownership and hotel policies to Payments, and returns null for unknown ids', async () => {
+  it('provides payable details and hotel policies to Payments, scoped to the booking owner', async () => {
     const response = await http()
       .post('/api/hotel-bookings')
       .set('Cookie', travelerCookie)
       .send(requestBody(roomIds.standard))
       .expect(201);
     const provider = app.get(HotelBookingsService);
+
+    await expect(provider.getPayable(response.body.id, travelerId)).resolves.toEqual({
+      amountCents: response.body.totalCents,
+      currency: response.body.currency,
+      status: BookingStatus.PENDING_PAYMENT,
+      holdExpiresAt: new Date(response.body.holdExpiresAt),
+    });
+    await expect(provider.getPayable(response.body.id, new Types.ObjectId().toHexString())).resolves.toBeNull();
+    await expect(provider.getPayable('not-an-object-id', travelerId)).resolves.toBeNull();
+    await expect(provider.getPayable(new Types.ObjectId().toHexString(), travelerId)).resolves.toBeNull();
 
     await expect(provider.getPolicies(response.body.id)).resolves.toEqual({
       ownerId: travelerId,
