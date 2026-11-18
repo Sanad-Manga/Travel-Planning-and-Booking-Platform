@@ -7,6 +7,7 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
 import { Connection } from 'mongoose';
 import { createHash } from 'node:crypto';
 import request from 'supertest';
+import { AUTH_RATE_LIMIT_CONFIG } from '../src/auth/auth-rate-limit';
 import { AuthModule } from '../src/auth/auth.module';
 import { PasswordResetService } from '../src/auth/password-reset.service';
 import configuration from '../src/config/configuration';
@@ -46,6 +47,11 @@ describe('forgot-password / reset-password (e2e)', () => {
     await resets.whenIdle(); // the email is sent after the response
     return res;
   };
+  // The 60 second per-email cooldown would swallow a second request; move the stored time back to simulate waiting.
+  const endCooldown = (email: string) =>
+    users()
+      .findOne({ email })
+      .then((u) => tokenRows().updateOne({ userId: u!._id }, { $set: { requestedAt: new Date(Date.now() - 61_000) } }));
   const reset = (token: string, newPassword: string) => http().post('/api/auth/reset-password').send({ token, newPassword });
   const tokenFrom = (message: { text: string }): string => new URL(/https?:\/\/\S+/.exec(message.text)![0]).searchParams.get('token')!;
   const lastTokenFor = (email: string): string => tokenFrom([...sender.sent].reverse().find((m) => m.to === email)!);
@@ -66,6 +72,9 @@ describe('forgot-password / reset-password (e2e)', () => {
     })
       .overrideProvider(EMAIL_SENDER)
       .useValue(sender)
+      // This spec sends far more than 10 requests from one IP; the limiter itself is tested in forgot-password-rate-limit.
+      .overrideProvider(AUTH_RATE_LIMIT_CONFIG)
+      .useValue({ limit: 10_000, windowMs: 60_000 })
       .compile();
     app = moduleRef.createNestApplication();
     setupApp(app);
@@ -154,6 +163,7 @@ describe('forgot-password / reset-password (e2e)', () => {
     it('two parallel requests leave exactly one live token, and only the surviving link works', async () => {
       const email = await register();
       await Promise.all([forgot(email), forgot(email)]);
+      expect(sentTo(email)).toHaveLength(1); // the cooldown lets exactly one of two parallel requests through
 
       const user = await users().findOne({ email });
       expect(await tokenRows().countDocuments({ userId: user!._id })).toBe(1);
@@ -195,6 +205,7 @@ describe('forgot-password / reset-password (e2e)', () => {
       const email = await register();
       await forgot(email);
       const first = lastTokenFor(email);
+      await endCooldown(email);
       await forgot(email);
       const second = lastTokenFor(email);
       expect(second).not.toBe(first);
@@ -208,6 +219,7 @@ describe('forgot-password / reset-password (e2e)', () => {
       const email = await register();
       await forgot(email);
       await reset(lastTokenFor(email), NEW).expect(204);
+      await endCooldown(email);
       await forgot(email);
       await reset(lastTokenFor(email), 'An0therPass1').expect(204);
       expect((await login(email, 'An0therPass1')).status).toBe(200);

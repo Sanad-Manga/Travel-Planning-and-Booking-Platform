@@ -20,6 +20,11 @@ export class PasswordResetToken {
   @Prop({ type: Date, required: true, index: { expireAfterSeconds: 0 } })
   expiresAt: Date;
 
+  // When the link was last issued. The per-email cooldown compares against it inside the same atomic upsert that
+  // writes the new token. Rows written before the cooldown existed have no value and count as "not recent".
+  @Prop({ type: Date })
+  requestedAt?: Date;
+
   // Set by the one compare-and-set that consumes the token; a used token can never be used again.
   @Prop({ type: Date })
   usedAt?: Date;

@@ -68,7 +68,7 @@ describe('PasswordResetService (ACC-07)', () => {
       const token = new URL(sentLink()).searchParams.get('token')!;
       expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/); // 32 random bytes, base64url
       const [filter, update] = tokens.findOneAndUpdate.mock.calls[0];
-      expect(filter).toEqual({ userId: new Types.ObjectId(USER_ID) });
+      expect(filter.userId).toEqual(new Types.ObjectId(USER_ID));
       expect(update.$set.tokenHash).toBe(sha256(token));
       expect(JSON.stringify(tokens.findOneAndUpdate.mock.calls)).not.toContain(token);
     });
@@ -90,27 +90,49 @@ describe('PasswordResetService (ACC-07)', () => {
       expect(sentLink()).toMatch(/^https:\/\/app\.example\.com\/reset-password\?token=[A-Za-z0-9_-]{43}$/);
     });
 
-    it('a newer request supersedes the older one: ONE upsert on userId overwriting the hash and clearing usedAt', async () => {
+    it('a newer request supersedes the older one: ONE conditional upsert on userId overwriting the hash and clearing usedAt', async () => {
       users.findByEmail.mockResolvedValue(activeUser());
       await request();
       await request();
       const calls = tokens.findOneAndUpdate.mock.calls;
       expect(calls).toHaveLength(2);
       for (const [filter, update, options] of calls) {
-        expect(filter).toEqual({ userId: new Types.ObjectId(USER_ID) }); // the same single row per user
+        expect(filter.userId).toEqual(new Types.ObjectId(USER_ID)); // the same single row per user
+        expect(filter.$or).toEqual([{ requestedAt: { $lte: expect.any(Date) } }, { requestedAt: { $exists: false } }]);
         expect(options).toEqual({ upsert: true });
         expect(update.$unset).toEqual({ usedAt: 1 });
+        expect(update.$set.requestedAt).toBeInstanceOf(Date);
       }
       expect(calls[0][1].$set.tokenHash).not.toBe(calls[1][1].$set.tokenHash);
     });
 
-    it('retries once when two parallel first requests collide on the unique userId', async () => {
+    it('cooldown: the cutoff is 60 seconds before now', async () => {
+      users.findByEmail.mockResolvedValue(activeUser());
+      jest.useFakeTimers({ now: new Date('2026-11-18T10:00:00.000Z'), doNotFake: ['setImmediate', 'nextTick'] });
+      try {
+        await request();
+      } finally {
+        jest.useRealTimers();
+      }
+      const [filter, update] = tokens.findOneAndUpdate.mock.calls[0];
+      expect(filter.$or[0].requestedAt.$lte).toEqual(new Date('2026-11-18T09:59:00.000Z'));
+      expect(update.$set.requestedAt).toEqual(new Date('2026-11-18T10:00:00.000Z'));
+    });
+
+    it('inside the cooldown (the conditional upsert hits the unique userId) no email is sent and nothing is logged as an error', async () => {
       users.findByEmail.mockResolvedValue(activeUser());
       tokens.findOneAndUpdate.mockReturnValueOnce({ exec: () => Promise.reject(Object.assign(new Error('dup'), { code: 11000 })) });
-      tokens.findOneAndUpdate.mockReturnValueOnce(exec(null));
       await request();
-      expect(tokens.findOneAndUpdate).toHaveBeenCalledTimes(2);
-      expect(email.send).toHaveBeenCalledTimes(1);
+      expect(tokens.findOneAndUpdate).toHaveBeenCalledTimes(1); // no retry
+      expect(email.send).not.toHaveBeenCalled();
+      expect(Logger.prototype.error).not.toHaveBeenCalled();
+    });
+
+    it('requestReset still returns void inside the cooldown, so the response is the same', async () => {
+      users.findByEmail.mockResolvedValue(activeUser());
+      tokens.findOneAndUpdate.mockReturnValueOnce({ exec: () => Promise.reject(Object.assign(new Error('dup'), { code: 11000 })) });
+      expect(service.requestReset('ali@example.com')).toBeUndefined();
+      await service.whenIdle();
     });
 
     it.each([

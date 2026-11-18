@@ -75,6 +75,22 @@ On success:
 
 Without `SMTP_HOST` (the normal local setup) the server sends through a throwaway Ethereal test inbox and logs a line such as `Email preview (test inbox): https://ethereal.email/message/...`. Open that URL to read the email and copy the link. With `NODE_ENV=production` and no `SMTP_HOST` the send fails (and is logged), so configure SMTP there. See GEN-01-B.
 
-## Not included
+## Rate limiting (ACC-07 review)
 
-Rate limiting per email or IP is not part of this ticket (see the PR notes).
+Two layers, both inside the auth module:
+
+1. **Per-email cooldown (60 seconds).** If a link was issued for the account less than 60 seconds ago, `forgot-password` creates no token and sends no email, and answers the **identical 200** (same status and body; never a 429). The earlier link stays valid. The check and the token write are one atomic conditional upsert, so of two parallel requests exactly one sends an email. After 60 seconds a new request works and invalidates the old link as before.
+2. **Per-IP limit.** `POST /api/auth/forgot-password` and `POST /api/auth/reset-password` each allow **10 requests per IP per 15 minutes** (separate counters per route; fixed window). Over the limit the API answers `429` in the standard error shape with a `Retry-After` header (seconds until the window ends):
+
+```json
+{ "statusCode": 429, "error": "Too Many Requests", "message": "Too many requests. Try again later.",
+  "path": "/api/auth/forgot-password", "timestamp": "2026-11-18T10:00:00.000Z" }
+```
+
+The IP check runs before the body is validated and before any email lookup, so a 429 depends only on the IP and reveals nothing about the email. The frontend should show the message and wait `Retry-After` seconds.
+
+Limitations:
+
+- The limiter is **in memory**: it is per server instance and resets when the server restarts. Several instances each count separately.
+- The key is `req.ip`. Behind a reverse proxy Express needs `trust proxy` configured, otherwise every client shares the proxy's address.
+- A global limiter (for example `@nestjs/throttler`) is a lead decision and is not part of this change.

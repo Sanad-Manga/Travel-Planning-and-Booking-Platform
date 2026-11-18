@@ -2000,3 +2000,21 @@ UsersService.completeEmailPasswordReset (the only change outside the auth folder
 upsert stored userId as a string, and fixed it with an explicit ObjectId. Verified: lint and build clean; full unit
 (--runInBand) 76 suites / 1140 tests pass; full e2e (--runInBand) 58 suites / 1408 tests pass. A parallel unit run
 showed mongodb-memory-server start-up timeouts in unrelated suites; they pass when run serially.
+
+Date: 2026-11-18
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: SCRUM-111 / ACC-07 review follow-up (rate limiting on forgot-password)
+Prompt:
+Sanad asked for rate limiting on PR #128. In the auth module only, no new dependency: a 60 second per-email cooldown on POST /api/auth/forgot-password (no token, no email, identical 200, old link stays valid, check and write in one atomic conditional upsert), and an in-memory fixed-window per-IP limiter (10 requests per 15 minutes, separate counters per route, 429 in the standard error shape with Retry-After, purged and overridable for tests) on forgot-password and reset-password. Update Swagger and docs/api/forgot-password.md, add unit and e2e tests.
+How the output was used:
+The assistant added requestedAt to the password reset token row and changed storeToken into one conditional upsert whose filter only matches a row older than the cooldown (or without requestedAt); a row inside the cooldown makes the upsert hit the unique userId index (11000), which is treated as the silent cooldown, so parallel requests send exactly one email. It added auth-rate-limit.ts (AuthRateLimiter, AuthRateLimitGuard, AuthRateLimited marker, AUTH_RATE_LIMIT_CONFIG token registered in AuthModule so tests can override it), put the guard on the two routes, added the 429 Swagger responses and rewrote the rate limiting section of the doc. Existing ACC-07 e2e tests that sent a second request for the same account now move requestedAt back, and that spec raises the IP limit. I reviewed the code, ran lint, build, unit and e2e tests.
+
+Date: 2026-11-18
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: SCRUM-111 / ACC-07 review follow-up (rate limiting on forgot-password)
+Prompt:
+Sanad asked for rate limiting on PR #128. In the auth module only, no new dependency: a 60 second per-email cooldown on POST /api/auth/forgot-password (no token, no email, identical 200, old link stays valid, check and write in one atomic conditional upsert), and an in-memory fixed-window per-IP limiter (10 requests per 15 minutes, separate counters per route, 429 in the standard error shape with Retry-After, purged and overridable for tests) on forgot-password and reset-password. Update Swagger and docs/api/forgot-password.md, add unit and e2e tests.
+How the output was used:
+The assistant added requestedAt to the password reset token row and changed storeToken into one conditional upsert whose filter only matches a row older than the cooldown (or without requestedAt); a row inside the cooldown makes the upsert hit the unique userId index (11000), which is treated as the silent cooldown, so parallel requests send exactly one email. It added auth-rate-limit.ts (AuthRateLimiter, AuthRateLimitGuard, AuthRateLimited marker, AUTH_RATE_LIMIT_CONFIG token registered in AuthModule so tests can override it), put the guard on the two routes, added the 429 Swagger responses and rewrote the rate limiting section of the doc. Existing ACC-07 e2e tests that sent a second request for the same account now move requestedAt back, and that spec raises the IP limit. I reviewed the code, ran lint, build, unit and e2e tests.

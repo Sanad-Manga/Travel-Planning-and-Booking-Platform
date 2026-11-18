@@ -9,3 +9,6 @@ export const RESET_TOKEN_MAX_LENGTH = 200;
 export const RESET_TOKEN_ERROR_MESSAGE = 'token is invalid or has expired';
 /** The same body for every forgot-password call, whatever the email. */
 export const FORGOT_PASSWORD_RESPONSE_MESSAGE = 'If the email is registered, a reset link has been sent.';
+
+/** ACC-07 review: a second forgot-password for the same account inside this window creates no token and sends no email. */
+export const RESET_REQUEST_COOLDOWN_SECONDS = 60;

@@ -7,7 +7,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { AccountStatus } from '../common';
 import { EmailService } from '../email';
 import { UsersService } from '../users/users.service';
-import { RESET_TOKEN_ERROR_MESSAGE, RESET_TOKEN_TTL_MINUTES } from './auth.constants';
+import { RESET_REQUEST_COOLDOWN_SECONDS, RESET_TOKEN_ERROR_MESSAGE, RESET_TOKEN_TTL_MINUTES } from './auth.constants';
 import { BCRYPT_SALT_ROUNDS } from './auth.service';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { PasswordResetToken, PasswordResetTokenDocument } from './schemas/password-reset-token.schema';
@@ -58,7 +58,8 @@ export class PasswordResetService {
       userId = user.id;
 
       const token = randomBytes(32).toString('base64url');
-      await this.storeToken(user.id, token);
+      // Inside the cooldown nothing is stored or sent, silently: the caller got the same 200 already.
+      if (!(await this.storeToken(user.id, token))) return;
       await this.email.send(this.buildEmail(user.email, token));
     } catch (error) {
       const type = error instanceof Error ? error.name : 'unknown error';
@@ -67,22 +68,35 @@ export class PasswordResetService {
   }
 
   /**
-   * ONE upsert on `userId`: the new hash and expiry overwrite the previous row and clear `usedAt`, so older links die
-   * atomically. Two parallel requests can never leave two live tokens (there is only one row to hold one).
+   * ONE conditional upsert on `userId`; returns false when the cooldown applies (nothing written).
+   * The filter only matches a row that was requested at least RESET_REQUEST_COOLDOWN_SECONDS ago (or never recorded),
+   * or no row at all (insert). A row inside the cooldown does not match, so the upsert tries to insert a second row for
+   * the same userId and the unique index rejects it (code 11000): that is the "cooldown" answer. Two parallel first
+   * requests collide the same way, so exactly one wins. On a match the new hash and expiry overwrite the previous row and
+   * clear `usedAt`, so older links die atomically.
    */
-  private async storeToken(userId: string, token: string): Promise<void> {
+  private async storeToken(userId: string, token: string): Promise<boolean> {
+    const now = Date.now();
+    const cutoff = new Date(now - RESET_REQUEST_COOLDOWN_SECONDS * 1000);
+    // A real ObjectId: on an upsert the filter value is what gets inserted, and a string would be stored as a string.
+    const filter = {
+      userId: new Types.ObjectId(userId),
+      $or: [{ requestedAt: { $lte: cutoff } }, { requestedAt: { $exists: false } }],
+    };
     const update = {
-      $set: { tokenHash: hashToken(token), expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MINUTES * 60_000) },
+      $set: {
+        tokenHash: hashToken(token),
+        expiresAt: new Date(now + RESET_TOKEN_TTL_MINUTES * 60_000),
+        requestedAt: new Date(now),
+      },
       $unset: { usedAt: 1 as const },
     };
-    // A real ObjectId: on an upsert the filter value is what gets inserted, and a string would be stored as a string.
-    const filter = { userId: new Types.ObjectId(userId) };
     try {
       await this.tokens.findOneAndUpdate(filter, update, { upsert: true }).exec();
+      return true;
     } catch (error) {
-      // Two parallel first requests can both try to insert the row; the loser simply overwrites it.
-      if ((error as { code?: number }).code !== DUPLICATE_KEY) throw error;
-      await this.tokens.findOneAndUpdate(filter, update, { upsert: true }).exec();
+      if ((error as { code?: number }).code === DUPLICATE_KEY) return false;
+      throw error;
     }
   }
 

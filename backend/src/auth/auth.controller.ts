@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Patch, Post, Req, Res, UnauthorizedException } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Patch, Post, Req, Res, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   ApiBadRequestResponse,
@@ -16,6 +16,7 @@ import {
 import { Request, Response } from 'express';
 import { AllowWhenMustChange, AuthenticatedUser, CurrentUser, ErrorResponseDto, Public, REFRESH_TOKEN_COOKIE } from '../common';
 import { clearAuthCookies, setAuthCookies } from './auth-cookies';
+import { AuthRateLimitGuard, AuthRateLimited } from './auth-rate-limit';
 import { AuthService } from './auth.service';
 import { FORGOT_PASSWORD_RESPONSE_MESSAGE } from './auth.constants';
 import { ChangePasswordDto } from './dto/change-password.dto';
@@ -38,6 +39,8 @@ export class AuthController {
 
   // ACC-07. Always the same 200, whatever the email: the work happens after the response is decided (see the service).
   @Public()
+  @UseGuards(AuthRateLimitGuard)
+  @AuthRateLimited('forgot-password')
   @Post('forgot-password')
   @HttpCode(200)
   @ApiOperation({
@@ -47,6 +50,7 @@ export class AuthController {
   })
   @ApiOkResponse({ type: ForgotPasswordResponseDto, description: 'Always this body for a well-formed email.' })
   @ApiBadRequestResponse({ type: ErrorResponseDto, description: 'Malformed or missing email, or unknown field' })
+  @ApiResponse({ status: 429, type: ErrorResponseDto, description: 'More than 10 requests from this IP in 15 minutes. Retry-After header gives the seconds to wait. Never depends on the email.' })
   forgotPassword(@Body() dto: ForgotPasswordDto): ForgotPasswordResponseDto {
     this.passwordReset.requestReset(dto.email);
     return { message: FORGOT_PASSWORD_RESPONSE_MESSAGE };
@@ -54,6 +58,8 @@ export class AuthController {
 
   // ACC-07. Does not log the user in: they sign in with the new password.
   @Public()
+  @UseGuards(AuthRateLimitGuard)
+  @AuthRateLimited('reset-password')
   @Post('reset-password')
   @HttpCode(204)
   @ApiOperation({
@@ -67,6 +73,7 @@ export class AuthController {
     description:
       'Field-level errors: newPassword breaks the rules (token not consumed), or token is invalid, expired, already used or replaced (one message for all of them).',
   })
+  @ApiResponse({ status: 429, type: ErrorResponseDto, description: 'More than 10 requests from this IP in 15 minutes. Retry-After header gives the seconds to wait.' })
   async resetPassword(@Body() dto: ResetPasswordDto): Promise<void> {
     await this.passwordReset.reset(dto);
   }
