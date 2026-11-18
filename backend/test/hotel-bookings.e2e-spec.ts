@@ -479,6 +479,34 @@ describe('hotel bookings (HTL-16) over HTTP', () => {
     await http().get(`/api/hotel-bookings/${response.body.id}`).set('Cookie', otherCookie).expect(404);
   });
 
+  it('expires an overdue pending hold when its owner reads the booking', async () => {
+    const response = await http()
+      .post('/api/hotel-bookings')
+      .set('Cookie', travelerCookie)
+      .send(requestBody(roomIds.standard))
+      .expect(201);
+    await db.collection('hotelBookings').updateOne(
+      { _id: new Types.ObjectId(response.body.id) },
+      { $set: { holdExpiresAt: new Date(Date.now() - 60_000) } },
+    );
+
+    const booking = await http()
+      .get(`/api/hotel-bookings/${response.body.id}`)
+      .set('Cookie', travelerCookie)
+      .expect(200);
+
+    expect(booking.body).toMatchObject({
+      id: response.body.id,
+      status: BookingStatus.EXPIRED,
+      holdExpiresAt: null,
+    });
+    const stored = await db
+      .collection('hotelBookings')
+      .findOne({ _id: new Types.ObjectId(response.body.id) });
+    expect(stored?.status).toBe(BookingStatus.EXPIRED);
+    expect(stored?.holdExpiresAt).toBeUndefined();
+  });
+
   it('confirms a paid hotel hold through BookingLifecycle without a Stripe event object', async () => {
     const response = await http()
       .post('/api/hotel-bookings')
