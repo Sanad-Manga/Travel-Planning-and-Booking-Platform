@@ -1787,3 +1787,12 @@ Prompt:
 Check the shutdown error (MongoClientClosedError in afterAll of the admin-accounts e2e suite on develop's CI) and find the cause before calling it a flake.
 How the output was used:
 The suite passed all 1325 tests; only afterAll(app.close) failed. It could not be reproduced by running the suite alone or in parallel, but the database-failure test was the suspect: it mocked countDocuments to throw synchronously, and paginate() builds Promise.all([find.exec(), countDocuments.exec()]) so the find was already running when the throw skipped Promise.all, leaving that query orphaned; closing the client in afterAll then interrupted it. Proved by running only that test (the error appeared 12 of 12 times across the three suites with the same pattern: admin-accounts, audit, airports) and by the same runs after the fix (0 of 9). Fix: the three mocks now return an object whose exec() rejects, like a real driver failure. No production code changed. Verification: lint, build, 1089 unit and 1330 e2e pass.
+================================================
+Date: 2026-11-18
+Student: Hessain Elrefaey
+Tool: Copilot (VS Code)
+Related Requirement: Blog comment validation regression (audit of develop at 0e30eb5)
+Prompt:
+Investigate the report that POST /api/posts/:id/comments with an empty body returns contradictory 400 messages for the 500-character limit and non-empty requirement. Add a test asserting the empty-body response contains only the applicable non-empty message.
+How the output was used:
+Created a separate feature/BLG-comment-empty-validation branch from 0e30eb5. The initial check used {"body":""}, which correctly returned only "Comment must not be empty" and missed the failing payload. Probed the actual endpoint with an omitted body property ({}), a null body, and no JSON body; each returned three details, including the misleading "Comment must be at most 500 characters" alongside "Comment must not be empty" and "body must be a string". Empty-string and whitespace-only strings returned only the non-empty message. Fixed this by defaulting a missing DTO body to an empty string and normalizing null to an empty string before validation. Added E2E cases for empty, whitespace, omitted, null, and no-body requests. Verification: comments E2E 28/28 and focused ESLint passed.

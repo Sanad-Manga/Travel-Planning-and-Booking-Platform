@@ -11,12 +11,12 @@ export class CreateCommentDto {
     maxLength: COMMENT_MAX_LENGTH,
   })
   @Transform(({ value }: { value: unknown }) =>
-    typeof value === 'string' ? value.trim() : value,
+    typeof value === 'string' ? value.trim() : value == null ? '' : value,
   )
   @IsString()
   @IsNotEmpty({ message: 'Comment must not be empty' })
   @MaxLength(COMMENT_MAX_LENGTH, {
     message: 'Comment must be at most 500 characters',
   })
-  body: string;
+  body: string = '';
 }

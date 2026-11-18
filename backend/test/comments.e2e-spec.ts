@@ -120,6 +120,30 @@ describe('BLG-07 edit and delete own comments (e2e)', () => {
     commentId = await addComment(postId, writerCookie, 'Original text');
   });
 
+  describe('POST /api/posts/:id/comments', () => {
+    const emptyBodyCases: Array<[string, Record<string, unknown> | undefined]> = [
+      ['empty string', { body: '' }],
+      ['whitespace only', { body: '   ' }],
+      ['missing body property', {}],
+      ['null body', { body: null }],
+      ['no JSON body', undefined],
+    ];
+
+    it.each(emptyBodyCases)(
+      'reports only the non-empty validation error for %s',
+      async (_label, body) => {
+        let req = http()
+          .post(`/api/posts/${postId}/comments`)
+          .set('Cookie', writerCookie);
+        req = body === undefined ? req.send() : req.send(body);
+        const response = await req.expect(400);
+        expect(response.body.details).toEqual([
+          { field: 'body', message: 'Comment must not be empty' },
+        ]);
+      },
+    );
+  });
+
   describe('PATCH /api/comments/:id', () => {
     it('the author edits their comment: trimmed text is stored, updatedAt moves, nothing else changes', async () => {
       const before = await storedComment(commentId);
