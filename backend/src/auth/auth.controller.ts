@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Patch, Post, Query, Req, Res, UnauthorizedException } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Patch, Post, Query, Req, Res, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   ApiBadRequestResponse,
@@ -16,11 +16,16 @@ import {
 import { Request, Response } from 'express';
 import { AllowWhenMustChange, AuthenticatedUser, CurrentUser, ErrorResponseDto, Public, REFRESH_TOKEN_COOKIE } from '../common';
 import { clearAuthCookies, setAuthCookies } from './auth-cookies';
+import { AuthRateLimitGuard, AuthRateLimited } from './auth-rate-limit';
 import { AuthService } from './auth.service';
 import { EmailVerificationService, ResendCooldownException } from './email-verification.service';
 import { VerifyEmailQueryDto } from './dto/verify-email-query.dto';
 import { VerifyEmailResponseDto } from './dto/verify-email-response.dto';
+import { FORGOT_PASSWORD_RESPONSE_MESSAGE } from './auth.constants';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { ForgotPasswordDto, ForgotPasswordResponseDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
+import { PasswordResetService } from './password-reset.service';
 import { LoginDto } from './dto/login.dto';
 import { LogoutResponseDto } from './dto/logout-response.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -33,7 +38,49 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly emailVerification: EmailVerificationService,
     private readonly config: ConfigService,
+    private readonly passwordReset: PasswordResetService,
   ) {}
+
+  // ACC-07. Always the same 200, whatever the email: the work happens after the response is decided (see the service).
+  @Public()
+  @UseGuards(AuthRateLimitGuard)
+  @AuthRateLimited('forgot-password')
+  @Post('forgot-password')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Request a password-reset link by email. The answer is identical for every well-formed email.',
+    description:
+      'If the email belongs to an ACTIVE account, a single-use link valid for 30 minutes is emailed; a newer request invalidates older links. Unknown, suspended and deactivated accounts get no email and the same response. The email is sent after the response, and a failed send never changes it.',
+  })
+  @ApiOkResponse({ type: ForgotPasswordResponseDto, description: 'Always this body for a well-formed email.' })
+  @ApiBadRequestResponse({ type: ErrorResponseDto, description: 'Malformed or missing email, or unknown field' })
+  @ApiResponse({ status: 429, type: ErrorResponseDto, description: 'More than 10 requests from this IP in 15 minutes. Retry-After header gives the seconds to wait. Never depends on the email.' })
+  forgotPassword(@Body() dto: ForgotPasswordDto): ForgotPasswordResponseDto {
+    this.passwordReset.requestReset(dto.email);
+    return { message: FORGOT_PASSWORD_RESPONSE_MESSAGE };
+  }
+
+  // ACC-07. Does not log the user in: they sign in with the new password.
+  @Public()
+  @UseGuards(AuthRateLimitGuard)
+  @AuthRateLimited('reset-password')
+  @Post('reset-password')
+  @HttpCode(204)
+  @ApiOperation({
+    summary: 'Set a new password with the token from the reset email. The token works once.',
+    description:
+      'All existing sessions and refresh tokens are invalidated, the login lockout is cleared, and no cookie is set: log in with the new password.',
+  })
+  @ApiNoContentResponse({ description: 'Password replaced.' })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description:
+      'Field-level errors: newPassword breaks the rules (token not consumed), or token is invalid, expired, already used or replaced (one message for all of them).',
+  })
+  @ApiResponse({ status: 429, type: ErrorResponseDto, description: 'More than 10 requests from this IP in 15 minutes. Retry-After header gives the seconds to wait.' })
+  async resetPassword(@Body() dto: ResetPasswordDto): Promise<void> {
+    await this.passwordReset.reset(dto);
+  }
 
   @Public()
   @Post('register')

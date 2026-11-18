@@ -103,6 +103,22 @@ export class UsersService {
     return result.modifiedCount === 1;
   }
 
+  /**
+   * ACC-07 (email reset): compare-and-set on the old hash, ACTIVE only. Replaces the hash, bumps tokenVersion (every
+   * access and refresh token dies), and clears the forced-change/temporary-password state and the login lockout.
+   */
+  async completeEmailPasswordReset(id: string, expectedHash: string, newHash: string): Promise<boolean> {
+    const result = await this.writeCredentials(
+      { _id: id, passwordHash: expectedHash, status: AccountStatus.ACTIVE },
+      {
+        $set: { passwordHash: newHash, mustChangePassword: false, failedAttempts: 0 },
+        $inc: { tokenVersion: 1 },
+        $unset: { lockedUntil: 1, temporaryPasswordExpiresAt: 1, temporaryPasswordConsumed: 1 },
+      },
+    );
+    return result.modifiedCount === 1;
+  }
+
   async completeForcedPasswordChange(id: string, expectedHash: string, newHash: string, version: number): Promise<boolean> {
     const result = await this.writeCredentials(
       {
