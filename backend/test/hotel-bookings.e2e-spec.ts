@@ -400,14 +400,142 @@ describe('hotel bookings (HTL-16) over HTTP', () => {
     const response = await http()
       .post('/api/hotel-bookings')
       .set('Cookie', travelerCookie)
-      .send(requestBody(roomIds.standard))
+      .send({
+        checkIn: day(2),
+        checkOut: day(5),
+        rooms: [
+          { roomId: roomIds.standard.toHexString(), adults: 1, children: 0 },
+          { roomId: roomIds.family.toHexString(), adults: 1, children: 0 },
+        ],
+      })
+      .expect(201);
+    const otherBookingResponse = await http()
+      .post('/api/hotel-bookings')
+      .set('Cookie', travelerCookie)
+      .send(requestBody(roomIds.otherHotel))
       .expect(201);
     const provider = app.get(HotelBookingsService);
 
     expect(await provider.markConfirmed(response.body.id, 'pi_hotel_test')).toBe(true);
+    const firstConfirmation = await db.collection('hotelBookings').findOne({ _id: new Types.ObjectId(response.body.id) });
     expect(await provider.markConfirmed(response.body.id, 'pi_hotel_test')).toBe(true);
+    expect(await provider.markConfirmed(otherBookingResponse.body.id, 'pi_hotel_other')).toBe(true);
     expect(await provider.hasUpcomingConfirmedBookings(travelerId, new Date())).toBe(true);
     expect(await provider.hasUpcomingConfirmedBookings(travelerId, new Date(`${day(3)}T00:00:00.000Z`))).toBe(false);
+
+    const confirmed = await db.collection('hotelBookings').findOne({ _id: new Types.ObjectId(response.body.id) });
+    const otherConfirmed = await db.collection('hotelBookings').findOne({ _id: new Types.ObjectId(otherBookingResponse.body.id) });
+    expect(confirmed?.status).toBe(BookingStatus.CONFIRMED);
+    expect(confirmed?.rooms).toHaveLength(2);
+    expect(confirmed?.bookingReference).toMatch(/^HTL-[A-F0-9]{16}$/);
+    expect(confirmed?.bookingReference).toBe(firstConfirmation?.bookingReference);
+    expect(otherConfirmed?.bookingReference).toBeTruthy();
+    expect(otherConfirmed?.bookingReference).not.toBe(confirmed?.bookingReference);
+    expect(confirmed?.holdExpiresAt).toBeUndefined();
+    expect(await db.collection('notifications').countDocuments({ userId: new Types.ObjectId(travelerId) })).toBe(2);
+  });
+
+  it('shows confirmation to its owner and hides bookings from other users', async () => {
+    const response = await http()
+      .post('/api/hotel-bookings')
+      .set('Cookie', travelerCookie)
+      .send(requestBody(roomIds.standard))
+      .expect(201);
+    const provider = app.get(HotelBookingsService);
+    expect(await provider.markConfirmed(response.body.id, 'pi_hotel_read')).toBe(true);
+
+    const confirmation = await http()
+      .get(`/api/hotel-bookings/${response.body.id}`)
+      .set('Cookie', travelerCookie)
+      .expect(200);
+    expect(confirmation.body).toMatchObject({
+      id: response.body.id,
+      status: BookingStatus.CONFIRMED,
+      bookingReference: expect.stringMatching(/^HTL-[A-F0-9]{16}$/),
+      holdExpiresAt: null,
+    });
+
+    await http().get(`/api/hotel-bookings/${new Types.ObjectId().toHexString()}`).set('Cookie', travelerCookie).expect(404);
+    await http().get(`/api/hotel-bookings/${response.body.id}`).expect(401);
+
+    await db.collection('users').insertOne({
+      name: 'Other Hotel Traveler',
+      email: 'other-hotel-traveler@example.com',
+      passwordHash: hashSync(PASSWORD, 4),
+      role: Role.USER,
+      status: 'ACTIVE',
+      consentAcceptedAt: new Date(),
+      preferredCurrency: 'USD',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const otherLogin = await http()
+      .post('/api/auth/login')
+      .send({ email: 'other-hotel-traveler@example.com', password: PASSWORD })
+      .expect(200);
+    const otherCookie = (otherLogin.headers['set-cookie'] as unknown as string[])
+      .map((cookie) => cookie.split(';')[0])
+      .join('; ');
+    await http().get(`/api/hotel-bookings/${response.body.id}`).set('Cookie', otherCookie).expect(404);
+  });
+
+  it('expires an overdue pending hold when its owner reads the booking', async () => {
+    const response = await http()
+      .post('/api/hotel-bookings')
+      .set('Cookie', travelerCookie)
+      .send(requestBody(roomIds.standard))
+      .expect(201);
+    await db.collection('hotelBookings').updateOne(
+      { _id: new Types.ObjectId(response.body.id) },
+      { $set: { holdExpiresAt: new Date(Date.now() - 60_000) } },
+    );
+
+    const booking = await http()
+      .get(`/api/hotel-bookings/${response.body.id}`)
+      .set('Cookie', travelerCookie)
+      .expect(200);
+
+    expect(booking.body).toMatchObject({
+      id: response.body.id,
+      status: BookingStatus.EXPIRED,
+      holdExpiresAt: null,
+    });
+    const stored = await db
+      .collection('hotelBookings')
+      .findOne({ _id: new Types.ObjectId(response.body.id) });
+    expect(stored?.status).toBe(BookingStatus.EXPIRED);
+    expect(stored?.holdExpiresAt).toBeUndefined();
+  });
+
+  it('confirms a paid hotel hold through BookingLifecycle without a Stripe event object', async () => {
+    const response = await http()
+      .post('/api/hotel-bookings')
+      .set('Cookie', travelerCookie)
+      .send({
+        checkIn: day(2),
+        checkOut: day(5),
+        rooms: [
+          { roomId: roomIds.standard.toHexString(), adults: 1, children: 0 },
+          { roomId: roomIds.family.toHexString(), adults: 1, children: 0 },
+        ],
+      })
+      .expect(201);
+    await db.collection('hotelBookings').updateOne(
+      { _id: new Types.ObjectId(response.body.id) },
+      { $set: { holdExpiresAt: new Date(Date.now() - 60_000) } },
+    );
+    const paidLifecycle = new BookingLifecycle(app.get(BookingProviderRegistry), {
+      prepareExpiry: async () => ({ outcome: 'PAID', paymentRef: 'pi_late_hotel' }),
+    });
+
+    await expect(paidLifecycle.expireIfDue(BookingType.HOTEL, response.body.id, new Date())).resolves.toBe(true);
+    const confirmation = await http()
+      .get(`/api/hotel-bookings/${response.body.id}`)
+      .set('Cookie', travelerCookie)
+      .expect(200);
+    expect(confirmation.body.status).toBe(BookingStatus.CONFIRMED);
+    expect(confirmation.body.bookingReference).toMatch(/^HTL-[A-F0-9]{16}$/);
+    expect(confirmation.body.rooms).toHaveLength(2);
     expect(await db.collection('notifications').countDocuments({ userId: new Types.ObjectId(travelerId) })).toBe(1);
   });
 
@@ -442,5 +570,6 @@ describe('hotel bookings (HTL-16) over HTTP', () => {
   it('documents the endpoint in Swagger', async () => {
     const response = await http().get('/api/docs-json').expect(200);
     expect(response.body.paths['/api/hotel-bookings'].post.summary).toContain('HTL-18');
+    expect(response.body.paths['/api/hotel-bookings/{id}'].get.summary).toContain('HTL-17');
   });
 });
