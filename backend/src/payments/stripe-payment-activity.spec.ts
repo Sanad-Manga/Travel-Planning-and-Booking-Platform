@@ -116,6 +116,23 @@ describe('StripePaymentActivity', () => {
     expect(row.status).toBe(PaymentStatus.CANCELLED);
   });
 
+  it('skips instead of crashing when Stripe is unreachable (GitHub issue #114)', async () => {
+    const row = model.seed({
+      bookingType: BookingType.FLIGHT,
+      bookingId: BOOKING_ID,
+      stripePaymentIntentId: 'pi_5',
+      status: PaymentStatus.REQUIRES_PAYMENT,
+      updatedAt: NOW,
+      createdAt: NOW,
+    });
+    stripe.retrievePaymentIntent = jest.fn().mockRejectedValue(new Error('Stripe is down'));
+
+    const result = await activity.prepareExpiry(BookingType.FLIGHT, BOOKING_ID.toString(), NOW);
+
+    expect(result).toBe('SKIP');
+    expect(row.status).toBe(PaymentStatus.REQUIRES_PAYMENT); // untouched — the next sweep tries again
+  });
+
   it('confirms instead of expiring when Stripe reports the payment actually succeeded past the cap', async () => {
     const row = model.seed({
       bookingType: BookingType.HOTEL,

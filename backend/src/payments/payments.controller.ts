@@ -8,6 +8,7 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiServiceUnavailableResponse,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
@@ -44,6 +45,7 @@ export class PaymentsController {
     type: ErrorResponseDto,
     description: 'Not awaiting payment, hold expired, policies not accepted, a payment is already in flight, or that booking type is not supported yet',
   })
+  @ApiServiceUnavailableResponse({ type: ErrorResponseDto, description: 'The payment provider is temporarily unavailable' })
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: CreatePaymentDto): Promise<PaymentResponseDto> {
     return this.payments.create(user, dto);
   }
@@ -59,6 +61,7 @@ export class PaymentsController {
   @ApiCreatedResponse({ type: PaymentResponseDto })
   @ApiNotFoundResponse({ type: ErrorResponseDto, description: 'Payment not found or belongs to another traveler' })
   @ApiConflictResponse({ type: ErrorResponseDto, description: 'Not retryable, or the booking hold has expired' })
+  @ApiServiceUnavailableResponse({ type: ErrorResponseDto, description: 'The payment provider is temporarily unavailable' })
   retry(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<PaymentResponseDto> {
     return this.payments.retry(user, id);
   }
