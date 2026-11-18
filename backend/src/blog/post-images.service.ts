@@ -1,175 +1,82 @@
-import {
-  ConflictException,
-  Injectable,
-  InternalServerErrorException,
-  Logger,
-  NotFoundException,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { FilterQuery, Model, Types } from 'mongoose';
-import { AuthenticatedUser, MAX_IMAGES_PER_ENTITY } from '../common';
-import { UploadFile, UploadReference, UploadService } from '../uploads';
-import { Post, PostImage } from './schemas/post.schema';
+import { Model, Types } from 'mongoose';
+import { AuthenticatedUser } from '../common';
+import { UploadFile, UploadService } from '../uploads';
+import { PostImageDto } from './dto/post-image.dto';
+import { Post } from './schemas/post.schema';
 
+const OBJECT_ID = /^[0-9a-f]{24}$/i;
+
+/**
+ * BLG-10: the author attaches images to their own post and removes them. Same pattern as ITN-12 (activity images).
+ * The shared UploadService checks the file (JPG/PNG, real image, 5 MB) and the limit of 5 images per post: it keeps
+ * one numbered slot per image, so two uploads at the same time can never both take the 5th place.
+ */
 @Injectable()
 export class PostImagesService {
-  private readonly logger = new Logger(PostImagesService.name);
   constructor(
     @InjectModel(Post.name) private readonly posts: Model<Post>,
     private readonly uploads: UploadService,
   ) {}
 
-  async attach(
-    id: string,
-    actor: AuthenticatedUser,
-    file: UploadFile,
-  ): Promise<UploadReference> {
-    const filter = this.ownedFilter(id, actor);
-    const post = await this.loadOwned(filter);
-    const postId = post._id.toString();
-    if ((post.images ?? []).length >= MAX_IMAGES_PER_ENTITY)
-      throw new ConflictException('A post can have at most five images');
-    // Shared service validates bytes/decoding and reserves capacity. No disk write before ownership.
-    const reference = await this.uploads.save(file, {
-      kind: 'post',
-      ownerId: postId,
-    });
-    let matched: number;
+  /**
+   * Ownership first (404 for a missing post or someone else's), then the upload service validates and stores the
+   * file (400 bad file, 409 when the 5 places are taken). Only then is the reference pushed onto the post. If that
+   * push fails, or the post was deleted in between, the stored file is removed again.
+   */
+  async attach(id: string, actor: AuthenticatedUser, file: UploadFile): Promise<PostImageDto> {
+    const postId = this.postId(id);
+    const filter = { _id: postId, authorId: new Types.ObjectId(actor.userId) };
+    if (!(await this.posts.exists(filter))) throw new NotFoundException('Post not found');
+
+    const image = await this.uploads.save(file, { kind: 'post', ownerId: postId.toString() });
     try {
-      const result = await this.posts
-        .updateOne(
-          {
-            ...filter,
-            [`images.${MAX_IMAGES_PER_ENTITY - 1}`]: { $exists: false },
-            'images.id': { $ne: reference.id },
-          },
-          { $push: { images: reference } },
-          { runValidators: true },
-        )
-        .exec();
-      matched = result.matchedCount;
-    } catch {
-      // A lost acknowledgement can hide a committed write. An absent subsequent read
-      // is NOT proof that an in-flight database write can no longer commit.
-      try {
-        if (await this.posts.exists({ ...filter, 'images.id': reference.id }))
-          return reference;
-      } catch {
-        /* Keep the file when even reconciliation is unavailable. */
-      }
-      this.warn(
-        postId,
-        reference.id,
-        'Attachment outcome uncertain; retained upload requires reconciliation',
-      );
-      throw new InternalServerErrorException(
-        'Image attachment outcome is uncertain',
-      );
+      const result = await this.posts.updateOne(filter, { $push: { images: { id: image.id, url: image.url } } }).exec();
+      if (result.matchedCount === 1) return image;
+    } catch (error) {
+      await this.removeStoredImages(postId.toString(), [image]);
+      throw error;
     }
-    if (matched === 1) return reference;
-    // A definite non-match did not attach our unique ID; safe compensation.
-    try {
-      await this.uploads.removeForTarget(reference.id, {
-        kind: 'post',
-        ownerId: postId,
-      });
-    } catch {
-      this.warn(
-        postId,
-        reference.id,
-        'Unattached upload cleanup requires retry',
-      );
-      throw new InternalServerErrorException(
-        'Image attachment failed; cleanup requires retry',
-      );
-    }
-    let exists: boolean;
-    try {
-      exists = !!(await this.posts.exists(filter));
-    } catch {
-      throw new InternalServerErrorException('Post could not be verified');
-    }
-    if (!exists) throw new NotFoundException('Post not found');
-    throw new ConflictException('Post image capacity or attachment changed');
+    await this.removeStoredImages(postId.toString(), [image]);
+    throw new NotFoundException('Post not found');
   }
 
-  async remove(
-    id: string,
-    imageId: string,
-    actor: AuthenticatedUser,
-  ): Promise<void> {
-    const filter = this.ownedFilter(id, actor);
-    if (typeof imageId !== 'string' || !/^[a-f0-9]{24}$/i.test(imageId))
-      throw new NotFoundException('Post image not found');
-    const post = await this.loadOwned(filter);
-    const image = (post.images ?? []).find(
-      (entry) => entry.id.toLowerCase() === imageId.toLowerCase(),
-    );
-    if (!image) throw new NotFoundException('Post image not found');
-    // Leave membership durable until storage deletion completes; foreign legacy
-    // references are detached without touching the other entity's physical file.
-    await this.uploads.removeForTarget(image.id, {
-      kind: 'post',
-      ownerId: post._id.toString(),
-    });
-    let matched: number;
-    try {
-      const result = await this.posts
-        .updateOne(
-          { ...filter, 'images.id': image.id },
-          { $pull: { images: { id: image.id } } },
-        )
-        .exec();
-      matched = result.matchedCount;
-    } catch {
-      throw new InternalServerErrorException(
-        'Image storage was removed; reference cleanup requires retry',
-      );
-    }
-    if (!matched) throw new NotFoundException('Post image not found');
+  /**
+   * The image must be one of this post's images, and the post must be the caller's (404 otherwise), so nobody can
+   * delete another entity's file through this route. The file is removed first (safe to repeat), then the reference
+   * is pulled in one conditional update, so a failure in between can simply be retried.
+   */
+  async remove(id: string, imageId: string, actor: AuthenticatedUser): Promise<void> {
+    const postId = this.postId(id);
+    const filter = { _id: postId, authorId: new Types.ObjectId(actor.userId), 'images.id': imageId };
+    if (!(await this.posts.exists(filter))) throw new NotFoundException('Post or image not found');
+
+    await this.removeFile(postId.toString(), imageId);
+    const result = await this.posts.updateOne(filter, { $pull: { images: { id: imageId } } }).exec();
+    if (result.matchedCount === 0) throw new NotFoundException('Post or image not found');
   }
 
-  /** Called only with a post obtained through the existing authorized deletion filter. */
-  async removeStoredImages(postId: string, images: PostImage[]): Promise<void> {
-    for (const image of images) {
-      // Legacy placeholder IDs never came from this service; never interpret their URL as a path.
-      if (/^[a-f0-9]{24}$/i.test(image.id))
-        await this.uploads.removeForTarget(image.id, {
-          kind: 'post',
-          ownerId: postId,
-        });
-    }
+  /**
+   * Used when a post is deleted (BlogService.deletePostAndDependents). Failures are not reported: the post is already
+   * gone, and the upload service retries what it could not finish (its `deleting` state).
+   */
+  async removeStoredImages(postId: string, images: { id: string }[]): Promise<void> {
+    await Promise.allSettled(images.map((image) => this.removeFile(postId, image.id)));
   }
 
-  private ownedFilter(id: string, actor: AuthenticatedUser): FilterQuery<Post> {
-    if (!actor?.userId)
-      throw new UnauthorizedException('Authentication required');
-    if (typeof id !== 'string' || !/^[a-f0-9]{24}$/i.test(id))
-      throw new NotFoundException('Post not found');
-    return {
-      _id: new Types.ObjectId(id),
-      authorId: new Types.ObjectId(actor.userId),
-    };
+  /**
+   * removeForTarget only deletes a file that the upload service stored for THIS post. Posts created before BLG-10
+   * could hold any id the client sent; such a reference is just pulled, and nobody else's file is touched.
+   */
+  private async removeFile(postId: string, imageId: string): Promise<void> {
+    if (!OBJECT_ID.test(imageId)) return;
+    await this.uploads.removeForTarget(imageId, { kind: 'post', ownerId: postId });
   }
 
-  private async loadOwned(filter: FilterQuery<Post>) {
-    let post;
-    try {
-      post = await this.posts
-        .findOne(filter)
-        .select('_id images')
-        .lean()
-        .exec();
-    } catch {
-      throw new InternalServerErrorException('Post could not be retrieved');
-    }
-    if (!post) throw new NotFoundException('Post not found');
-    return post;
-  }
-
-  private warn(postId: string, imageId: string, message: string): void {
-    // Only normalized identifiers, never binary data, paths, URLs or raw driver exceptions.
-    this.logger.warn(`${message}; postId=${postId}; imageId=${imageId}`);
+  // A malformed id can never match, so it gets the same 404 as an unknown one.
+  private postId(id: string): Types.ObjectId {
+    if (!OBJECT_ID.test(id)) throw new NotFoundException('Post not found');
+    return new Types.ObjectId(id);
   }
 }

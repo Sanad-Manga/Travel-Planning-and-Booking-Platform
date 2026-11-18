@@ -1,12 +1,4 @@
-import {
-  Controller,
-  Delete,
-  HttpCode,
-  Param,
-  Post,
-  UploadedFile,
-  UseInterceptors,
-} from '@nestjs/common';
+import { Controller, Delete, HttpCode, HttpStatus, Param, Post, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBadRequestResponse,
@@ -15,122 +7,60 @@ import {
   ApiConsumes,
   ApiCookieAuth,
   ApiCreatedResponse,
-  ApiForbiddenResponse,
-  ApiInternalServerErrorResponse,
   ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOperation,
-  ApiParam,
   ApiPayloadTooLargeResponse,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import {
-  AuthenticatedUser,
-  CurrentUser,
-  ErrorResponseDto,
-  IMAGE_MAX_BYTES,
-  MAX_IMAGES_PER_ENTITY,
-} from '../common';
+import { AuthenticatedUser, CurrentUser, ErrorResponseDto, IMAGE_MAX_BYTES } from '../common';
 import { UploadFile } from '../uploads';
-import { PostImageDto } from './dto/create-post.dto';
+import { PostImageDto } from './dto/post-image.dto';
 import { PostImagesService } from './post-images.service';
 
+/** BLG-10: images of a post. Any logged-in user, but only on their own post (checked in the service). */
 @ApiTags('posts')
 @ApiCookieAuth()
-@ApiForbiddenResponse({ type: ErrorResponseDto, description: 'Forced password replacement is required by the existing global authentication guard.' })
+@ApiUnauthorizedResponse({ type: ErrorResponseDto, description: 'Not logged in' })
 @Controller('posts/:id/images')
-@ApiParam({
-  name: 'id',
-  description:
-    'Post ObjectId; only its author may modify images, including drafts/hidden posts.',
-})
 export class PostImagesController {
   constructor(private readonly images: PostImagesService) {}
 
   @Post()
-  // Multer's default memory storage: no dest/storage option or module-wide disk configuration.
-  @UseInterceptors(
-    FileInterceptor('image', {
-      limits: { fileSize: IMAGE_MAX_BYTES, files: 1, fields: 0, parts: 2 },
-    }),
-  )
-  @ApiOperation({
-    summary: 'Attach one JPEG/PNG to my post (BLG-10)',
-    description: `Shared byte/content validation; at most ${IMAGE_MAX_BYTES} bytes per image and ${MAX_IMAGES_PER_ENTITY} images per post. Returned URLs are public even for draft/hidden posts.`,
-  })
+  @UseInterceptors(FileInterceptor('image', { limits: { fileSize: IMAGE_MAX_BYTES, files: 1 } }))
+  @ApiOperation({ summary: 'Attach one image (JPG or PNG, at most 5 MB, at most 5 per post) to my post - BLG-10' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     schema: {
       type: 'object',
-      additionalProperties: false,
       required: ['image'],
-      properties: {
-        image: {
-          type: 'string',
-          format: 'binary',
-          description: 'One JPEG or PNG file, max 5 MiB.',
-        },
-      },
+      properties: { image: { type: 'string', format: 'binary' } },
     },
   })
-  @ApiCreatedResponse({ type: PostImageDto })
+  @ApiCreatedResponse({ type: PostImageDto, description: 'The stored image' })
   @ApiBadRequestResponse({
     type: ErrorResponseDto,
-    description:
-      'Missing/empty/corrupt image, unsupported MIME/content mismatch or extra fields/files.',
+    description: 'No file in the image field, not a JPG or PNG, a file that is not a real image, or an empty file',
   })
-  @ApiPayloadTooLargeResponse({
-    type: ErrorResponseDto,
-    description: 'File exceeds the multipart 5 MiB limit.',
-  })
-  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
-  @ApiNotFoundResponse({
-    type: ErrorResponseDto,
-    description: 'Invalid/missing post or another author’s post.',
-  })
-  @ApiConflictResponse({
-    type: ErrorResponseDto,
-    description: 'Five-image limit or concurrent attachment change.',
-  })
-  @ApiInternalServerErrorResponse({
-    type: ErrorResponseDto,
-    description:
-      'Storage/database unavailable or uncertain attachment acknowledgement; cleanup/reconciliation may be required.',
-  })
+  @ApiNotFoundResponse({ type: ErrorResponseDto, description: 'No such post (or it belongs to someone else)' })
+  @ApiConflictResponse({ type: ErrorResponseDto, description: 'The post already has 5 images' })
+  @ApiPayloadTooLargeResponse({ type: ErrorResponseDto, description: 'The file is larger than 5 MB' })
   attach(
     @Param('id') id: string,
     @CurrentUser() actor: AuthenticatedUser,
     @UploadedFile() file: UploadFile,
-  ) {
+  ): Promise<PostImageDto> {
     return this.images.attach(id, actor, file);
   }
 
   @Delete(':imageId')
-  @HttpCode(204)
-  @ApiParam({
-    name: 'imageId',
-    description:
-      'Attached upload ObjectId; cannot delete another post/entity’s file.',
-  })
-  @ApiOperation({
-    summary: 'Remove one image from my post (BLG-10)',
-    description:
-      'Storage cleanup precedes atomic reference removal. Retry failures; already-removed/malformed/unassociated image IDs return 404. Legacy foreign references are detached without deleting foreign storage.',
-  })
-  @ApiNoContentResponse({
-    description: 'Storage cleanup and reference removal completed.',
-  })
-  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Remove one image from my post; the stored file is deleted too - BLG-10' })
+  @ApiNoContentResponse({ description: 'Removed' })
   @ApiNotFoundResponse({
     type: ErrorResponseDto,
-    description:
-      'Invalid/missing/other-author post or missing/malformed/unassociated image.',
-  })
-  @ApiInternalServerErrorResponse({
-    type: ErrorResponseDto,
-    description:
-      'Storage/reference cleanup failed. Retry; a reference may temporarily point to a removed file.',
+    description: 'No such post (or it belongs to someone else), or the image is not on this post',
   })
   remove(
     @Param('id') id: string,

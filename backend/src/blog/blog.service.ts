@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ConflictException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -60,9 +59,6 @@ export class BlogService {
    * The author is always the caller; isHidden always starts false. Neither can be sent in the body.
    */
   async create(dto: CreatePostDto, actor: AuthenticatedUser): Promise<PostResponseDto> {
-    if (dto.images !== undefined && (!Array.isArray(dto.images) || dto.images.length !== 0)) {
-      throw this.imageInputError();
-    }
     // Limits re-checked here too, so they hold for any caller of the service (contracts section 3).
     this.assertLimit('tags', dto.tags, POST_MAX_TAGS);
 
@@ -72,7 +68,7 @@ export class BlogService {
       title: dto.title,
       body: dto.body,
       tags: dto.tags ?? [],
-      images: [],
+      images: [], // attached later through POST /posts/:id/images (BLG-10)
       status,
       isHidden: false,
       ...(status === PostStatus.PUBLISHED ? { publishedAt: new Date() } : {}),
@@ -351,7 +347,6 @@ export class BlogService {
    * post becomes PUBLISHED and kept afterwards (also if it goes back to DRAFT and is re-published).
    */
   async update(id: string, dto: UpdatePostDto, actor: AuthenticatedUser): Promise<PostResponseDto> {
-    if (dto.images !== undefined) throw this.imageInputError();
     const changes: Partial<Record<'title' | 'body' | 'tags' | 'status', unknown>> = {};
     for (const key of ['title', 'body', 'tags', 'status'] as const) {
       const value = dto[key];
@@ -381,41 +376,25 @@ export class BlogService {
   }
 
   /**
-   * Delete using the caller's existing authorized filter (or an admin's _id filter):
-   * load the post/image snapshot, clean managed images through target-scoped storage,
-   * then conditionally delete the post only if that snapshot is unchanged.
-   * Cleanup failure leaves the post available for retry; concurrent image changes
-   * can prevent deletion and require retry. Filesystem and MongoDB are not atomic,
-   * so interruption after unlink can leave references to removed files until retry.
+   * Deletes the post matching `filter`, then its dependents. Reusable for an admin delete (GEN-10):
+   * pass a filter on `_id` only. The post goes first, so a half-finished cascade leaves only orphans
+   * that nothing can reach any more.
    *
-   * Only after parent deletion do we remove comments/likes by their ObjectId postId.
-   * This existing dependent cascade remains nontransactional: failure after deleting
-   * the parent can leave dependent orphans requiring reconciliation. No transaction,
-   * rollback or new recovery architecture is introduced here.
+   * ASSUMPTION for BLG-05 / BLG-06: likes and comments live in collections named `likes` and `comments`
+   * and point at the post with an ObjectId field `postId`. Going through the raw collection keeps this a
+   * harmless no-op while those modules do not exist. If their schemas differ, change DEPENDENT_COLLECTIONS
+   * and the field below.
+   * LIMITATION: not wrapped in a MongoDB transaction (standalone servers and the in-memory test server
+   * do not support them), so the post delete and the cascade are not atomic.
+   * BLG-10: the post's image files are removed last, best effort (see PostImagesService.removeStoredImages).
    */
   async deletePostAndDependents(filter: FilterQuery<Post>): Promise<void> {
-    let post;
-    try { post = await this.posts.findOne(filter).select('_id images').lean().exec(); }
-    catch { throw new InternalServerErrorException('Post could not be retrieved'); }
+    const post = await this.posts.findOneAndDelete(filter).select('_id images').lean();
     if (!post) throw new NotFoundException('Post not found');
-    // Retain the parent and its references until scoped storage cleanup succeeds.
-    await this.postImages.removeStoredImages(post._id.toString(), post.images ?? []);
-    let deleted;
-    try {
-      // A concurrently attached/removed image requires retry, never deleting a
-      // parent whose newly added file was absent from our cleanup snapshot.
-      deleted = await this.posts.findOneAndDelete({ ...filter, images: post.images === undefined ? { $exists: false } : post.images }).select('_id').lean().exec();
-    } catch { throw new InternalServerErrorException('Post deletion outcome is uncertain'); }
-    if (!deleted) {
-      let exists;
-      try { exists = await this.posts.exists(filter); }
-      catch { throw new InternalServerErrorException('Post could not be verified'); }
-      if (!exists) throw new NotFoundException('Post not found');
-      throw new ConflictException('Post images changed; retry deletion');
-    }
     for (const name of DEPENDENT_COLLECTIONS) {
       await this.connection.collection(name).deleteMany({ postId: post._id });
     }
+    await this.postImages.removeStoredImages(post._id.toString(), post.images ?? []);
   }
 
   /** Only published posts open here. A hidden one opens only for its author and admins. Drafts never open (the author uses /mine). */
@@ -456,9 +435,5 @@ export class BlogService {
         details: [{ field, message: `A post can have at most ${max} ${field}` }],
       });
     }
-  }
-
-  private imageInputError(): BadRequestException {
-    return new BadRequestException({ message: 'Validation failed', details: [{ field: 'images', message: 'Use the post image upload/removal endpoints; direct image references are not accepted' }] });
   }
 }

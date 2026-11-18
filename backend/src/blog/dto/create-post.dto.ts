@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform, Type } from 'class-transformer';
-import { ArrayMaxSize, IsArray, IsEnum, IsNotEmpty, IsOptional, IsString, Matches, MaxLength, ValidateNested } from 'class-validator';
-import { MAX_IMAGES_PER_ENTITY, POST_MAX_TAGS, PostStatus, TAG_MAX_LENGTH } from '../../common';
+import { Transform } from 'class-transformer';
+import { ArrayMaxSize, IsArray, IsEnum, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { POST_MAX_TAGS, PostStatus, TAG_MAX_LENGTH } from '../../common';
 import { POST_BODY_MAX_LENGTH, POST_TITLE_MAX_LENGTH } from '../blog.constants';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
@@ -20,25 +20,10 @@ const cleanTags = ({ value }: { value: unknown }) => {
     });
 };
 
-export class PostImageDto {
-  @ApiProperty({ description: 'Server-generated upload ID returned by the post image endpoint (BLG-10).', example: '6730a1f2c3d4e5f607182931' })
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(100)
-  id: string;
-
-  @ApiProperty({
-    description: 'Backend-relative public image URL returned by the shared UploadService.',
-    example: '/uploads/6730a1f2c3d4e5f607182931.jpg',
-  })
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(500)
-  // Retained response/legacy representation; create/update cannot attach client-provided references.
-  @Matches(/^\/uploads\/(?!.*\.\.)[\w\-./]+$/, { message: 'url must be an upload path such as /uploads/posts/photo.jpg' })
-  url: string;
-}
-
+/**
+ * Images are not part of this body: they are attached and removed through POST/DELETE /posts/:id/images (BLG-10),
+ * so a client can never point a post at someone else's upload. An `images` field is rejected by the global whitelist.
+ */
 export class CreatePostDto {
   @ApiProperty({ example: 'Three days in Cairo', maxLength: POST_TITLE_MAX_LENGTH })
   @Transform(trim)
@@ -67,14 +52,6 @@ export class CreatePostDto {
   @IsString({ each: true })
   @MaxLength(TAG_MAX_LENGTH, { each: true })
   tags?: string[];
-
-  @ApiPropertyOptional({ type: [PostImageDto], maxItems: 0, deprecated: true, description: 'Legacy input: only omitted/empty on create; any provided images field is rejected on PATCH. Use POST/DELETE /posts/:id/images instead.' })
-  @IsOptional()
-  @IsArray()
-  @ArrayMaxSize(MAX_IMAGES_PER_ENTITY)
-  @ValidateNested({ each: true })
-  @Type(() => PostImageDto)
-  images?: PostImageDto[];
 
   @ApiPropertyOptional({ enum: PostStatus, default: PostStatus.DRAFT, description: 'DRAFT is private; PUBLISHED is public. Defaults to DRAFT.' })
   @IsOptional()

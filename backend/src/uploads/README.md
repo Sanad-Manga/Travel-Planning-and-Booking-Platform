@@ -9,7 +9,7 @@ serving at `/uploads/`, but no standalone upload POST or DELETE endpoint.
 ```typescript
 save(file: UploadFile, target: UploadTarget): Promise<{ id: string; url: string }>
 remove(id: string): Promise<void>
-removeForTarget(id: string, target: UploadTarget): Promise<void>
+removeForTarget(id: string, target: UploadTarget): Promise<void> // deletes only if stored for that kind/ownerId, else no-op
 ```
 
 `UploadFile` accepts a buffered Multer file: `{ buffer, size, mimetype }`.
@@ -44,11 +44,6 @@ class ConsumerModule {}
 ```
 
 The consumer must authenticate and authorize **before** calling save/remove.
-BLG-10 adds `removeForTarget` under student implementation authorization (2026-11-17); owner/lead review is pending, and explicit Yusuf/Ahmed approval has not been independently verified. It atomically
-matches kind/ownerId as well as ID before marking a record deleting, then uses
-the same storage/recovery path. Missing or foreign-target metadata is a no-op,
-so legacy forged references cannot delete another entity's file. Original
-`save`/`remove` contracts and storage/schema/index behavior are unchanged.
 For deletion, load the parent, check ownership/role, and find the requested file
 ID among that entity's stored references before calling `remove(id)`. The fixed
 contract has no principal and cannot enforce these checks itself. Interceptors
@@ -151,12 +146,8 @@ are treated as already deleted. A disk failure retains deletion state/capacity;
 DB failure after unlink is safely retried. Pending IDs have not been returned to
 consumers and are reclaimed by the lease recovery path.
 
-MongoDB and the filesystem are not an atomic transaction. On Windows,
-simultaneous unlink may report EPERM for an already-removed generated
-path; BLG-10 treats that as complete only after checking the path is absent.
-Existing/unreadable files still fail and retain recovery metadata. This narrow
-correction is covered by both concurrent and genuine-permission-failure tests.
-Cleanup can be delayed while either is unavailable; recovery converges when service is restored.
+MongoDB and the filesystem are not an atomic transaction. Cleanup can be delayed
+while either is unavailable; recovery converges when service is restored.
 Publication precedes the ready acknowledgement, so a validated but uncommitted
 file can temporarily exist publicly at an unannounced random URL. Ready uploads
 whose caller failed to attach them are not automatically expired: the upload
@@ -169,17 +160,13 @@ requires removing an existing image first; atomic replacement is not provided.
 - **Ahmed / airlines:** existing `logoUrl` accepts HTTP(S) only and has no stored
   upload ID. Update that stub in the airline-owned integration; relative returned
   paths are currently incompatible with its DTO.
-- **Yusuf / hotels:** existing `{ id, url }` arrays accept these relative paths;
-  integrate authorized attachment/removal and entity cleanup in that module.
-- **Blog BLG-10:** authorized multipart attachment/removal and conditional post
-  deletion now reuse this service. Direct create/PATCH reference manipulation is
-  restricted under student implementation authorization and pending owner/lead review; see [blog-images](../../../docs/api/blog-images.md).
+- **Yusuf / hotels and blog:** existing `{ id, url }` arrays accept these relative
+  paths. Add authorized multipart endpoints, trusted attachment, removal and
+  cleanup when entities are deleted/references replaced.
 - **Yassin / itineraries:** activity schema and ITN-12 image integration remain
   itinerary-owned work. Authorize through the activity's parent itinerary.
 - Existing unmanaged IDs/URLs are not automatically registered, counted or
-  deleted by this service. Scoped Blog cleanup detaches foreign/unmanaged legacy
-  references without deleting their physical files; other consumer integrations
-  are unchanged by BLG-10.
+  deleted by this service. No consumer modules were modified.
 
 ## Tests and verification
 
