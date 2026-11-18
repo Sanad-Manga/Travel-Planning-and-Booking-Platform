@@ -61,6 +61,37 @@ describe('POST /api/auth/logout (e2e)', () => {
     expectBothCleared(res);
   });
 
+  it('login -> refresh (A->B) -> refresh (B->C) -> logout with C: replaying A, B and C all give 401 (issue #115)', async () => {
+    const a = (await loginFresh()).refresh;
+    const first = await refreshWith(a).expect(200);
+    const b = valueOf(find(first, 'refresh_token'));
+    const second = await refreshWith(b).expect(200);
+    const c = valueOf(find(second, 'refresh_token'));
+
+    await logoutWith(c).expect(200);
+
+    for (const cookie of [a, b, c]) {
+      const res = await refreshWith(cookie).expect(401);
+      expect(res.body).toMatchObject({ statusCode: 401, message: 'Invalid or expired session' });
+      expectBothCleared(res);
+    }
+  });
+
+  it('login -> refresh (A->B) -> logout with B: replaying A and B give 401', async () => {
+    const a = (await loginFresh()).refresh;
+    const b = valueOf(find(await refreshWith(a).expect(200), 'refresh_token'));
+    await logoutWith(b).expect(200);
+    await refreshWith(a).expect(401);
+    await refreshWith(b).expect(401);
+  });
+
+  it('logout with an already-used cookie is still 200 and keeps the newer session usable until it logs out', async () => {
+    const a = (await loginFresh()).refresh;
+    const b = valueOf(find(await refreshWith(a).expect(200), 'refresh_token'));
+    await logoutWith(a).expect(200);
+    await refreshWith(b).expect(200);
+  });
+
   it('stores only the jti, the user and the token expiry (no token, so no secret)', async () => {
     const session = await loginFresh();
     await logoutWith(session.refresh).expect(200);

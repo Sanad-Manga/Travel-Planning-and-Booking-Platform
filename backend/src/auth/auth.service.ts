@@ -112,6 +112,8 @@ export class AuthService {
   /**
    * Stateless sliding session (ACC-06): a valid refresh token buys a NEW access token and a NEW refresh token,
    * so every refresh restarts the 30 minutes. A token whose `jti` was revoked by logout is rejected (ACC-06).
+   * Refresh tokens are single use (issue #115): once the checks pass, the presented `jti` is consumed atomically,
+   * so replaying an old cookie, or sending the same cookie twice at once, gets the same generic 401.
    * Role and ids are re-read from the database, never copied from the old token.
    */
   async refresh(refreshToken: unknown): Promise<LoginResult> {
@@ -122,6 +124,11 @@ export class AuthService {
 
     const user = await this.usersService.findById(payload.sub);
     if (!user || user.status !== AccountStatus.ACTIVE || payload.tokenVersion !== (user.tokenVersion ?? 0) || user.mustChangePassword) {
+      throw this.invalidSession();
+    }
+    // Consume only after every check passed (a rejected request must not burn a valid token), and issue nothing
+    // unless this request is the one that consumed it.
+    if (!(await this.revocations.consume(payload.jti, payload.sub, new Date(payload.exp * 1000)))) {
       throw this.invalidSession();
     }
     return this.startSession(user);
