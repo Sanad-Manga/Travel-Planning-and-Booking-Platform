@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Connection, Model, Types } from 'mongoose';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import {
   AuthenticatedUser,
   BookingStatus,
@@ -38,6 +39,8 @@ interface FieldError {
   field: string;
   message: string;
 }
+
+const HOTEL_COMPLETION_BATCH_SIZE = 100;
 
 @Injectable()
 export class HotelBookingsService implements RoomReservations, BookingProvider, UpcomingBookingsChecker, OnModuleInit {
@@ -289,12 +292,60 @@ export class HotelBookingsService implements RoomReservations, BookingProvider, 
     if (!owned) return null;
 
     await this.bookingLifecycle.expireIfDue(BookingType.HOTEL, id, now);
+    await this.completeStayIfDue(id, now);
 
     const booking = await this.bookings
       .findOne(ownerFilter)
       .lean<HotelBookingLean>()
       .exec();
     return booking ? HotelBookingResponseDto.from(booking) : null;
+  }
+
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT, { timeZone: 'UTC' })
+  async completeCheckedOutStays(): Promise<void> {
+    await this.completePastStays();
+  }
+
+  async completePastStays(now: Date = new Date()): Promise<number> {
+    const checkoutDate = todayUtc(now);
+    let afterId: Types.ObjectId | undefined;
+    let completed = 0;
+
+    for (;;) {
+      const due = await this.bookings
+        .find({
+          status: BookingStatus.CONFIRMED,
+          checkOut: { $lt: checkoutDate },
+          ...(afterId ? { _id: { $gt: afterId } } : {}),
+        })
+        .sort({ _id: 1 })
+        .limit(HOTEL_COMPLETION_BATCH_SIZE)
+        .select('_id')
+        .lean<{ _id: Types.ObjectId }[]>()
+        .exec();
+      if (due.length === 0) return completed;
+
+      for (const { _id } of due) {
+        try {
+          await this.bookingLifecycle.transition(
+            BookingType.HOTEL,
+            _id.toString(),
+            BookingStatus.COMPLETED,
+          );
+          completed += 1;
+        } catch (error) {
+          if (
+            !(error instanceof ConflictException) &&
+            !(error instanceof NotFoundException)
+          ) {
+            throw error;
+          }
+        }
+        afterId = _id;
+      }
+
+      if (due.length < HOTEL_COMPLETION_BATCH_SIZE) return completed;
+    }
   }
 
   async getPolicies(id: string): Promise<BookingPolicies | null> {
@@ -354,6 +405,30 @@ export class HotelBookingsService implements RoomReservations, BookingProvider, 
       details.push({ field: 'rooms', message: 'at least one adult is required for the reservation' });
     }
     if (details.length > 0) throw new BadRequestException({ message: 'Validation failed', details });
+  }
+
+  private async completeStayIfDue(id: string, now: Date): Promise<void> {
+    const booking = await this.bookings
+      .findOne({ _id: new Types.ObjectId(id), status: BookingStatus.CONFIRMED })
+      .select('checkOut')
+      .lean<Pick<HotelBookingLean, 'checkOut'>>()
+      .exec();
+    if (!booking || booking.checkOut >= todayUtc(now)) return;
+
+    try {
+      await this.bookingLifecycle.transition(
+        BookingType.HOTEL,
+        id,
+        BookingStatus.COMPLETED,
+      );
+    } catch (error) {
+      if (
+        !(error instanceof ConflictException) &&
+        !(error instanceof NotFoundException)
+      ) {
+        throw error;
+      }
+    }
   }
 
   private async reservedRoomIds(

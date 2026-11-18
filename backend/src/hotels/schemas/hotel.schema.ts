@@ -77,6 +77,12 @@ export class Hotel {
   @Prop({ type: String, default: null })
   checkOutTime: string | null;
 
+  @Prop({ type: Number, default: null, min: 1, max: 5 })
+  averageRating: number | null;
+
+  @Prop({ type: Number, default: 0, min: 0 })
+  reviewCount: number;
+
   // false = deactivated by Admin (ACC-15): hidden from search and not bookable. This ticket never changes it.
   @Prop({ default: true })
   isActive: boolean;

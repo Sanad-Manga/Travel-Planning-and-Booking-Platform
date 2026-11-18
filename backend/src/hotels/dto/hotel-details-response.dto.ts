@@ -3,10 +3,7 @@ import { HotelPhotoDto } from './create-hotel.dto';
 import { FreeRoomsPageDto } from './free-rooms-response.dto';
 import { HotelPoliciesResponseDto } from './hotel-policies-response.dto';
 
-/**
- * One guest review on the hotel page. The reviews module (HTL-23/HTL-24, Hotels B) does not exist yet, so this shape is
- * provisional: it only fixes what the page needs to draw a review. Until that module is merged `reviews` is always [].
- */
+/** One visible guest review on the public hotel details page. */
 export class HotelReviewItemDto {
   @ApiProperty({ example: '6730a1f2c3d4e5f607182950' })
   id: string;
@@ -64,14 +61,14 @@ export class HotelDetailsResponseDto {
     type: Number,
     nullable: true,
     example: 4.5,
-    description: 'Average of the guest ratings. null = no rating yet (always null until the reviews module of HTL-23/24 is merged).',
+    description: 'Average of visible guest ratings. null = no rating yet.',
   })
   averageRating: number | null;
 
-  @ApiProperty({ example: 0, description: 'Number of visible reviews (0 until the reviews module of HTL-23/24 is merged).' })
+  @ApiProperty({ example: 0, description: 'Number of visible guest reviews.' })
   reviewCount: number;
 
-  @ApiProperty({ type: [HotelReviewItemDto], description: 'Visible reviews, newest first. [] until the reviews module of HTL-23/24 is merged.' })
+  @ApiProperty({ type: [HotelReviewItemDto], description: 'Visible reviews, newest first.' })
   reviews: HotelReviewItemDto[];
 
   @ApiProperty({

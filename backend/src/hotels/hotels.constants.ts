@@ -38,3 +38,8 @@ export const HOTEL_SEARCH_MAX_ROOMS = 10;
 // HTL-08: longest date range the room-status view may cover (inclusive days). Module-local: the ticket sets no limit,
 // this only bounds rooms x days in one response.
 export const ROOM_STATUS_MAX_DAYS = 62;
+
+// HTL-23 review limits.
+export const HOTEL_REVIEW_MIN_RATING = 1;
+export const HOTEL_REVIEW_MAX_RATING = 5;
+export const HOTEL_REVIEW_MAX_LENGTH = 1000;
