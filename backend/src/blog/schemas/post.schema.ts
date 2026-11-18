@@ -44,6 +44,10 @@ export class Post {
   @Prop({ default: false })
   isHidden: boolean;
 
+  // BLG-13: one of the author's own itineraries (reference to itineraries._id). Readers see it only while it is public.
+  @Prop({ type: Types.ObjectId, ref: 'Itinerary' })
+  itineraryId?: Types.ObjectId;
+
   // Denormalised counters, kept up to date with $inc by the likes (BLG-06) and comments (BLG-05) code.
   @Prop({ type: Number, default: 0, min: 0 })
   likeCount: number;
