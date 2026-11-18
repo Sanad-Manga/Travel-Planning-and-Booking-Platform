@@ -1830,3 +1830,14 @@ full module graph) passed unmodified once UsersModule/EmailModule were wired in 
 (src/email, src/notifications): 6 suites / 63 tests pass. Not done: wiring EmailService.send into
 ModeratorAccountsService.create() or Ziad's ACC-02/ACC-07 — those are Mohamed Walid's and Ziad's own files per
 the module-ownership rule, flagged in the PR rather than touched.
+
+================================================
+Date: 2026-11-18
+Student: Yusuf Eser
+Tool: Claude (Claude Code, Opus 5.5)
+Related Requirement: BLG-12 (SCRUM-102) Public author page (posts + public itineraries)
+Prompt:
+Implement BLG-12 following contracts.md: public GET /api/authors/:id showing the author's name, join date, published posts and public itineraries; a deactivated author is 404; no private user data; lists paginated with PaginationDto/paginate(); malformed id 404. Do not edit the itineraries or users modules; read them through their services or models via DI. Add e2e tests and docs.
+How the output was used:
+The assistant added AuthorsController (@Public, Swagger with AuthorPageDto and 404/400 ErrorResponseDto), AuthorsService and AuthorPageDto in the blog module. The service reads the user through UsersService.findById (404 for unknown, malformed or DEACTIVATED), lists PUBLISHED and not hidden posts with paginate() and the existing PostListRowDto, and lists PUBLIC and not hidden itineraries with paginate() and the itineraries module's own toPublicItineraryRow mapper. ItinerariesModule has no "public itineraries of one author" method, so BlogModule registers the Itinerary schema read-only instead of editing that module; a message to the owner suggests listPublicByAuthor so Blog can switch later. Choices I accepted: page and limit apply to both lists; a SUSPENDED author's page shows posts but no itineraries (ITN-20 shows public itineraries only for ACTIVE authors). One line was added to NOT_LISTS in test/pagination.e2e-spec.ts (the route returns one object holding two paginated lists). Verification: build, lint, the new e2e suite (7 tests) and the blog, itineraries, pagination and account-status e2e suites pass with --runInBand; blog unit/integration specs pass. Not done: a manual Swagger click-through against Atlas.
+================================================
