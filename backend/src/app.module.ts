@@ -6,6 +6,7 @@ import { AirlinesModule } from './airlines';
 import { AuditModule } from './audit';
 import { AuthModule } from './auth/auth.module';
 import { BlogModule } from './blog/blog.module';
+import { FavouritesModule } from './favourites/favourites.module';
 import configuration from './config/configuration';
 import { validateEnv } from './config/env.validation';
 import { FlightsModule } from './flights';
@@ -45,6 +46,7 @@ import { UploadsModule } from './uploads';
     UploadsModule,
     ReportsModule,
     AdminModule,
+    FavouritesModule,
   ],
 })
 export class AppModule {}
