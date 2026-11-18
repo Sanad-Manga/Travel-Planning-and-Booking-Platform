@@ -54,8 +54,10 @@ describe('forgot-password / reset-password (e2e)', () => {
       .then((u) => tokenRows().updateOne({ userId: u!._id }, { $set: { requestedAt: new Date(Date.now() - 61_000) } }));
   const reset = (token: string, newPassword: string) => http().post('/api/auth/reset-password').send({ token, newPassword });
   const tokenFrom = (message: { text: string }): string => new URL(/https?:\/\/\S+/.exec(message.text)![0]).searchParams.get('token')!;
-  const lastTokenFor = (email: string): string => tokenFrom([...sender.sent].reverse().find((m) => m.to === email)!);
-  const sentTo = (email: string) => sender.sent.filter((m) => m.to === email);
+  // ACC-02 registration also emails a verification link; these tests are about the reset email only.
+  const resetMails = () => sender.sent.filter((m) => m.subject === 'Reset your password');
+  const lastTokenFor = (email: string): string => tokenFrom([...resetMails()].reverse().find((m) => m.to === email)!);
+  const sentTo = (email: string) => resetMails().filter((m) => m.to === email);
   const fieldsOf = (res: request.Response): string[] => (res.body.details ?? []).map((d: { field: string }) => d.field);
 
   beforeAll(async () => {
@@ -112,7 +114,7 @@ describe('forgot-password / reset-password (e2e)', () => {
       }
       expect(responses.map((r) => JSON.stringify(r.body))).toEqual(new Array(4).fill(JSON.stringify(GENERIC)));
       // Only the ACTIVE account got an email.
-      expect(sender.sent.map((m) => m.to)).toEqual([known]);
+      expect(resetMails().map((m) => m.to)).toEqual([known]);
       expect(await tokenRows().countDocuments()).toBe(await tokenRows().countDocuments({ userId: (await users().findOne({ email: known }))!._id }));
     });
 
@@ -137,6 +139,8 @@ describe('forgot-password / reset-password (e2e)', () => {
 
     it('a failed email send does not change the response', async () => {
       const email = await register();
+      // The ACC-02 verification email is sent in the background after registration; let it go out first so it cannot use up the one-shot failure.
+      for (let i = 0; i < 100 && !sender.sent.some((m) => m.to === email); i++) await new Promise((r) => setTimeout(r, 20));
       sender.failNextSendOnce = true;
       const res = await forgot(email);
       expect(res.status).toBe(200);
