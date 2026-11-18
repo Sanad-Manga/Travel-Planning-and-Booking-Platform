@@ -181,9 +181,14 @@ export class PaymentsService {
     intent: Stripe.PaymentIntent,
     status: PaymentStatus.PROCESSING | PaymentStatus.FAILED | PaymentStatus.CANCELLED,
   ): Promise<void> {
-    await this.payments
-      .updateOne({ stripePaymentIntentId: intent.id, status: { $ne: PaymentStatus.SUCCEEDED } }, { $set: { status } })
-      .exec();
+    // PROCESSING only ever moves a payment forward from REQUIRES_PAYMENT. Without this restriction,
+    // a `payment_intent.processing` event arriving out of order after a `payment_failed`/`canceled`
+    // event had already landed would flip an already-terminal payment back to PROCESSING.
+    const allowedFrom =
+      status === PaymentStatus.PROCESSING
+        ? [PaymentStatus.REQUIRES_PAYMENT]
+        : [PaymentStatus.REQUIRES_PAYMENT, PaymentStatus.PROCESSING];
+    await this.payments.updateOne({ stripePaymentIntentId: intent.id, status: { $in: allowedFrom } }, { $set: { status } }).exec();
   }
 
   /** Cheap fast-fail for the common case; NOT the real guarantee (see savePayment). */
