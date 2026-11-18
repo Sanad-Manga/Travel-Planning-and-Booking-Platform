@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { Model, Types } from 'mongoose';
 import Stripe from 'stripe';
 import { BookingStatus, BookingType, PaymentStatus, Role } from '../common';
@@ -245,6 +245,15 @@ describe('PaymentsService', () => {
         hotelService.create(user(OWNER_ID), { bookingType: BookingType.HOTEL, bookingId: BOOKING_ID }),
       ).rejects.toBeInstanceOf(ConflictException);
     });
+
+    it('returns a clear 503 instead of a generic 500 when Stripe is unreachable (GitHub issue #114)', async () => {
+      acceptPolicies();
+      stripe.createPaymentIntent = jest.fn().mockRejectedValue(new Error('Stripe is down'));
+
+      await expect(
+        service.create(user(OWNER_ID), { bookingType: BookingType.FLIGHT, bookingId: BOOKING_ID }),
+      ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    });
   });
 
   describe('retry', () => {
@@ -286,6 +295,16 @@ describe('PaymentsService', () => {
       flights.bookings.set(BOOKING_ID, { status: BookingStatus.PENDING_PAYMENT, holdExpiresAt: new Date(Date.now() - 1_000) });
 
       await expect(service.retry(user(OWNER_ID), first.id)).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('returns a clear 503 instead of a generic 500 when Stripe is unreachable (GitHub issue #114)', async () => {
+      acceptPolicies();
+      const first = await service.create(user(OWNER_ID), { bookingType: BookingType.FLIGHT, bookingId: BOOKING_ID });
+      const firstRow = (await paymentModel.findById(first.id).lean().exec()) as PaymentLean;
+      await service.handleWebhookEvent(paymentIntentEvent('payment_intent.payment_failed', firstRow.stripePaymentIntentId));
+      stripe.createPaymentIntent = jest.fn().mockRejectedValue(new Error('Stripe is down'));
+
+      await expect(service.retry(user(OWNER_ID), first.id)).rejects.toBeInstanceOf(ServiceUnavailableException);
     });
   });
 

@@ -1891,3 +1891,32 @@ Prompt:
 Implement BLG-13 following contracts.md: PATCH /api/posts/:id/itinerary, the author attaches one of their own itineraries to their own post; readers see it only if the itinerary is public. Read Yassin's itineraries only, do not edit his module. Add e2e tests and docs.
 How the output was used:
 The assistant added an optional itineraryId to the Post schema, AttachItineraryDto (a valid id, or null to remove), PostItineraryController and PostItineraryService in the blog module (same separate-controller pattern as BLG-10 images). attach() gives 404 for a missing or someone else's post, then 404 for an itinerary that is missing or not the caller's own, then sets the field with one update filtered on post id and author. GET /api/posts/:id now returns `itinerary` (the public itinerary row) only when it is PUBLIC, not hidden and its author ACTIVE (same rule as ITN-20/21), otherwise null; PostResponseDto returns itineraryId. It reuses the read-only Itinerary model from BLG-12, so this branch is based on feature/BLG-12-author-page. Finding: the global JwtAuthGuard returns early on @Public routes, so GET /api/posts/:id never knows the reader; an "author always sees it" exception was dropped because it could never run. Verification: build, lint, the new e2e suite (8 tests) and the blog, author-page, blog-images, pagination and account-status e2e suites (341 tests) plus 46 blog unit/integration tests pass with --runInBand. Not done: a manual Swagger click-through against Atlas.
+================================================
+Date: 2026-11-18
+Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code, Sonnet 5)
+Related Requirement: none (GitHub issue #114, found by an audit of develop)
+Prompt:
+Fix GitHub issue #114: (1) retrievePaymentIntent in stripe-payment-activity.ts has no try/catch, so a Stripe
+error during the hold-expiry sweep/lazy check escapes prepareExpiry, crashes a booking read with a 500, and
+leaves the hold stuck (the sweep keeps failing the same way every minute); a Stripe failure here should leave
+the booking as it is (SKIP, retried next sweep). (2) create/retry in payments.service.ts let a Stripe error from
+createPaymentIntent escape as a generic 500; expected a clear 502/503. Fix with tests.
+How the output was used:
+Wrapped the `retrievePaymentIntent` call in `StripePaymentActivity.prepareExpiry` in a try/catch that returns
+'SKIP' on failure, leaving the in-flight payment row untouched so the next sweep or lazy check tries again,
+instead of letting the error reach the caller (a booking read) as an unhandled 500. Added a private
+`createPaymentIntentOrThrow` helper in `PaymentsService` that wraps the existing `stripe.createPaymentIntent`
+call, logs the failure, and throws `ServiceUnavailableException` (503) with a clear "try again shortly" message;
+both `create()` and `retry()` now call it instead of the gateway method directly. Added `@ApiServiceUnavailableResponse`
+to both endpoints in `payments.controller.ts`. Chose 503 (not 502) since the backend itself is healthy — it is the
+upstream payment provider that is unavailable, which is exactly what 503 communicates. Tests use the existing
+hand-rolled `FakeStripeGateway`, monkey-patching its `retrievePaymentIntent`/`createPaymentIntent` methods to
+reject for one call (the project's established style for a single-shot failure, same as `forceDuplicateKeyOnce`
+elsewhere in this module) rather than new e2e specs — these are deterministic, synchronous-failure-mode bugs,
+not concurrency, so a real in-memory Mongo/HTTP round trip buys nothing a unit test with a fake doesn't already
+prove, and matches how every other Stripe-gateway failure mode in this module is already tested.
+Verification: tsc --noEmit and eslint clean. New tests: `stripe-payment-activity.spec.ts` (SKIP on an
+unreachable Stripe, in-flight row left untouched) and two in `payments.service.spec.ts` (create/retry each
+return ServiceUnavailableException when Stripe is down). Scoped unit (`src/payments`, `src/refunds`): 146/146
+pass. Related e2e (`payments-webhook`, `payments-concurrency`, capped at 2 workers): 5/5 pass.
