@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { BookingStatus, CabinClass } from '../../common';
 import {
   BookingPassengerResponseDto,
@@ -59,7 +59,15 @@ export class FlightBookingSummaryResponseDto {
   @ApiProperty({
     example: '2026-11-07T12:10:00.000Z',
     nullable: true,
-    description: 'UTC hold expiry time',
+    description:
+      'UTC hold expiry time while the booking waits for payment; null once it is confirmed',
   })
   holdExpiresAt: string | null;
+
+  @ApiPropertyOptional({
+    example: 'FLT-9F2C41A7B3D84E60',
+    description:
+      'Unique booking reference, present once the booking is confirmed. Absent while pending payment and for historical confirmed bookings created before FLT-23.',
+  })
+  bookingReference?: string;
 }

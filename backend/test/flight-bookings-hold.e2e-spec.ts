@@ -1157,6 +1157,8 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       expect(summary.body.passengers[0]).not.toHaveProperty(
         'passportOrIdNumber',
       );
+      expect(summary.body).not.toHaveProperty('bookingReference');
+      expect(summary.body.holdExpiresAt).not.toBeNull();
     });
 
     it('allows only the booking owner to view the summary', async () => {
@@ -1186,16 +1188,143 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
         .expect(404);
     });
 
-    it('does not return a summary after the booking is no longer pending', async () => {
+    it('lets the owner read back a confirmed one-way booking with its reference', async () => {
       const flightId = await createFlight();
       await addCabin(flightId, 'ECONOMY', 10);
       const bookingId = await hold(flightId);
-      await lifecycle.confirmPaid(BookingType.FLIGHT, bookingId, 'pi_summary');
+      await lifecycle.confirmPaid(
+        BookingType.FLIGHT,
+        bookingId,
+        'pi_summary_one_way',
+      );
+      const stored = await connection
+        .collection('flightBookings')
+        .findOne({ _id: new Types.ObjectId(bookingId) });
+      expect(stored?.bookingReference).toMatch(/^FLT-[0-9A-F]{16}$/);
+
+      const details = await http()
+        .get(`${BOOKING}/${bookingId}`)
+        .set('Cookie', traveler)
+        .expect(200);
+
+      expect(details.body).toMatchObject({
+        id: bookingId,
+        status: 'CONFIRMED',
+        bookingReference: stored?.bookingReference,
+        holdExpiresAt: null,
+        cabinClass: 'ECONOMY',
+        passengerCounts: { adults: 1, children: 0, infants: 0 },
+        currency: 'USD',
+        totalCents: 45000,
+      });
+      expect(details.body.flight).toMatchObject({
+        id: flightId,
+        flightNumber: 'MS777',
+        departureAirport: 'CAI',
+        arrivalAirport: 'JFK',
+      });
+      expect(details.body.segments).toHaveLength(1);
+      expect(details.body.segments[0]).toMatchObject({
+        flightId,
+        cabinClass: 'ECONOMY',
+        flight: {
+          id: flightId,
+          flightNumber: 'MS777',
+          departureAirport: 'CAI',
+          arrivalAirport: 'JFK',
+        },
+      });
+      expect(details.body.passengers).toEqual([]);
+    });
+
+    it('lets the owner read back both segments of a confirmed round trip', async () => {
+      const outboundId = await createFlight();
+      const returnId = await createFlight(
+        {
+          flightNumber: 'BB778',
+          departureAirport: 'JFK',
+          arrivalAirport: 'CAI',
+          departureLocalTime: '2090-12-02T10:00',
+          arrivalLocalTime: '2090-12-02T18:30',
+        },
+        returnModerator,
+      );
+      await addCabin(outboundId, 'ECONOMY', 10);
+      await addCabin(returnId, 'BUSINESS', 10);
+      const created = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          segments: [
+            { flightId: outboundId, cabinClass: 'ECONOMY' },
+            { flightId: returnId, cabinClass: 'BUSINESS' },
+          ],
+          passengers: [
+            {
+              fullName: 'Amina Example',
+              dateOfBirth: '2078-12-01',
+              passportOrIdNumber: 'P1234567',
+            },
+          ],
+        })
+        .expect(201);
+      const bookingId = created.body.id as string;
+      await lifecycle.confirmPaid(
+        BookingType.FLIGHT,
+        bookingId,
+        'pi_summary_round_trip',
+      );
+
+      const details = await http()
+        .get(`${BOOKING}/${bookingId}`)
+        .set('Cookie', traveler)
+        .expect(200);
+
+      expect(details.body.status).toBe('CONFIRMED');
+      expect(details.body.bookingReference).toMatch(/^FLT-[0-9A-F]{16}$/);
+      expect(details.body.holdExpiresAt).toBeNull();
+      expect(details.body.segments).toHaveLength(2);
+      const segments = details.body.segments as Array<{
+        flightId: string;
+        cabinClass: string;
+        flight: { flightNumber: string };
+      }>;
+      expect(segments.map((segment) => segment.flightId)).toEqual([
+        outboundId,
+        returnId,
+      ]);
+      expect(segments.map((segment) => segment.cabinClass)).toEqual([
+        'ECONOMY',
+        'BUSINESS',
+      ]);
+      expect(segments.map((segment) => segment.flight.flightNumber)).toEqual([
+        'MS777',
+        'BB778',
+      ]);
+      expect(details.body.passengers[0]).toMatchObject({
+        fullName: 'Amina Example',
+        passengerType: 'ADULT',
+      });
+      expect(details.body.passengers[0]).not.toHaveProperty(
+        'passportOrIdNumber',
+      );
+    });
+
+    it('hides a confirmed booking from another traveler', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+      const bookingId = await hold(flightId);
+      await lifecycle.confirmPaid(
+        BookingType.FLIGHT,
+        bookingId,
+        'pi_summary_other',
+      );
 
       await http()
         .get(`${BOOKING}/${bookingId}`)
-        .set('Cookie', traveler)
-        .expect(409);
+        .set('Cookie', otherTraveler)
+        .expect(404);
+      await http().get(`${BOOKING}/${bookingId}`).expect(401);
     });
 
     it('lazily expires an overdue hold before returning the summary', async () => {

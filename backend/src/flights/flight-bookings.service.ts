@@ -283,7 +283,12 @@ export class FlightBookingsService {
     return [{ flightId: dto.flightId, cabinClass: dto.cabinClass }];
   }
 
-  /** FLT-21: show the pending summary only to its owner, resolving an overdue hold before returning it. */
+  /**
+   * FLT-21/FLT-23: show the booking only to its owner, resolving an overdue hold first. While the booking
+   * waits for payment the response is the unchanged pending summary; once it is confirmed the same shape is
+   * returned with the booking reference, status CONFIRMED and a null hold expiry. Another owner and an
+   * unknown id both answer 404, and expired/cancelled bookings keep answering 409.
+   */
   async getSummary(
     user: AuthenticatedUser,
     id: string,
@@ -310,11 +315,12 @@ export class FlightBookingsService {
     const payable = await this.bookingProvider.getPayable(id, user.userId);
     if (!payable) throw new NotFoundException('Flight booking not found');
     if (
-      booking.status !== BookingStatus.PENDING_PAYMENT ||
-      payable.status !== BookingStatus.PENDING_PAYMENT
+      (booking.status !== BookingStatus.PENDING_PAYMENT &&
+        booking.status !== BookingStatus.CONFIRMED) ||
+      payable.status !== booking.status
     ) {
       throw new ConflictException(
-        'A summary is available only while the booking is pending payment',
+        'A booking is available only while it is pending payment or after it is confirmed',
       );
     }
 
@@ -357,6 +363,9 @@ export class FlightBookingsService {
       currency: payable.currency,
       status: payable.status,
       holdExpiresAt: payable.holdExpiresAt?.toISOString() ?? null,
+      ...(booking.bookingReference
+        ? { bookingReference: booking.bookingReference }
+        : {}),
     };
   }
 

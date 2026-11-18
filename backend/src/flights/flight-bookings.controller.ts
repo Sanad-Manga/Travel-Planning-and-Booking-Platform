@@ -91,10 +91,13 @@ export class FlightBookingsController {
   @Get(':id')
   @Roles(Role.USER)
   @ApiOperation({
-    summary: 'Get the pending flight booking summary - FLT-21',
+    summary: 'Get a flight booking for its owner - FLT-21/FLT-23',
     description:
       'Returns flight, passenger, baggage and payable-total details for the booking owner. ' +
-      'The total is read from the same getPayable amount used by Payments.',
+      'While the booking waits for payment this is the pending summary and the total is read from the same ' +
+      'getPayable amount used by Payments. After payment it returns the confirmed booking with its unique ' +
+      'booking reference, status CONFIRMED, null hold expiry and every one-way or round-trip segment. ' +
+      'Passport/identity-document numbers and payment credentials are never included.',
   })
   @ApiOkResponse({ type: FlightBookingSummaryResponseDto })
   @ApiForbiddenResponse({
@@ -108,7 +111,7 @@ export class FlightBookingsController {
   @ApiConflictResponse({
     type: ErrorResponseDto,
     description:
-      'A summary is available only while the booking is pending payment',
+      'The booking is neither pending payment nor confirmed (for example expired or cancelled)',
   })
   getSummary(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.bookings.getSummary(user, id);
