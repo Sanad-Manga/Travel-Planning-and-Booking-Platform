@@ -51,7 +51,16 @@ export class StripePaymentActivity implements PaymentActivity {
       // Stripe refuses to cancel an already-succeeded/already-canceled intent — fine, the
       // retrieve below reports the true status either way.
     }
-    const latest = await this.stripe.retrievePaymentIntent(inFlight.stripePaymentIntentId);
+    let latest;
+    try {
+      latest = await this.stripe.retrievePaymentIntent(inFlight.stripePaymentIntentId);
+    } catch {
+      // Stripe is unreachable or erroring (network issue, outage) — leave the booking exactly as
+      // it is and let the next sweep/lazy check try again, rather than crashing the caller (a 500
+      // on a booking read, per the real repro that surfaced this) or guessing at PAID vs EXPIRE
+      // when the one source of truth for that decision couldn't actually be reached.
+      return 'SKIP';
+    }
     if (latest.status === 'succeeded') {
       inFlight.status = PaymentStatus.SUCCEEDED;
       await inFlight.save();
