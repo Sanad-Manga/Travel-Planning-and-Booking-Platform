@@ -1998,3 +1998,12 @@ Implement FLT-25 "My flight bookings" in the flights module only: GET /api/fligh
 How the output was used:
 Added FlightBookingsService.listMine() (plus GET /api/flight-bookings on the existing controller) and a flights-module MyFlightBookingsQueryDto/FlightBookingListRowDto. Ownership is part of the MongoDB query (the shared bookingVisibilityFilter narrowed to the caller's userId for role USER, so it can never widen), and the group is derived in the pipeline from the outbound segment's flight departureAt through one $lookup, so the group filter, skip/limit and total are computed in the database and pages stay stable (createdAt desc, _id desc). Legacy records without a segments array fall back to the top-level flightId, and a missing bookingReference stays absent instead of being generated. List rows reuse the existing segment/passenger mappers, so passport/identity numbers, paymentRef and Stripe ids never appear. GET /:id was left unchanged and still reads the latest refund through RefundsService.getLatestForBooking. Updated Swagger (route, query params, paginated schema, 400/401/403), docs/contracts.md and the flight E2E suite (grouping, cancellation precedence, round-trip grouping, legacy one-way, owner isolation, pagination/default/invalid pages, Swagger) plus a mapper unit test. No common/ or other module files were changed.
 Verification: npm run build passed; npm run lint passed; npx jest flight-booking-list-row --runInBand 3/3 passed; npx jest --config ./test/jest-e2e.json flight-bookings-hold --runInBand 68/68 passed.
+
+Date: 2026-11-19
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: GitHub issue #119 (parallel Jest runs time out)
+Prompt:
+Take issue #119 (default npx jest and npm run test:e2e fail with hook timeouts because every worker starts its own in-memory mongod) and propose a fix.
+How the output was used:
+The assistant reproduced the failure, measured that mongod starts queue behind each other (about 2.4 s each, 4 concurrent already hit the 10 s launch limit) and that other sessions running tests at the same time make it worse, then added one Jest setup file (test/helpers/mongo-launch-timeout.ts) that raises the library launch timeout to 60 s for MongoMemoryServer and MongoMemoryReplSet, plus testTimeout 60000 in both Jest configs. Under the same machine load the control run without it failed on 1530 launch timeouts, with it 57 e2e suites (1429 tests) and 78 unit suites (1141 tests) passed with default workers. I read every file and ran lint, build and both suites.
