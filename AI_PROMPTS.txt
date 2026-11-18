@@ -1835,6 +1835,59 @@ Prompt:
 Check the shutdown error (MongoClientClosedError in afterAll of the admin-accounts e2e suite on develop's CI) and find the cause before calling it a flake.
 How the output was used:
 The suite passed all 1325 tests; only afterAll(app.close) failed. It could not be reproduced by running the suite alone or in parallel, but the database-failure test was the suspect: it mocked countDocuments to throw synchronously, and paginate() builds Promise.all([find.exec(), countDocuments.exec()]) so the find was already running when the throw skipped Promise.all, leaving that query orphaned; closing the client in afterAll then interrupted it. Proved by running only that test (the error appeared 12 of 12 times across the three suites with the same pattern: admin-accounts, audit, airports) and by the same runs after the fix (0 of 9). Fix: the three mocks now return an object whose exec() rejects, like a real driver failure. No production code changed. Verification: lint, build, 1089 unit and 1330 e2e pass.
+Date: 2026-11-18
+Student: Abdulrahman Mohamad Hosny
+Tool: Copilot (VS Code)
+Related Requirement: FLT-23 (confirm after payment: booking reference, notification, e-ticket PDF)
+Prompt:
+Implement only FLT-23 against docs/contracts.md: a successful payment confirms the flight booking atomically, every confirmed booking gets exactly one unique reference, held seats become booked seats, the traveler gets one in-app confirmation notification, and GET /api/flight-bookings/:id/e-ticket returns a PDF for the owner only. Keep BookingProvider.markConfirmed(id, paymentRef) unchanged and make it work from both the payment webhook and BookingLifecycle's late-paid path without any Stripe event object. Do not add email, refunds, cancellation, other booking types or unrelated changes. Backfill no historical bookings; keep them valid. Add focused tests for first confirmation, same-reference idempotency, a different reference, the late-paid path, owner PDF, other owner, missing/not-confirmed, round trip and one-way. Update Swagger, docs/contracts.md only where needed, and append this entry; then build, lint and run the flight-booking E2E before committing.
+How the output was used:
+Added `bookingReference` to the flight booking schema with a sparse unique index (so confirmed bookings are unique while historical ones without a reference stay valid). `FlightBookingProvider.markConfirmed` now assigns `FLT-` plus 16 upper-case hex characters in the same `findOneAndUpdate`/transaction that flips PENDING_PAYMENT to CONFIRMED, stores `paymentRef`, clears `holdExpiresAt` and converts every segment's held seats to booked. A duplicate-key collision rolls the transaction back and retries with a fresh reference (bounded attempts); the same `paymentRef` remains a no-op and a different one is refused, so neither can overwrite the reference. The existing single BOOKING_CONFIRMED notification is still sent only after a first successful commit and `NotificationsService.notify` never rolls the booking back. The late-paid path already reached `confirmPaid` -> `markConfirmed`, so Payments code was left untouched; a focused E2E overrides the PAYMENT_ACTIVITY DI token to return `{ outcome: 'PAID', paymentRef }` without any Stripe event. Added `FlightETicketService` (pdfkit already declared) to shape the ticket data and render it in memory, and `GET /api/flight-bookings/:id/e-ticket` (role USER) with the ownership check in the service: another traveler and an unknown id answer 404, a pending booking or a historical confirmed booking without a reference answers 409. The PDF is returned as an `application/pdf` attachment named after the reference, contains the reference, passenger names/types and every booked segment, and excludes passport/identity numbers and payment data; nothing is stored in uploads or static files. Exposed the optional reference on the booking response DTO and documented the route/PDF/errors in Swagger. Updated the confirmation rule in docs/contracts.md with the FLT-23 reference and e-ticket contract. No Payments production change, no email, no refunds/cancellation and no unrelated files.
+Verification: `npx jest flight-eticket --runInBand` 4/4 unit tests (round trip, legacy one-way, no identity numbers, real PDF buffer); `npx jest --config ./test/jest-e2e.json flight-bookings-hold --runInBand` 59/59 (including first confirmation, same-reference repeat, different reference, late-paid PAID path, owner PDF, non-owner 404, role 403/401, unknown/malformed 404, pending/no-reference 409, round-trip both segments, one-way, Swagger PDF documentation); `npm run build` and `npm run lint` passed. The E2E deliberately logs the existing rollback-test `Error: boom`; the suite still passes.
+
+Date: 2026-11-18
+Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code, Sonnet 5)
+Related Requirement: GEN-01-B (SCRUM-112, bonus) Email notifications via SMTP
+Prompt:
+Implement GEN-01-B against docs/contracts.md and the ticket's acceptance criteria/checklist: the existing GEN-01
+in-app notifications (plus moderator invitations) are also sent by email via SMTP, with a test inbox used in
+development, SMTP credentials only ever in env and never logged, an email failure must never break the in-app
+notification, and the sender must expose a simple API Ziad (ACC-02, ACC-07) can call directly. Confirmed in Jira
+first that this ticket's only real blocker (GEN-01) is Done — the "only after mandatory tickets pass" line in its
+description is informal guidance, not a Jira dependency. The moderator-invite email itself fires from
+backend/src/admin/moderator-accounts.service.ts, owned by Mohamed Walid, not me — build and publish the
+capability, do not touch his file.
+How the output was used:
+Added a new `email` module (sibling to `fx`/`refunds`/`payments`, per contracts.md's module list), using the
+`nodemailer` dependency that was already installed but unused. `EmailSender` interface + `EMAIL_SENDER` token +
+`SmtpEmailSender` (lazy transporter, same reasoning as StripePaymentGateway's lazy client: several e2e specs boot
+modules that pull this in without SMTP configured) + `FakeEmailSender` for tests, mirroring the StripeGateway/
+ExchangeRateProvider pattern exactly. With no SMTP_HOST configured, `SmtpEmailSender` creates and caches a
+throwaway Nodemailer Ethereal test account on first use and logs only the preview URL (never credentials) for
+each sent message — satisfies "a test inbox is used in development" with zero manual account setup. The published
+`EmailService.send({ to, subject, text, html? })` is a deliberately separate capability from
+`NotificationsService.notify()`, not a parameter on it: a moderator invite carries a plaintext temporary password,
+and routing that through `notify()` would persist it into the `notifications` collection (readable via
+GET /api/notifications) — a real data-hygiene bug. So `notify()` itself was extended (after the in-app
+Notification document is already saved, in its own try/catch) to also email the recipient the same title/message,
+resolving their address via the existing `UsersService.findById` (confirmed no import cycle: UsersModule only
+imports ReferenceDataModule); an email failure is logged and swallowed there, never affecting the already-saved
+in-app notification. SMTP_HOST/PORT/USER/PASSWORD/FROM were added to env.validation.ts as optional (same
+lazy-validation precedent as STRIPE_SECRET_KEY/FX_API_KEY — validated inside SmtpEmailSender itself, not at
+bootstrap) and to .env.example. docs/contracts.md section 7 gained an `EmailService.send` row, and section 9's
+Auth/Admin/Payments rows were updated so Ziad and Mohamed Walid know to call it from their own files.
+Verification: tsc --noEmit and eslint clean. New email-sender.spec.ts (mocks the nodemailer module: real-SMTP
+branch builds a transporter from env vars and never touches the test-account API; no-SMTP_HOST branch creates and
+caches one Ethereal test account across two send() calls; preview URL is logged, the test-account password never
+is) and email.service.spec.ts. Extended notifications.service.spec.ts: notify() emails the resolved address,
+skips silently when no email is resolvable, and an email failure is logged without affecting the already-saved
+notification or making notify() reject. The existing notifications.integration.spec.ts (real in-memory Mongo,
+full module graph) passed unmodified once UsersModule/EmailModule were wired in — no override needed. Scoped run
+(src/email, src/notifications): 6 suites / 63 tests pass. Not done: wiring EmailService.send into
+ModeratorAccountsService.create() or Ziad's ACC-02/ACC-07 — those are Mohamed Walid's and Ziad's own files per
+the module-ownership rule, flagged in the PR rather than touched.
+
 ================================================
 Date: 2026-11-18
 Student: Hessain Elrefaey
@@ -1865,6 +1918,16 @@ How the output was used:
 The assistant added AuthorsController (@Public, Swagger with AuthorPageDto and 404/400 ErrorResponseDto), AuthorsService and AuthorPageDto in the blog module. The service reads the user through UsersService.findById (404 for unknown, malformed or DEACTIVATED), lists PUBLISHED and not hidden posts with paginate() and the existing PostListRowDto, and lists PUBLIC and not hidden itineraries with paginate() and the itineraries module's own toPublicItineraryRow mapper. ItinerariesModule has no "public itineraries of one author" method, so BlogModule registers the Itinerary schema read-only instead of editing that module; a message to the owner suggests listPublicByAuthor so Blog can switch later. Choices I accepted: page and limit apply to both lists; a SUSPENDED author's page shows posts but no itineraries (ITN-20 shows public itineraries only for ACTIVE authors). One line was added to NOT_LISTS in test/pagination.e2e-spec.ts (the route returns one object holding two paginated lists). Verification: build, lint, the new e2e suite (7 tests) and the blog, itineraries, pagination and account-status e2e suites pass with --runInBand; blog unit/integration specs pass. Not done: a manual Swagger click-through against Atlas.
 
 Date: 2026-11-18
+Student: Abdulrahman Mohamad Hosny
+Tool: OpenCode (DeepSeek V4.1 Flash Free)
+Related Requirement: FLT-23 (SCRUM-84) follow-up for issue #118 (confirmed flight booking readback)
+Prompt:
+Work on the existing FLT-23 PR #124 branch and fix issue #118 without opening a new PR. Extend GET /api/flight-bookings/:id so the booking owner can read back a confirmed one-way or round-trip booking, keeping the pending-payment response unchanged and enforcing ownership in the service (another traveler gets the private-resource 404). Include the booking reference and segment details, expose no passport/identity numbers or payment/Stripe data, and do not implement the hotel-booking endpoint (separate HTL-17 / SCRUM-86 follow-up). Do not invent a refund-status field when no refund read contract exists on this branch. Add focused E2E tests for confirmed one-way, confirmed round trip, non-owner access and pending behavior; update Swagger, docs/contracts.md only where needed, append this entry, then build, lint and run the flight-booking E2E before committing and pushing to the existing branch.
+How the output was used:
+Extended FlightBookingsService.getSummary so a booking whose owner matches can be read while PENDING_PAYMENT (unchanged contract) or CONFIRMED. The confirmed response reuses the same shape and adds the unique bookingReference, status CONFIRMED and a null holdExpiresAt, with every one-way or round-trip segment resolved to its flight details; expired/cancelled bookings still answer 409 and another traveler or unknown id still answers 404. The passport/ID number remains excluded by the shared passenger mapper, and no paymentRef, Stripe event or payment credential is exposed. Added an optional bookingReference to FlightBookingSummaryResponseDto and updated the route's Swagger description and 409 documentation. No hotel, refund, cancellation or Payments production changes; hotel readback remains the separate HTL-17 / SCRUM-86 follow-up, and refund status is not fabricated because no refund read contract exists on this branch (PAY-03 is separate). Updated docs/contracts.md with the confirmed readback contract and the refund-status limitation.
+Verification: npm run build passed; npm run lint passed; npx jest flight-eticket --runInBand 4/4 unit tests passed; npx jest --config ./test/jest-e2e.json flight-bookings-hold --runInBand 61/61 E2E tests passed, including the new confirmed one-way readback, confirmed round-trip readback and non-owner 404 tests, the unchanged pending summary, the late-paid path, idempotent confirmation and e-ticket access. The suite logs the existing intentional rollback-test "Error: boom" and still passes.
+
+Date: 2026-11-18
 Student: Yusuf Eser
 Tool: Claude (Claude Code, Opus 5.5)
 Related Requirement: BLG-13 (SCRUM-116, bonus) Attach an itinerary to a post
@@ -1881,3 +1944,39 @@ Prompt:
 Implement only GitHub issue #115 following contracts.md, in the auth module only: refresh tokens must rotate and be single use. Consume the presented jti atomically in AuthService.refresh() after the signature, revocation and user checks, with a new TokenRevocationService.consume() (upsert on the unique jti index); the same generic 401 for a replay; no reuse detection; logout unchanged. Add unit and e2e tests (replay, parallel refreshes, logout, rejected users not consuming) and docs.
 How the output was used:
 The assistant added TokenRevocationService.consume() (returns true only for the request that inserted the row, E11000 counts as lost, other errors propagate) and called it in AuthService.refresh() after the user checks, so a rejected request never burns a token and no new tokens are issued unless the consume succeeded. It updated the Swagger text of POST /api/auth/refresh, added unit tests (auth.service.spec.ts, token-revocation.service.spec.ts), e2e tests in refresh.e2e-spec.ts and logout.e2e-spec.ts (replay, 5 parallel refreshes giving one 200 and four 401, suspended or deactivated users not consuming, logout after rotation), and docs/api/auth-refresh-rotation.md (no ACC-06 doc existed). Nothing in common/ or other modules was changed.
+Student: Abdulrahman Mohamad Hosny
+Tool: OpenCode (DeepSeek V4.1 Flash Free)
+Related Requirement: FLT-23 (SCRUM-84) follow-up for issue #118 â€” refund status after merging develop
+Prompt:
+After the PR branch merged develop (which brought PAY-03's refunds module), re-check the booking-details refund requirement. If the stable read contract is now available, consume it exactly instead of leaving a limitation.
+How the output was used:
+Imported RefundsModule into FlightsModule and injected RefundsService into FlightBookingsService. The confirmed-booking readback now returns `refund` from `getLatestForBooking(BookingType.FLIGHT, bookingId)`, using PAY-03's published RefundSummary shape (id, bookingType, bookingId, status, amountCents, currency, reason, createdAt) or null when no refund was issued; Stripe ids and userId are not copied into the flight response. The field is absent from pending-payment responses so the FLT-21 contract stays unchanged. Updated the summary DTO, Swagger description, docs/contracts.md and the flight E2E suite (latest-refund ordering, null refund, no Stripe ids, pending response has no refund field).
+Verification: npm run build passed; npm run lint passed; npx jest --config ./test/jest-e2e.json flight-bookings-hold --runInBand 62/62 passed; npx jest refunds.service.spec --runInBand 13/13 passed.
+Date: 2026-11-18
+Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code, Sonnet 5)
+Related Requirement: none (GitHub issue #114, found by an audit of develop)
+Prompt:
+Fix GitHub issue #114: (1) retrievePaymentIntent in stripe-payment-activity.ts has no try/catch, so a Stripe
+error during the hold-expiry sweep/lazy check escapes prepareExpiry, crashes a booking read with a 500, and
+leaves the hold stuck (the sweep keeps failing the same way every minute); a Stripe failure here should leave
+the booking as it is (SKIP, retried next sweep). (2) create/retry in payments.service.ts let a Stripe error from
+createPaymentIntent escape as a generic 500; expected a clear 502/503. Fix with tests.
+How the output was used:
+Wrapped the `retrievePaymentIntent` call in `StripePaymentActivity.prepareExpiry` in a try/catch that returns
+'SKIP' on failure, leaving the in-flight payment row untouched so the next sweep or lazy check tries again,
+instead of letting the error reach the caller (a booking read) as an unhandled 500. Added a private
+`createPaymentIntentOrThrow` helper in `PaymentsService` that wraps the existing `stripe.createPaymentIntent`
+call, logs the failure, and throws `ServiceUnavailableException` (503) with a clear "try again shortly" message;
+both `create()` and `retry()` now call it instead of the gateway method directly. Added `@ApiServiceUnavailableResponse`
+to both endpoints in `payments.controller.ts`. Chose 503 (not 502) since the backend itself is healthy — it is the
+upstream payment provider that is unavailable, which is exactly what 503 communicates. Tests use the existing
+hand-rolled `FakeStripeGateway`, monkey-patching its `retrievePaymentIntent`/`createPaymentIntent` methods to
+reject for one call (the project's established style for a single-shot failure, same as `forceDuplicateKeyOnce`
+elsewhere in this module) rather than new e2e specs — these are deterministic, synchronous-failure-mode bugs,
+not concurrency, so a real in-memory Mongo/HTTP round trip buys nothing a unit test with a fake doesn't already
+prove, and matches how every other Stripe-gateway failure mode in this module is already tested.
+Verification: tsc --noEmit and eslint clean. New tests: `stripe-payment-activity.spec.ts` (SKIP on an
+unreachable Stripe, in-flight row left untouched) and two in `payments.service.spec.ts` (create/retry each
+return ServiceUnavailableException when Stripe is down). Scoped unit (`src/payments`, `src/refunds`): 146/146
+pass. Related e2e (`payments-webhook`, `payments-concurrency`, capped at 2 workers): 5/5 pass.

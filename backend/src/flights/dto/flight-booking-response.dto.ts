@@ -104,6 +104,12 @@ export class FlightBookingResponseDto {
   @ApiProperty({ example: 'USD' }) currency: string;
   @ApiProperty({ enum: BookingStatus, example: BookingStatus.PENDING_PAYMENT })
   status: BookingStatus;
+  @ApiPropertyOptional({
+    example: 'FLT-9F2C41A7B3D84E60',
+    description:
+      'Unique flight booking reference. Assigned exactly once when the booking is confirmed, so it is absent while the booking is pending payment.',
+  })
+  bookingReference?: string;
   @ApiProperty({
     example: '2026-11-07T12:10:00.000Z',
     nullable: true,
@@ -154,6 +160,9 @@ export function toFlightBookingResponse(
     baggageFeeCents: doc.baggageFeeCents ?? 0,
     currency: doc.currency,
     status: doc.status,
+    ...(doc.bookingReference
+      ? { bookingReference: doc.bookingReference }
+      : {}),
     holdExpiresAt: doc.holdExpiresAt ? doc.holdExpiresAt.toISOString() : null,
     createdAt: doc.createdAt.toISOString(),
   };

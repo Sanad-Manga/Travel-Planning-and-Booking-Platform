@@ -9,7 +9,7 @@
 - Backend: NestJS + TypeScript + MongoDB Atlas (Mongoose). Frontend: Next.js (later).
 - Folders: `backend/`, `frontend/`, `docs/requirements`, `docs/api`, `AI_PROMPTS.txt`, `README.md`, `.env.example`.
 - One folder per feature module: `backend/src/<module>/` with `<module>.module.ts`, `.controller.ts`, `.service.ts`, `schemas/`, `dto/`.
-- Modules: `auth`, `users`, `admin`, `airlines`, `flights`, `flight-bookings`, `hotels`, `hotel-bookings`, `reviews`, `payments`, `fx`, `refunds`, `notifications`, `uploads`, `audit`, `itineraries`, `blog`, `reports`, `reference-data`, `common`.
+- Modules: `auth`, `users`, `admin`, `airlines`, `flights`, `flight-bookings`, `hotels`, `hotel-bookings`, `reviews`, `payments`, `fx`, `refunds`, `email`, `notifications`, `uploads`, `audit`, `itineraries`, `blog`, `reports`, `reference-data`, `common`.
 - Shared code only in `backend/src/common/` (guards, decorators, enums, pagination, filters, constants). Changing `common/` needs the lead's approval.
 - Never edit another person's module. Ask the owner or the lead.
 
@@ -109,7 +109,8 @@ Everything below is injected via NestJS DI. Owners publish the signature first; 
 
 | Service | Owner | Signature (stable) | Used by |
 |---|---|---|---|
-| `NotificationsService.notify` | Payments | `notify({ userId, type, title, message, link? }): Promise<void>` | everyone who tells users something |
+| `NotificationsService.notify` | Payments | `notify({ userId, type, title, message, link? }): Promise<void>`; also emails the recipient the same title/message (GEN-01-B) — an email failure never breaks the in-app notification | everyone who tells users something |
+| `EmailService.send` | Payments (`email` module) | `send({ to, subject, text, html? }): Promise<void>`; one-off transactional email that must NOT go through `notify` (nothing here may carry a secret like a password or token, since `notify`'s content is persisted and readable via `GET /api/notifications`) | moderator invitations (Admin), email verification / forgotten password (Auth) |
 | `AuditService.log` | Admin | `log({ actorId, action, targetType, targetId, details? }): Promise<void>` | admin actions, moderation |
 | `UploadService.save / remove / removeForTarget` | Admin / seeding / uploads (Walid) | `save(file, { kind, ownerId }): Promise<{ id, url }>`, `remove(id)`, `removeForTarget(id, { kind, ownerId })` (deletes the file only if it was stored for that kind and owner, otherwise does nothing; added for BLG-10, pending lead approval); enforces JPG/PNG, 5 MB, count limits | airlines, hotels, itineraries, blog |
 | `BookingLifecycle.transition` | Payments | `transition(type, bookingId, to: BookingStatus): Promise<void>`; rejects illegal transitions | booking owners |
@@ -130,7 +131,11 @@ Payments owns the **hold-expiry sweep** (cron every minute plus a lazy expiry ch
 
 `BookingLifecycle.transition()` is the only code that changes `BookingStatus`. It validates against the transition table, calls `applyStatus`, and the owner's `applyStatus` releases inventory in the same MongoDB transaction when `to` is `EXPIRED` or `CANCELLED` (no separate best-effort release step). Booking owners check that the caller owns the booking BEFORE calling `transition()`. Before expiring, the sweep and the lazy check call `PaymentActivity.prepareExpiry`; the sweep walks overdue bookings by `_id` with `afterId` so skipped bookings are neither re-fetched in a loop nor starve later ones.
 
-**Confirmation rule.** Every path that confirms a paid booking, including `BookingLifecycle.settleDueBooking` when `PaymentActivity.prepareExpiry` returns `PAID`, must call the owner's `markConfirmed(id, paymentRef)` and store `paymentRef`. A bare `transition(..., CONFIRMED)` is not allowed: it skips the reference, the held-to-booked conversion and the notification. `markConfirmed` must be idempotent and callable from both the webhook and the late-paid expiry path.
+**Confirmation rule.** Every path that confirms a paid booking, including `BookingLifecycle.settleDueBooking` when `PaymentActivity.prepareExpiry` returns `PAID`, must call the owner's `markConfirmed(id, paymentRef)` and store `paymentRef`. A bare `transition(..., CONFIRMED)` is not allowed: it skips the reference, the held-to-booked conversion and the notification. `markConfirmed` must be idempotent and callable from both the webhook and the late-paid expiry path. It receives only `(id, paymentRef)` and must never require or assume a provider event object.
+
+**Flight booking reference and e-ticket (FLT-23).** In the same transaction that changes `PENDING_PAYMENT` to `CONFIRMED`, the flight provider assigns exactly one booking reference (`FLT-` plus 16 upper-case hex characters) and converts every segment's held seats to booked. A repeat with the same `paymentRef` is a successful no-op that keeps the reference, inventory and notification count unchanged; a different `paymentRef` never reconfirms or replaces them. The reference has a sparse unique index, so historical confirmed bookings without one remain valid. Only after the transaction commits is the single in-app `BOOKING_CONFIRMED` notification sent, and notification failure never rolls the booking back. `GET /api/flight-bookings/:id/e-ticket` is a role-`USER` route that enforces ownership in the service (another traveler and an unknown id both answer 404), requires a `CONFIRMED` booking with a reference (409 otherwise), and generates a PDF attachment for that request only. The PDF never includes passport/identity-document numbers or payment data, and no e-ticket file is stored publicly.
+
+`GET /api/flight-bookings/:id` keeps its pending-payment summary unchanged and, once the booking is `CONFIRMED`, returns the same owner-only shape with the booking reference, `CONFIRMED` status, a null hold expiry, every one-way or round-trip segment with its flight details, and the latest refund (or null when none was issued) read through PAY-03's `RefundsService.getLatestForBooking` contract. Ownership is enforced in the service (another traveler and an unknown id answer 404); expired or cancelled bookings answer 409. Passport/identity-document numbers, Stripe ids and payment data are never included.
 
 **Cancellation policy split.** Tier storage, validation and routes (`PUT /api/airlines/:id/cancellation-policy`, `PUT /api/hotels/:id/policies`) live in the airlines and hotels modules and are owned by their module owners. Payments owns `RefundCalculator.compute` and never copies or edits the tier data.
 
@@ -151,13 +156,13 @@ Payments owns the **hold-expiry sweep** (cron every minute plus a lazy expiry ch
 
 | Owner | Provides | Needs from |
 |---|---|---|
-| Auth (Ziad Mohamed) | Guards, `@CurrentUser`, login/session, profile (incl. preferred currency) | Admin (seed admin) |
-| Admin / seeding / uploads (Mohamed Walid) | Seeding + `ReferenceDataService` (incl. list queries), `UploadService`, audit log, moderator creation, suspend/reactivate, provider deactivate/reactivate (`PATCH /api/admin/providers/:type/:id/deactivate` and `/reactivate`, `:type` = `hotel` or `airline`; separate from suspending the moderator; hidden from search and not bookable, existing CONFIRMED bookings stay valid; affected parties notified), reports | Auth (guards), airlines/hotels exist (moderator link), Notifications |
+| Auth (Ziad Mohamed) | Guards, `@CurrentUser`, login/session, profile (incl. preferred currency) | Admin (seed admin), Email (`EmailService.send`, GEN-01-B — email verification, forgotten password) |
+| Admin / seeding / uploads (Mohamed Walid) | Seeding + `ReferenceDataService` (incl. list queries), `UploadService`, audit log, moderator creation, suspend/reactivate, provider deactivate/reactivate (`PATCH /api/admin/providers/:type/:id/deactivate` and `/reactivate`, `:type` = `hotel` or `airline`; separate from suspending the moderator; hidden from search and not bookable, existing CONFIRMED bookings stay valid; affected parties notified), reports | Auth (guards), airlines/hotels exist (moderator link), Notifications, Email (`EmailService.send`, GEN-01-B — moderator invitation, carries the temporary password, so it must NOT go through `notify`) |
 | Flights A (Ahmed Sanad) | Skeleton, `common/`, airlines, flights, cabins, baggage rules, airline cancellation tiers, flight status job | Seeding (airports/cities), Upload |
 | Hotels A (Yusuf Eser) | Hotels, rooms, availability, hotel policies (check-in/out times, cancellation tiers) | Seeding (cities), Upload |
 | Flights B (Abdulrahman Hosny) | Search, holds, flight booking, e-ticket, cancel | Flights A (cabins), Payments (confirm/refund), Notifications |
 | Hotels B (Hessain Elrefaey) | Search, holds, hotel booking, cancel, reviews, reservations list for the hotel moderator (HTL-22) | Hotels A (rooms/availability), Payments, Notifications |
-| Payments (Abdelrahman ElGabarty) | Stripe, webhook, refunds, notifications, lifecycle, `RefundCalculator`, FX (`fx` module) | Booking provider interface |
+| Payments (Abdelrahman ElGabarty) | Stripe, webhook, refunds, notifications, lifecycle, `RefundCalculator`, FX (`fx` module), Email (`email` module, GEN-01-B) | Booking provider interface |
 | Itineraries (Yassin) | Itineraries, days, budgets, clone | Seeding (cities/currencies), Upload, Payments (`FxService`), Hotels B / Flights B search |
 | Blog (Yusuf Eser) | Posts, comments, likes, tags, search | Auth (guards), Upload |
 

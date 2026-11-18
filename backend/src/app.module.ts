@@ -9,6 +9,7 @@ import { BlogModule } from './blog/blog.module';
 import { FavouritesModule } from './favourites/favourites.module';
 import configuration from './config/configuration';
 import { validateEnv } from './config/env.validation';
+import { EmailModule } from './email';
 import { FlightsModule } from './flights';
 import { FxModule } from './fx';
 import { ItinerariesModule } from './itineraries';
@@ -36,6 +37,7 @@ import { UploadsModule } from './uploads';
     PaymentsModule,
     RefundsModule,
     FxModule,
+    EmailModule,
     BlogModule,
     AuthModule,
     NotificationsModule,

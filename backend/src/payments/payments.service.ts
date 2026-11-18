@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -18,7 +19,7 @@ import { CreatePaymentDto } from './dto/create-payment.dto';
 import { PaymentResponseDto } from './dto/payment-response.dto';
 import { PolicyAcceptanceService } from './policy-acceptance.service';
 import { Payment, PaymentDocument, PaymentLean } from './schemas/payment.schema';
-import { STRIPE_GATEWAY, StripeGateway } from './stripe-gateway';
+import { CreatedIntent, STRIPE_GATEWAY, StripeGateway } from './stripe-gateway';
 
 /**
  * PAY-01: create/retry a Stripe PaymentIntent for a PENDING_PAYMENT booking, read one back, and
@@ -48,7 +49,7 @@ export class PaymentsService {
     await this.assertNoPaymentInFlight(bookingType, bookingId);
     await this.policyAcceptance.assertAccepted(bookingType, bookingId);
 
-    const intent = await this.stripe.createPaymentIntent(payable.amountCents, payable.currency, {
+    const intent = await this.createPaymentIntentOrThrow(payable.amountCents, payable.currency, {
       bookingType,
       bookingId,
       userId: user.userId,
@@ -85,7 +86,7 @@ export class PaymentsService {
       // Already terminal on Stripe's side — fine, that's the outcome we wanted anyway.
     }
 
-    const intent = await this.stripe.createPaymentIntent(payable.amountCents, payable.currency, {
+    const intent = await this.createPaymentIntentOrThrow(payable.amountCents, payable.currency, {
       bookingType: previous.bookingType,
       bookingId: previous.bookingId.toString(),
       userId: user.userId,
@@ -257,6 +258,24 @@ export class PaymentsService {
       })
       .exec();
     if (inFlight) throw new ConflictException('A payment is already in progress for this booking');
+  }
+
+  /**
+   * Stripe's own createPaymentIntent call, with a network/outage error translated into a clear
+   * 503 instead of escaping as a generic 500 (GitHub issue #114, fix 2) — the caller is told to
+   * retry, not left with an unexplained server error.
+   */
+  private async createPaymentIntentOrThrow(
+    amountCents: number,
+    currency: string,
+    metadata: Record<string, string>,
+  ): Promise<CreatedIntent> {
+    try {
+      return await this.stripe.createPaymentIntent(amountCents, currency, metadata);
+    } catch (error) {
+      this.logger.error('Stripe createPaymentIntent failed', error instanceof Error ? error.stack : String(error));
+      throw new ServiceUnavailableException('The payment provider is temporarily unavailable — please try again shortly');
+    }
   }
 
   /**
