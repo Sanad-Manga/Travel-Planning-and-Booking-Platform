@@ -19,6 +19,15 @@ export interface EnvVars {
    */
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
+  /**
+   * GEN-01-B: like STRIPE_SECRET_KEY, validated lazily inside SmtpEmailSender, not here. Left
+   * unset entirely in development — the sender then falls back to a throwaway Ethereal test inbox.
+   */
+  SMTP_HOST?: string;
+  SMTP_PORT?: string;
+  SMTP_USER?: string;
+  SMTP_PASSWORD?: string;
+  SMTP_FROM?: string;
 }
 
 export function validateEnv(raw: Record<string, unknown>): Record<string, unknown> & EnvVars {

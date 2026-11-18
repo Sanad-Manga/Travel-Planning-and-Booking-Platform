@@ -10,6 +10,12 @@ import { PolicyAcceptance } from './schemas/policy-acceptance.schema';
 import { StripePaymentActivity } from './stripe-payment-activity';
 import { Refund } from '../refunds/schemas/refund.schema';
 import { Notification } from '../notifications/schemas/notification.schema';
+import { User } from '../users/schemas/user.schema';
+import { Country } from '../reference-data/schemas/country.schema';
+import { City } from '../reference-data/schemas/city.schema';
+import { Airport } from '../reference-data/schemas/airport.schema';
+import { Attraction } from '../reference-data/schemas/attraction.schema';
+import { Currency } from '../reference-data/schemas/currency.schema';
 
 describe('PaymentsModule wiring', () => {
   it('provides the lifecycle, real Stripe payment activity, and registers the every-minute hold-expiry cron job', async () => {
@@ -27,6 +33,18 @@ describe('PaymentsModule wiring', () => {
       .overrideProvider(getModelToken(Refund.name))
       .useValue({})
       .overrideProvider(getModelToken(Notification.name))
+      .useValue({})
+      .overrideProvider(getModelToken(User.name))
+      .useValue({})
+      .overrideProvider(getModelToken(Country.name))
+      .useValue({})
+      .overrideProvider(getModelToken(City.name))
+      .useValue({})
+      .overrideProvider(getModelToken(Airport.name))
+      .useValue({})
+      .overrideProvider(getModelToken(Attraction.name))
+      .useValue({})
+      .overrideProvider(getModelToken(Currency.name))
       .useValue({})
       .compile();
     const app = moduleRef.createNestApplication();

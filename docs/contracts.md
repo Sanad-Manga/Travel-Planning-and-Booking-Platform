@@ -9,7 +9,7 @@
 - Backend: NestJS + TypeScript + MongoDB Atlas (Mongoose). Frontend: Next.js (later).
 - Folders: `backend/`, `frontend/`, `docs/requirements`, `docs/api`, `AI_PROMPTS.txt`, `README.md`, `.env.example`.
 - One folder per feature module: `backend/src/<module>/` with `<module>.module.ts`, `.controller.ts`, `.service.ts`, `schemas/`, `dto/`.
-- Modules: `auth`, `users`, `admin`, `airlines`, `flights`, `flight-bookings`, `hotels`, `hotel-bookings`, `reviews`, `payments`, `fx`, `refunds`, `notifications`, `uploads`, `audit`, `itineraries`, `blog`, `reports`, `reference-data`, `common`.
+- Modules: `auth`, `users`, `admin`, `airlines`, `flights`, `flight-bookings`, `hotels`, `hotel-bookings`, `reviews`, `payments`, `fx`, `refunds`, `email`, `notifications`, `uploads`, `audit`, `itineraries`, `blog`, `reports`, `reference-data`, `common`.
 - Shared code only in `backend/src/common/` (guards, decorators, enums, pagination, filters, constants). Changing `common/` needs the lead's approval.
 - Never edit another person's module. Ask the owner or the lead.
 
@@ -109,7 +109,8 @@ Everything below is injected via NestJS DI. Owners publish the signature first; 
 
 | Service | Owner | Signature (stable) | Used by |
 |---|---|---|---|
-| `NotificationsService.notify` | Payments | `notify({ userId, type, title, message, link? }): Promise<void>` | everyone who tells users something |
+| `NotificationsService.notify` | Payments | `notify({ userId, type, title, message, link? }): Promise<void>`; also emails the recipient the same title/message (GEN-01-B) — an email failure never breaks the in-app notification | everyone who tells users something |
+| `EmailService.send` | Payments (`email` module) | `send({ to, subject, text, html? }): Promise<void>`; one-off transactional email that must NOT go through `notify` (nothing here may carry a secret like a password or token, since `notify`'s content is persisted and readable via `GET /api/notifications`) | moderator invitations (Admin), email verification / forgotten password (Auth) |
 | `AuditService.log` | Admin | `log({ actorId, action, targetType, targetId, details? }): Promise<void>` | admin actions, moderation |
 | `UploadService.save / remove / removeForTarget` | Admin / seeding / uploads (Walid) | `save(file, { kind, ownerId }): Promise<{ id, url }>`, `remove(id)`, `removeForTarget(id, { kind, ownerId })` (deletes the file only if it was stored for that kind and owner, otherwise does nothing; added for BLG-10, pending lead approval); enforces JPG/PNG, 5 MB, count limits | airlines, hotels, itineraries, blog |
 | `BookingLifecycle.transition` | Payments | `transition(type, bookingId, to: BookingStatus): Promise<void>`; rejects illegal transitions | booking owners |
@@ -155,13 +156,13 @@ Payments owns the **hold-expiry sweep** (cron every minute plus a lazy expiry ch
 
 | Owner | Provides | Needs from |
 |---|---|---|
-| Auth (Ziad Mohamed) | Guards, `@CurrentUser`, login/session, profile (incl. preferred currency) | Admin (seed admin) |
-| Admin / seeding / uploads (Mohamed Walid) | Seeding + `ReferenceDataService` (incl. list queries), `UploadService`, audit log, moderator creation, suspend/reactivate, provider deactivate/reactivate (`PATCH /api/admin/providers/:type/:id/deactivate` and `/reactivate`, `:type` = `hotel` or `airline`; separate from suspending the moderator; hidden from search and not bookable, existing CONFIRMED bookings stay valid; affected parties notified), reports | Auth (guards), airlines/hotels exist (moderator link), Notifications |
+| Auth (Ziad Mohamed) | Guards, `@CurrentUser`, login/session, profile (incl. preferred currency) | Admin (seed admin), Email (`EmailService.send`, GEN-01-B — email verification, forgotten password) |
+| Admin / seeding / uploads (Mohamed Walid) | Seeding + `ReferenceDataService` (incl. list queries), `UploadService`, audit log, moderator creation, suspend/reactivate, provider deactivate/reactivate (`PATCH /api/admin/providers/:type/:id/deactivate` and `/reactivate`, `:type` = `hotel` or `airline`; separate from suspending the moderator; hidden from search and not bookable, existing CONFIRMED bookings stay valid; affected parties notified), reports | Auth (guards), airlines/hotels exist (moderator link), Notifications, Email (`EmailService.send`, GEN-01-B — moderator invitation, carries the temporary password, so it must NOT go through `notify`) |
 | Flights A (Ahmed Sanad) | Skeleton, `common/`, airlines, flights, cabins, baggage rules, airline cancellation tiers, flight status job | Seeding (airports/cities), Upload |
 | Hotels A (Yusuf Eser) | Hotels, rooms, availability, hotel policies (check-in/out times, cancellation tiers) | Seeding (cities), Upload |
 | Flights B (Abdulrahman Hosny) | Search, holds, flight booking, e-ticket, cancel | Flights A (cabins), Payments (confirm/refund), Notifications |
 | Hotels B (Hessain Elrefaey) | Search, holds, hotel booking, cancel, reviews, reservations list for the hotel moderator (HTL-22) | Hotels A (rooms/availability), Payments, Notifications |
-| Payments (Abdelrahman ElGabarty) | Stripe, webhook, refunds, notifications, lifecycle, `RefundCalculator`, FX (`fx` module) | Booking provider interface |
+| Payments (Abdelrahman ElGabarty) | Stripe, webhook, refunds, notifications, lifecycle, `RefundCalculator`, FX (`fx` module), Email (`email` module, GEN-01-B) | Booking provider interface |
 | Itineraries (Yassin) | Itineraries, days, budgets, clone | Seeding (cities/currencies), Upload, Payments (`FxService`), Hotels B / Flights B search |
 | Blog (Yusuf Eser) | Posts, comments, likes, tags, search | Auth (guards), Upload |
 
