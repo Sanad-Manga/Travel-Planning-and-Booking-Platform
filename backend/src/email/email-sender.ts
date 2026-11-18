@@ -52,6 +52,13 @@ export class SmtpEmailSender implements EmailSender {
       return this.transporter;
     }
 
+    if (process.env.NODE_ENV === 'production') {
+      // Falling back to a throwaway test inbox in production would silently drop every email a
+      // real user was supposed to receive, with only a warn log as a trace. Fail the send loudly
+      // instead, so a missing SMTP_HOST gets noticed immediately rather than discovered later.
+      throw new Error('SMTP_HOST is not configured in production — refusing to send through a throwaway test inbox');
+    }
+
     const testAccount = await nodemailer.createTestAccount();
     this.transporter = nodemailer.createTransport({
       host: testAccount.smtp.host,
@@ -69,5 +76,18 @@ export class SmtpEmailSender implements EmailSender {
     const info = await transporter.sendMail({ from: this.from, ...input });
     const previewUrl = nodemailer.getTestMessageUrl(info);
     if (previewUrl) this.logger.log(`Email preview (test inbox): ${previewUrl}`);
+  }
+}
+
+/**
+ * Used instead of `SmtpEmailSender` when `NODE_ENV=test` (see `EmailModule`). Without this, every
+ * e2e spec that triggers `NotificationsService.notify()` would reach Ethereal over the real
+ * network on every run — slow, noisy, and broken entirely offline/sandboxed, for no value: no
+ * e2e spec asserts on sent email content today.
+ */
+@Injectable()
+export class NoopEmailSender implements EmailSender {
+  async send(): Promise<void> {
+    // Intentionally does nothing.
   }
 }

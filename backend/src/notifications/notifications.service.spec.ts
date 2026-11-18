@@ -14,6 +14,9 @@ import { Notification, NotificationLean } from './schemas/notification.schema';
 const USER_ID = new Types.ObjectId().toString();
 const user: AuthenticatedUser = { userId: USER_ID, role: Role.USER };
 
+/** notify()'s email side-effect is fire-and-forget — let its microtask chain settle before asserting on it. */
+const flushPromises = () => new Promise((resolve) => setImmediate(resolve));
+
 /** A Mongoose query stand-in: every builder method returns itself and exec() resolves `result`. */
 function query(result: unknown) {
   const q: Record<string, jest.Mock> = {};
@@ -172,6 +175,7 @@ describe('NotificationsService', () => {
         title: 'Refund issued',
         message: 'We refunded your booking.',
       });
+      await flushPromises();
 
       expect(emailSender.sent).toEqual([
         { to: 'traveler@example.com', subject: 'Refund issued', text: 'We refunded your booking.' },
@@ -185,6 +189,7 @@ describe('NotificationsService', () => {
       await expect(
         service.notify({ userId: USER_ID, type: NotificationType.BOOKING_CONFIRMED, title: 't', message: 'm' }),
       ).resolves.toBeUndefined();
+      await flushPromises();
 
       expect(emailSender.sent).toHaveLength(0);
       expect(errorLog).not.toHaveBeenCalled();
@@ -198,9 +203,22 @@ describe('NotificationsService', () => {
       await expect(
         service.notify({ userId: USER_ID, type: NotificationType.BOOKING_CONFIRMED, title: 't', message: 'm' }),
       ).resolves.toBeUndefined();
+      await flushPromises();
 
       expect(model.create).toHaveBeenCalledTimes(1); // already persisted before the email was even attempted
       expect(errorLog).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not block on the email send — notify() resolves before a slow send settles', async () => {
+      model.create.mockResolvedValue({});
+      usersService.findById.mockResolvedValue({ email: 'traveler@example.com' });
+      let resolveSend!: () => void;
+      emailSender.send = jest.fn(() => new Promise((resolve) => (resolveSend = () => resolve(undefined))));
+
+      const notifyPromise = service.notify({ userId: USER_ID, type: NotificationType.BOOKING_CONFIRMED, title: 't', message: 'm' });
+      await expect(notifyPromise).resolves.toBeUndefined(); // resolves without waiting for the send
+
+      resolveSend();
     });
   });
 

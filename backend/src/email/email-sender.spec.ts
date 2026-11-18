@@ -78,6 +78,16 @@ describe('SmtpEmailSender', () => {
     expect(logWarn).toHaveBeenCalledTimes(1);
   });
 
+  it('refuses to fall back to a test inbox in production — real users must not silently get nothing', async () => {
+    process.env.NODE_ENV = 'production';
+    const sender = new SmtpEmailSender();
+
+    await expect(sender.send({ to: 'user@example.com', subject: 'Hi', text: 'Hello' })).rejects.toThrow(
+      'SMTP_HOST is not configured in production',
+    );
+    expect(createTestAccount).not.toHaveBeenCalled();
+  });
+
   it('logs a preview URL for a sent test-inbox email, never credentials', async () => {
     createTestAccount.mockResolvedValue({
       user: 'ethereal-user',
