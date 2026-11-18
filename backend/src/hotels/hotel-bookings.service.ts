@@ -20,8 +20,8 @@ import {
   Role,
 } from '../common';
 import { NotificationsService } from '../notifications';
+import { BookingLifecycle, BookingProviderRegistry } from '../payments';
 import { BookingPolicies, BookingProvider, BookingStatusSnapshot } from '../payments/booking-provider.interface';
-import { BookingProviderRegistry } from '../payments/booking-provider.registry';
 import { UpcomingBookingsChecker, UpcomingBookingsRegistry } from '../users/upcoming-bookings';
 import { CreateHotelBookingDto } from './dto/create-hotel-booking.dto';
 import { HotelBookingResponseDto } from './dto/hotel-booking-response.dto';
@@ -50,6 +50,7 @@ export class HotelBookingsService implements RoomReservations, BookingProvider, 
     private readonly upcomingBookings: UpcomingBookingsRegistry,
     private readonly notifications: NotificationsService,
     private readonly hotelsService: HotelsService,
+    private readonly bookingLifecycle: BookingLifecycle,
   ) {}
 
   onModuleInit(): void {
@@ -272,6 +273,28 @@ export class HotelBookingsService implements RoomReservations, BookingProvider, 
       });
     }
     return outcome.kind !== 'REFUSED';
+  }
+
+  async getForUser(
+    id: string,
+    userId: string,
+    now: Date = new Date(),
+  ): Promise<HotelBookingResponseDto | null> {
+    if (!Types.ObjectId.isValid(id) || !Types.ObjectId.isValid(userId)) return null;
+    const ownerFilter = { _id: new Types.ObjectId(id), userId: new Types.ObjectId(userId) };
+    const owned = await this.bookings
+      .findOne(ownerFilter)
+      .lean<HotelBookingLean>()
+      .exec();
+    if (!owned) return null;
+
+    await this.bookingLifecycle.expireIfDue(BookingType.HOTEL, id, now);
+
+    const booking = await this.bookings
+      .findOne(ownerFilter)
+      .lean<HotelBookingLean>()
+      .exec();
+    return booking ? HotelBookingResponseDto.from(booking) : null;
   }
 
   async getPolicies(id: string): Promise<BookingPolicies | null> {
