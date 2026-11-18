@@ -18,8 +18,14 @@ import { IssueRefundInput, RefundsService } from '../refunds/refunds.service';
 /** Hand-rolled stand-in for RefundsService — only the two methods PaymentsService calls. */
 class FakeRefundsService {
   readonly issued: IssueRefundInput[] = [];
+  /** Test helper: makes the NEXT issue() call throw instead of succeeding, to simulate a transient failure. */
+  failNextIssueOnce = false;
 
   async issue(input: IssueRefundInput) {
+    if (this.failNextIssueOnce) {
+      this.failNextIssueOnce = false;
+      throw new Error('transient refund-gateway hiccup');
+    }
     this.issued.push(input);
     return {} as Awaited<ReturnType<RefundsService['issue']>>;
   }
@@ -78,13 +84,19 @@ class FakePaymentModel {
         ...row,
         save: async () => {
           const index = this.rows.findIndex((r) => r._id.equals(row._id));
-          this.rows[index] = { ...this.rows[index], status: row.status };
+          this.rows[index] = { ...this.rows[index], status: row.status, amountCents: row.amountCents };
         },
         set status(value: PaymentStatus) {
           row.status = value;
         },
         get status() {
           return row.status;
+        },
+        set amountCents(value: number) {
+          row.amountCents = value;
+        },
+        get amountCents() {
+          return row.amountCents;
         },
       }),
     };
@@ -343,6 +355,34 @@ describe('PaymentsService', () => {
       ]);
     });
 
+    it('retries the refund on the next webhook delivery if the first refund attempt fails transiently', async () => {
+      acceptPolicies();
+      const created = await service.create(user(OWNER_ID), { bookingType: BookingType.FLIGHT, bookingId: BOOKING_ID });
+      const row = (await paymentModel.findById(created.id).lean().exec()) as PaymentLean;
+
+      flights.bookings.set(BOOKING_ID, { status: BookingStatus.EXPIRED, holdExpiresAt: null });
+      refunds.failNextIssueOnce = true;
+
+      await expect(
+        service.handleWebhookEvent(paymentIntentEvent('payment_intent.succeeded', row.stripePaymentIntentId)),
+      ).rejects.toThrow('transient refund-gateway hiccup');
+
+      // Not left stuck SUCCEEDED-but-unrefunded: the status rolled back, so Stripe's retry below
+      // re-enters the same branch instead of short-circuiting on the SUCCEEDED idempotency check.
+      const afterFailure = (await paymentModel.findById(created.id).lean().exec()) as PaymentLean;
+      expect(afterFailure.status).toBe(PaymentStatus.REQUIRES_PAYMENT);
+      expect(refunds.issued).toHaveLength(0);
+
+      // Stripe retries the same webhook delivery; this time the refund actually goes through.
+      await expect(
+        service.handleWebhookEvent(paymentIntentEvent('payment_intent.succeeded', row.stripePaymentIntentId)),
+      ).resolves.toBeUndefined();
+
+      const afterRetry = (await paymentModel.findById(created.id).lean().exec()) as PaymentLean;
+      expect(afterRetry.status).toBe(PaymentStatus.SUCCEEDED);
+      expect(refunds.issued).toHaveLength(1);
+    });
+
     it('ignores an unknown PaymentIntent id', async () => {
       await expect(
         service.handleWebhookEvent(paymentIntentEvent('payment_intent.succeeded', 'pi_unknown')),
@@ -361,7 +401,7 @@ describe('PaymentsService', () => {
       expect(updated.status).toBe(PaymentStatus.PROCESSING);
     });
 
-    it('does not confirm the booking when the Stripe amount disagrees with the stored amount', async () => {
+    it('does not confirm the booking when the Stripe amount disagrees with the stored amount, and refunds exactly what was charged', async () => {
       acceptPolicies();
       const created = await service.create(user(OWNER_ID), { bookingType: BookingType.FLIGHT, bookingId: BOOKING_ID });
       const row = (await paymentModel.findById(created.id).lean().exec()) as PaymentLean;
@@ -371,6 +411,23 @@ describe('PaymentsService', () => {
       expect(flights.status(BOOKING_ID)).toBe(BookingStatus.PENDING_PAYMENT); // not confirmed
       const updated = (await paymentModel.findById(created.id).lean().exec()) as PaymentLean;
       expect(updated.status).toBe(PaymentStatus.SUCCEEDED); // money was genuinely collected, stays visible
+      expect(updated.amountCents).toBe(1); // corrected to what Stripe actually charged
+      expect(refunds.issued).toEqual([
+        { bookingType: BookingType.FLIGHT, bookingId: BOOKING_ID, amountCents: 1, reason: expect.any(String) },
+      ]);
+    });
+
+    it('does not auto-refund when the currency itself disagrees, leaving it for manual review', async () => {
+      acceptPolicies();
+      const created = await service.create(user(OWNER_ID), { bookingType: BookingType.FLIGHT, bookingId: BOOKING_ID });
+      const row = (await paymentModel.findById(created.id).lean().exec()) as PaymentLean;
+
+      await service.handleWebhookEvent(paymentIntentEvent('payment_intent.succeeded', row.stripePaymentIntentId, 25_000, 'eur'));
+
+      const updated = (await paymentModel.findById(created.id).lean().exec()) as PaymentLean;
+      expect(updated.status).toBe(PaymentStatus.SUCCEEDED);
+      expect(updated.amountCents).toBe(25_000); // left as recorded — not guessed at
+      expect(refunds.issued).toHaveLength(0);
     });
 
     it('does not mark the payment SUCCEEDED when confirmPaid fails transiently, so a retried webhook delivery still confirms the booking', async () => {

@@ -189,14 +189,24 @@ describe('RefundsService', () => {
       expect(notifications.sent).toHaveLength(1);
     });
 
-    it('cancels an orphaned refund race via the unique-index duplicate-key path', async () => {
+    it('reuses the same Stripe refund on retry after a transient DB failure, instead of refunding twice', async () => {
       payments.add({ bookingType: BookingType.FLIGHT, bookingId: BOOKING_ID, status: PaymentStatus.SUCCEEDED, amountCents: 10_000 });
-      refundModel.forceDuplicateKeyOnce = true;
 
+      // The Stripe call succeeds, but the DB write that would have recorded it fails — the real
+      // failure mode an idempotency key protects against (crash/timeout between the two).
+      refundModel.forceDuplicateKeyOnce = true;
       await expect(
         service.issue({ bookingType: BookingType.FLIGHT, bookingId: BOOKING_ID.toString(), amountCents: 5_000 }),
       ).rejects.toBeInstanceOf(ConflictException);
+      expect(stripe.refunds.size).toBe(1);
+
+      // A caller retrying after that failure reaches Stripe again with the SAME idempotency key —
+      // Stripe returns the one real refund instead of creating a second one.
+      const result = await service.issue({ bookingType: BookingType.FLIGHT, bookingId: BOOKING_ID.toString(), amountCents: 5_000 });
+      expect(stripe.refunds.size).toBe(1);
+      expect(result.amountCents).toBe(5_000);
     });
+
   });
 
   describe('applyStripeRefundEvent', () => {

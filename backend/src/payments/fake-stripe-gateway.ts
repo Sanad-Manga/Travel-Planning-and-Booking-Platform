@@ -17,6 +17,7 @@ interface FakeRefund {
 export class FakeStripeGateway implements StripeGateway {
   readonly intents = new Map<string, FakeIntent>();
   readonly refunds = new Map<string, FakeRefund>();
+  private readonly refundsByIdempotencyKey = new Map<string, string>();
   private nextId = 1;
   private nextRefundId = 1;
   /** Overrides the status the next `createRefund` call returns; default is 'succeeded'. */
@@ -49,11 +50,20 @@ export class FakeStripeGateway implements StripeGateway {
     if (intent) intent.status = status;
   }
 
-  async createRefund(paymentIntentId: string, amountCents: number): Promise<CreatedRefund> {
+  async createRefund(paymentIntentId: string, amountCents: number, _reason?: string, idempotencyKey?: string): Promise<CreatedRefund> {
+    // Mirrors real Stripe: a repeated idempotency key returns the SAME refund instead of a new one.
+    if (idempotencyKey) {
+      const existingId = this.refundsByIdempotencyKey.get(idempotencyKey);
+      if (existingId) {
+        const existing = this.refunds.get(existingId)!;
+        return { id: existingId, status: existing.status };
+      }
+    }
     const id = `re_fake_${this.nextRefundId++}`;
     const status = this.nextRefundStatus ?? 'succeeded';
     this.nextRefundStatus = null;
     this.refunds.set(id, { status, amountCents, paymentIntentId });
+    if (idempotencyKey) this.refundsByIdempotencyKey.set(idempotencyKey, id);
     return { id, status };
   }
 

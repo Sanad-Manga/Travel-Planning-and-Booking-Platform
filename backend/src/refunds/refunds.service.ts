@@ -1,10 +1,11 @@
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import Stripe from 'stripe';
 import { AuthenticatedUser, BookingType, NotificationType, PaymentStatus, RefundStatus } from '../common';
 import { assertOwner } from '../common/ownership';
 import { NotificationsService } from '../notifications';
+import { formatMoney } from '../payments/money';
 import { Payment } from '../payments/schemas/payment.schema';
 import { STRIPE_GATEWAY, StripeGateway } from '../payments/stripe-gateway';
 import { RefundSummary } from './refund-summary';
@@ -33,6 +34,8 @@ function toRefundStatus(stripeStatus: string): RefundStatus {
  */
 @Injectable()
 export class RefundsService {
+  private readonly logger = new Logger(RefundsService.name);
+
   constructor(
     @InjectModel(Refund.name) private readonly refunds: Model<Refund>,
     @InjectModel(Payment.name) private readonly payments: Model<Payment>,
@@ -69,7 +72,12 @@ export class RefundsService {
       throw new ConflictException('A refund has already been issued for this booking');
     }
 
-    const stripeRefund = await this.stripe.createRefund(payment.stripePaymentIntentId, input.amountCents, input.reason);
+    // Deterministic per payment, not per call: two concurrent or retried `issue` calls for the
+    // same payment reach Stripe with the SAME key, so Stripe itself returns the one real refund
+    // instead of creating a second one — the DB's unique index below only stops a second local
+    // row, not a second real charge-reversal if the check-then-call-then-save sequence races.
+    const idempotencyKey = `refund-${payment.stripePaymentIntentId}`;
+    const stripeRefund = await this.stripe.createRefund(payment.stripePaymentIntentId, input.amountCents, input.reason, idempotencyKey);
     const status = toRefundStatus(stripeRefund.status);
 
     let created: RefundLean;
@@ -133,18 +141,29 @@ export class RefundsService {
     await this.notify(refund, status);
   }
 
+  /**
+   * The refund itself (Stripe call + DB row) is already committed by the time this runs — a
+   * notification failure must never surface as if the refund had failed, so this is caught and
+   * logged rather than propagated. (`NotificationsService.notify` is documented to never throw on
+   * its own, but this doesn't lean on that promise for something this consequential to get wrong.)
+   */
   private async notify(refund: { userId: Types.ObjectId; amountCents: number; currency: string }, status: RefundStatus): Promise<void> {
-    await this.notifications.notify({
-      userId: refund.userId.toString(),
-      type: NotificationType.REFUND_UPDATE,
-      title: status === RefundStatus.REFUNDED ? 'Refund completed' : status === RefundStatus.FAILED ? 'Refund failed' : 'Refund issued',
-      message:
-        status === RefundStatus.REFUNDED
-          ? `Your refund of ${refund.amountCents} ${refund.currency} cents has been completed.`
-          : status === RefundStatus.FAILED
-            ? `Your refund of ${refund.amountCents} ${refund.currency} cents could not be completed. Please contact support.`
-            : `Your refund of ${refund.amountCents} ${refund.currency} cents is being processed.`,
-    });
+    const amount = formatMoney(refund.amountCents, refund.currency);
+    try {
+      await this.notifications.notify({
+        userId: refund.userId.toString(),
+        type: NotificationType.REFUND_UPDATE,
+        title: status === RefundStatus.REFUNDED ? 'Refund completed' : status === RefundStatus.FAILED ? 'Refund failed' : 'Refund issued',
+        message:
+          status === RefundStatus.REFUNDED
+            ? `Your refund of ${amount} has been completed.`
+            : status === RefundStatus.FAILED
+              ? `Your refund of ${amount} could not be completed. Please contact support.`
+              : `Your refund of ${amount} is being processed.`,
+      });
+    } catch (error) {
+      this.logger.error(`Failed to notify user ${refund.userId.toString()} of a ${status} refund`, error instanceof Error ? error.stack : String(error));
+    }
   }
 
   private toSummary(refund: {

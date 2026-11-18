@@ -35,9 +35,12 @@ export interface StripeGateway {
    * PAY-03: refunds part of a succeeded PaymentIntent. `reason` is free text, stored in metadata
    * rather than Stripe's own `reason` enum (`duplicate`/`fraudulent`/`requested_by_customer`),
    * which cannot represent "cancelled per tier 2" or "airline cancelled the flight" without risking
-   * a validation error on anything that doesn't fit it.
+   * a validation error on anything that doesn't fit it. `idempotencyKey` (deterministic per payment,
+   * e.g. `refund-<paymentIntentId>`) makes two concurrent/retried calls for the same payment return
+   * the SAME Stripe refund instead of creating two real ones — the DB-side unique index alone only
+   * stops a second local row, not a second real charge-reversal at Stripe.
    */
-  createRefund(paymentIntentId: string, amountCents: number, reason?: string): Promise<CreatedRefund>;
+  createRefund(paymentIntentId: string, amountCents: number, reason?: string, idempotencyKey?: string): Promise<CreatedRefund>;
 }
 
 /** DI token for StripeGateway (an interface has no runtime value to inject by). */
@@ -98,12 +101,15 @@ export class StripePaymentGateway implements StripeGateway {
     return this.getClient().webhooks.constructEvent(rawBody, signature, secret);
   }
 
-  async createRefund(paymentIntentId: string, amountCents: number, reason?: string): Promise<CreatedRefund> {
-    const refund = await this.getClient().refunds.create({
-      payment_intent: paymentIntentId,
-      amount: amountCents,
-      ...(reason ? { metadata: { reason } } : {}),
-    });
+  async createRefund(paymentIntentId: string, amountCents: number, reason?: string, idempotencyKey?: string): Promise<CreatedRefund> {
+    const refund = await this.getClient().refunds.create(
+      {
+        payment_intent: paymentIntentId,
+        amount: amountCents,
+        ...(reason ? { metadata: { reason } } : {}),
+      },
+      idempotencyKey ? { idempotencyKey } : undefined,
+    );
     return { id: refund.id, status: refund.status ?? 'pending' };
   }
 }
