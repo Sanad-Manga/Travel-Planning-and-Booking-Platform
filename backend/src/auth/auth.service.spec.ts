@@ -6,6 +6,7 @@ import { compare, hashSync } from 'bcryptjs';
 import { AccountStatus, Role } from '../common';
 import { UsersService } from '../users/users.service';
 import { AuthService } from './auth.service';
+import { EmailVerificationService } from './email-verification.service';
 import { TokenRevocationService } from './token-revocation.service';
 
 const ID = '6730a1f2c3d4e5f607182930';
@@ -22,6 +23,7 @@ describe('AuthService', () => {
     replacePasswordHash: jest.fn(),
   };
   const jwtService = { signAsync: jest.fn(), verifyAsync: jest.fn() };
+  const emailVerification = { sendInBackground: jest.fn() };
   const revocations = { revoke: jest.fn(), isRevoked: jest.fn(), consume: jest.fn() };
   const claims = (extra: Record<string, unknown> = {}) => ({ sub: ID, jti: 'jti-1', exp: 1_900_000_000, ...extra });
   const dto = { name: 'Ali', email: 'ali@example.com', password: 'Passw0rdOK', acceptTerms: true };
@@ -50,6 +52,7 @@ describe('AuthService', () => {
         { provide: UsersService, useValue: usersService },
         { provide: JwtService, useValue: jwtService },
         { provide: TokenRevocationService, useValue: revocations },
+        { provide: EmailVerificationService, useValue: emailVerification },
         // Fake secrets, only for this test.
         { provide: ConfigService, useValue: new ConfigService({ JWT_ACCESS_SECRET: 'a'.repeat(32), JWT_REFRESH_SECRET: 'r'.repeat(32) }) },
       ],
@@ -73,6 +76,13 @@ describe('AuthService', () => {
       const result = await service.register(dto);
       expect(result).toMatchObject({ id: ID, email: dto.email, role: Role.USER, status: AccountStatus.ACTIVE });
       expect(JSON.stringify(result)).not.toContain('passwordHash');
+    });
+
+    it('creates the account unverified and starts the verification email in the background (ACC-02)', async () => {
+      usersService.findByEmail.mockResolvedValue(null);
+      await service.register(dto);
+      expect(usersService.create.mock.calls[0][0].emailVerified).toBe(false);
+      expect(emailVerification.sendInBackground).toHaveBeenCalledTimes(1);
     });
 
     it('rejects a duplicate email with a field-level 409 and creates nothing', async () => {

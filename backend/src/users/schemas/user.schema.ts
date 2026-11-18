@@ -19,6 +19,11 @@ export class User {
   @Prop({ required: true, select: false })
   passwordHash: string;
 
+  // ACC-02. Only an explicit `false` means "unverified" (set at registration). No default on purpose: users without
+  // the field (existing, seeded, admin-created moderators) count as verified, so nothing else changes behaviour.
+  @Prop({ type: Boolean })
+  emailVerified?: boolean;
+
   @Prop({ type: Boolean, default: false })
   mustChangePassword: boolean;
 

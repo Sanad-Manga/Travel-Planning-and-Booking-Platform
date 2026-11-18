@@ -8,6 +8,7 @@ import { AccessTokenPayload, AccountStatus, LOGIN_LOCK_MINUTES, LOGIN_MAX_FAILED
 import { UserDocument } from '../users/schemas/user.schema';
 import { UsersService } from '../users/users.service';
 import { REFRESH_TOKEN_TTL_SECONDS } from './auth-cookies';
+import { EmailVerificationService } from './email-verification.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -38,6 +39,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
     private readonly revocations: TokenRevocationService,
+    private readonly emailVerification: EmailVerificationService,
   ) {}
 
   /** Creates a USER account. Business rule (unique email) is enforced here, not only by the DTO. */
@@ -58,7 +60,10 @@ export class AuthService {
       email: dto.email,
       passwordHash,
       consentAcceptedAt: new Date(),
+      emailVerified: false, // ACC-02: booking stays blocked until the emailed link is used
     });
+    // ACC-02: background send; a failure is logged and never fails or slows registration.
+    this.emailVerification.sendInBackground(user);
     return UserResponseDto.from(user);
   }
 
