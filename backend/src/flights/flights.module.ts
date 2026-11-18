@@ -7,6 +7,7 @@ import { PaymentsModule } from '../payments';
 import { FlightBookingProvider } from './flight-booking.provider';
 import { FlightBookingsController } from './flight-bookings.controller';
 import { FlightBookingsService } from './flight-bookings.service';
+import { FlightETicketService } from './flight-eticket.service';
 import { FlightCabinsReader } from './flight-cabins.reader';
 import { FlightInventoryService } from './flight-inventory.service';
 import { FlightCabinsController } from './flight-cabins.controller';
@@ -50,6 +51,7 @@ import { Flight, FlightSchema } from './schemas/flight.schema';
     FlightInventoryService,
     FlightBookingsService,
     FlightBookingProvider,
+    FlightETicketService,
     FlightCabinsService,
     FlightStatusJob,
     FlightEditService,

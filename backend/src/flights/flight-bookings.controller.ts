@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Res,
+  StreamableFile,
+} from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
@@ -8,9 +16,11 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiProduces,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { Response } from 'express';
 import {
   AuthenticatedUser,
   CurrentUser,
@@ -33,6 +43,50 @@ import { FlightBookingsService } from './flight-bookings.service';
 @Controller('flight-bookings')
 export class FlightBookingsController {
   constructor(private readonly bookings: FlightBookingsService) {}
+
+  @Get(':id/e-ticket')
+  @Roles(Role.USER)
+  @ApiProduces('application/pdf')
+  @ApiOperation({
+    summary: 'Download the confirmed flight booking e-ticket PDF - FLT-23',
+    description:
+      "Generates a PDF e-ticket for the booking owner only. The booking must be CONFIRMED and have its unique booking reference. " +
+      'Another traveler\'s booking and an unknown id both answer 404, so ids cannot be probed; a pending, expired or cancelled booking answers 409. ' +
+      'The PDF contains the reference, passenger names/types and every booked segment; it never contains passport/identity-document numbers or payment data, and no file is stored on the server.',
+  })
+  @ApiOkResponse({
+    description:
+      'The e-ticket as a downloadable PDF attachment; the filename contains the booking reference',
+    content: {
+      'application/pdf': { schema: { type: 'string', format: 'binary' } },
+    },
+  })
+  @ApiForbiddenResponse({
+    type: ErrorResponseDto,
+    description: 'Only travelers (role USER) can download an e-ticket',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'The booking is unknown or belongs to another traveler',
+  })
+  @ApiConflictResponse({
+    type: ErrorResponseDto,
+    description:
+      'The booking is not confirmed, or it has no e-ticket reference',
+  })
+  async eTicket(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const file = await this.bookings.getETicket(user, id);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${file.filename}"`,
+      'Content-Length': file.buffer.length.toString(),
+    });
+    return new StreamableFile(file.buffer);
+  }
 
   @Get(':id')
   @Roles(Role.USER)

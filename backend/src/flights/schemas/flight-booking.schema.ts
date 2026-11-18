@@ -141,6 +141,14 @@ export class FlightBooking {
   /** Set when the payment is confirmed (PAY-01). */
   @Prop({ type: String })
   paymentRef?: string;
+
+  /**
+   * FLT-23: assigned exactly once, in the same atomic confirmation that stores `paymentRef`.
+   * A confirmed booking keeps this reference for life; historical bookings confirmed before
+   * FLT-23 keep none (the sparse unique index tolerates the missing field).
+   */
+  @Prop({ type: String })
+  bookingReference?: string;
 }
 
 export type FlightBookingDocument = HydratedDocument<FlightBooking>;
@@ -185,3 +193,8 @@ export const FlightBookingSchema = SchemaFactory.createForClass(FlightBooking);
 FlightBookingSchema.index({ userId: 1, createdAt: -1 });
 // The hold-expiry sweep: PENDING_PAYMENT bookings whose hold ran out, in _id order (cursor).
 FlightBookingSchema.index({ status: 1, holdExpiresAt: 1, _id: 1 });
+// FLT-23: two confirmed bookings can never share a reference; unconfirmed/legacy bookings are excluded.
+FlightBookingSchema.index(
+  { bookingReference: 1 },
+  { unique: true, sparse: true },
+);

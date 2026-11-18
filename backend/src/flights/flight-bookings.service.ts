@@ -31,6 +31,10 @@ import { FlightBookingSummaryResponseDto } from './dto/flight-booking-summary-re
 import { HoldFlightBookingDto } from './dto/hold-flight-booking.dto';
 import { FlightBookingProvider } from './flight-booking.provider';
 import {
+  FlightETicketFile,
+  FlightETicketService,
+} from './flight-eticket.service';
+import {
   BookingPassenger,
   FlightBooking,
   FlightBookingLean,
@@ -111,6 +115,7 @@ export class FlightBookingsService {
     private readonly airlines: AirlinesService,
     private readonly bookingProvider: FlightBookingProvider,
     private readonly bookingLifecycle: BookingLifecycle,
+    private readonly etickets: FlightETicketService,
   ) {}
 
   /** FLT-19: derive passenger types from date of birth and create the pending booking with baggage details. */
@@ -352,6 +357,57 @@ export class FlightBookingsService {
       currency: payable.currency,
       status: payable.status,
       holdExpiresAt: payable.holdExpiresAt?.toISOString() ?? null,
+    };
+  }
+
+  /**
+   * FLT-23: generate the owner's e-ticket for a confirmed booking that has a reference. Someone
+   * else's booking and a missing one both answer 404 (ids cannot be probed); a booking that is not
+   * confirmed, or a historical confirmed booking without a reference, answers 409. The PDF is
+   * rendered for this request only and never stored.
+   */
+  async getETicket(
+    user: AuthenticatedUser,
+    id: string,
+  ): Promise<FlightETicketFile> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new NotFoundException('Flight booking not found');
+    }
+    const booking = await this.model
+      .findOne({
+        _id: new Types.ObjectId(id),
+        userId: new Types.ObjectId(user.userId),
+      })
+      .lean<FlightBookingLean>()
+      .exec();
+    if (!booking) throw new NotFoundException('Flight booking not found');
+    if (booking.status !== BookingStatus.CONFIRMED) {
+      throw new ConflictException(
+        'An e-ticket is available only after the booking is confirmed',
+      );
+    }
+    if (!booking.bookingReference) {
+      throw new ConflictException('This booking has no e-ticket reference');
+    }
+
+    const segments = getFlightBookingSegments(booking);
+    const segmentFlights = await Promise.all(
+      segments.map((segment) =>
+        this.flights.findById(segment.flightId).lean<FlightLean>().exec(),
+      ),
+    );
+    if (segmentFlights.some((flight) => flight === null)) {
+      throw new NotFoundException('A booked flight segment was not found');
+    }
+
+    const data = this.etickets.buildData(
+      booking,
+      segmentFlights as FlightLean[],
+    );
+    return {
+      buffer: await this.etickets.render(data),
+      filename: `e-ticket-${booking.bookingReference}.pdf`,
+      bookingReference: booking.bookingReference,
     };
   }
 
