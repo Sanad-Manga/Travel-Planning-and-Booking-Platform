@@ -19,7 +19,12 @@ import {
 } from '../common';
 import { AirlinesService } from '../airlines';
 import { BookingLifecycle } from '../payments';
+import { RefundsService, RefundSummary } from '../refunds';
 import { FlightInventoryService } from './flight-inventory.service';
+import {
+  FlightBookingRefundDto,
+  FlightBookingSummaryResponseDto,
+} from './dto/flight-booking-summary-response.dto';
 import {
   FlightBookingResponseDto,
   toBookingPassengerResponse,
@@ -27,9 +32,12 @@ import {
   toFlightBookingResponse,
 } from './dto/flight-booking-response.dto';
 import { CreateFlightBookingDto } from './dto/create-flight-booking.dto';
-import { FlightBookingSummaryResponseDto } from './dto/flight-booking-summary-response.dto';
 import { HoldFlightBookingDto } from './dto/hold-flight-booking.dto';
 import { FlightBookingProvider } from './flight-booking.provider';
+import {
+  FlightETicketFile,
+  FlightETicketService,
+} from './flight-eticket.service';
 import {
   BookingPassenger,
   FlightBooking,
@@ -111,6 +119,8 @@ export class FlightBookingsService {
     private readonly airlines: AirlinesService,
     private readonly bookingProvider: FlightBookingProvider,
     private readonly bookingLifecycle: BookingLifecycle,
+    private readonly etickets: FlightETicketService,
+    private readonly refunds: RefundsService,
   ) {}
 
   /** FLT-19: derive passenger types from date of birth and create the pending booking with baggage details. */
@@ -278,7 +288,12 @@ export class FlightBookingsService {
     return [{ flightId: dto.flightId, cabinClass: dto.cabinClass }];
   }
 
-  /** FLT-21: show the pending summary only to its owner, resolving an overdue hold before returning it. */
+  /**
+   * FLT-21/FLT-23: show the booking only to its owner, resolving an overdue hold first. While the booking
+   * waits for payment the response is the unchanged pending summary; once it is confirmed the same shape is
+   * returned with the booking reference, status CONFIRMED and a null hold expiry. Another owner and an
+   * unknown id both answer 404, and expired/cancelled bookings keep answering 409.
+   */
   async getSummary(
     user: AuthenticatedUser,
     id: string,
@@ -305,11 +320,12 @@ export class FlightBookingsService {
     const payable = await this.bookingProvider.getPayable(id, user.userId);
     if (!payable) throw new NotFoundException('Flight booking not found');
     if (
-      booking.status !== BookingStatus.PENDING_PAYMENT ||
-      payable.status !== BookingStatus.PENDING_PAYMENT
+      (booking.status !== BookingStatus.PENDING_PAYMENT &&
+        booking.status !== BookingStatus.CONFIRMED) ||
+      payable.status !== booking.status
     ) {
       throw new ConflictException(
-        'A summary is available only while the booking is pending payment',
+        'A booking is available only while it is pending payment or after it is confirmed',
       );
     }
 
@@ -336,6 +352,12 @@ export class FlightBookingsService {
       );
     }
 
+    // PAY-03's published read contract: the refund is its exact summary, or null when none was issued.
+    const refund =
+      booking.status === BookingStatus.CONFIRMED
+        ? await this.refunds.getLatestForBooking(BookingType.FLIGHT, id)
+        : null;
+
     return {
       id: booking._id.toString(),
       flight: outboundSummary.flight,
@@ -352,6 +374,76 @@ export class FlightBookingsService {
       currency: payable.currency,
       status: payable.status,
       holdExpiresAt: payable.holdExpiresAt?.toISOString() ?? null,
+      ...(booking.bookingReference
+        ? { bookingReference: booking.bookingReference }
+        : {}),
+      ...(booking.status === BookingStatus.CONFIRMED
+        ? { refund: refund ? this.toRefundResponse(refund) : null }
+        : {}),
+    };
+  }
+
+  private toRefundResponse(refund: RefundSummary): FlightBookingRefundDto {
+    return {
+      id: refund.id,
+      bookingType: refund.bookingType,
+      bookingId: refund.bookingId,
+      status: refund.status,
+      amountCents: refund.amountCents,
+      currency: refund.currency,
+      ...(refund.reason !== undefined ? { reason: refund.reason } : {}),
+      createdAt: refund.createdAt,
+    };
+  }
+
+  /**
+   * FLT-23: generate the owner's e-ticket for a confirmed booking that has a reference. Someone
+   * else's booking and a missing one both answer 404 (ids cannot be probed); a booking that is not
+   * confirmed, or a historical confirmed booking without a reference, answers 409. The PDF is
+   * rendered for this request only and never stored.
+   */
+  async getETicket(
+    user: AuthenticatedUser,
+    id: string,
+  ): Promise<FlightETicketFile> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new NotFoundException('Flight booking not found');
+    }
+    const booking = await this.model
+      .findOne({
+        _id: new Types.ObjectId(id),
+        userId: new Types.ObjectId(user.userId),
+      })
+      .lean<FlightBookingLean>()
+      .exec();
+    if (!booking) throw new NotFoundException('Flight booking not found');
+    if (booking.status !== BookingStatus.CONFIRMED) {
+      throw new ConflictException(
+        'An e-ticket is available only after the booking is confirmed',
+      );
+    }
+    if (!booking.bookingReference) {
+      throw new ConflictException('This booking has no e-ticket reference');
+    }
+
+    const segments = getFlightBookingSegments(booking);
+    const segmentFlights = await Promise.all(
+      segments.map((segment) =>
+        this.flights.findById(segment.flightId).lean<FlightLean>().exec(),
+      ),
+    );
+    if (segmentFlights.some((flight) => flight === null)) {
+      throw new NotFoundException('A booked flight segment was not found');
+    }
+
+    const data = this.etickets.buildData(
+      booking,
+      segmentFlights as FlightLean[],
+    );
+    return {
+      buffer: await this.etickets.render(data),
+      filename: `e-ticket-${booking.bookingReference}.pdf`,
+      bookingReference: booking.bookingReference,
     };
   }
 
