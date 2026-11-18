@@ -70,12 +70,14 @@ export class AuthController {
   @HttpCode(200)
   @ApiOperation({
     summary: 'Renew the session using the refresh_token cookie. Sets a new access_token and refresh_token (a sliding 30 minutes).',
+    description:
+      'Refresh tokens rotate and are single use: the cookie sent here is consumed, and replaying it (or sending it twice at the same moment) returns 401. Only the newest refresh cookie works. Logout invalidates the current refresh token. Access tokens are stateless and stay valid until they expire (up to 15 minutes), also after logout.',
   })
   @ApiOkResponse({ type: UserResponseDto, description: 'The current user. The new tokens are only in the Set-Cookie headers.' })
   @ApiUnauthorizedResponse({
     type: ErrorResponseDto,
     description:
-      'Missing, invalid, expired, revoked or outdated-version refresh cookie, inactive account, or forced password replacement pending. Same generic message for all; both cookies are cleared.',
+      'Missing, invalid, expired, revoked, already used (replayed) or outdated-version refresh cookie, inactive account, or forced password replacement pending. Same generic message for all; both cookies are cleared.',
   })
   async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response): Promise<UserResponseDto> {
     const secure = this.config.get<boolean>('cookieSecure') ?? false;
