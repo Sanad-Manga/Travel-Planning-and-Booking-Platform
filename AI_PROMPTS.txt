@@ -1792,6 +1792,11 @@ The suite passed all 1325 tests; only afterAll(app.close) failed. It could not b
 Date: 2026-11-18
 Student: Yusuf Eser
 Tool: Claude (Claude Code, Opus 5.5)
+Related Requirement: BON-02 (SCRUM-117, bonus) Favourites list (hotels and public itineraries)
+Prompt:
+Implement BON-02 following contracts.md: new /api/favourites endpoints where a registered user saves hotels and public itineraries and views their list. Guest 401, no duplicates, only existing hotels and public itineraries, a user sees only their own list. Reference other modules' entities by id only and do not edit them.
+How the output was used:
+The assistant created a new favourites module: Favourite schema (userId, type HOTEL|ITINERARY, itemId; unique index on all three), AddFavouriteDto, FavouriteDto, FavouritesService and FavouritesController (POST, GET paginated with paginate(), DELETE /:id), registered in app.module.ts. A hotel must exist and be active (read through the Hotel model that HotelsModule exports); an itinerary must pass ItinerariesPublicService.loadPublic (PUBLIC, not hidden, author ACTIVE). A duplicate save is caught through the unique index (E11000) and returns the existing favourite with 200 instead of 201, which also covers two requests at the same time. Items that stop being available stay listed with available=false and name=null, so a title made private never leaks. Every query filters on the caller's id. I accepted DELETE as part of "a favourites list" (flagged in the PR). One row was added to the GEN-05 table in test/pagination.e2e-spec.ts. Verification: build, lint, the new e2e suite (8 tests incl. a 3-request race) and the pagination, account-status, guest-401, validation, hotel-search and itineraries e2e suites pass with --runInBand. Not done: a manual Swagger click-through against Atlas.
 Related Requirement: BLG-12 (SCRUM-102) Public author page (posts + public itineraries)
 Prompt:
 Implement BLG-12 following contracts.md: public GET /api/authors/:id showing the author's name, join date, published posts and public itineraries; a deactivated author is 404; no private user data; lists paginated with PaginationDto/paginate(); malformed id 404. Do not edit the itineraries or users modules; read them through their services or models via DI. Add e2e tests and docs.
