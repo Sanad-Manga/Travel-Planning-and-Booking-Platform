@@ -8,6 +8,7 @@ import { PAYMENT_ACTIVITY } from './payment-activity';
 import { PaymentsController } from './payments.controller';
 import { PaymentsService } from './payments.service';
 import { PolicyAcceptanceService } from './policy-acceptance.service';
+import { RefundsModule } from '../refunds';
 import { Payment, PaymentSchema } from './schemas/payment.schema';
 import {
   PolicyAcceptance,
@@ -25,6 +26,7 @@ import { StripePaymentActivity } from './stripe-payment-activity';
       { name: PolicyAcceptance.name, schema: PolicyAcceptanceSchema },
       { name: Payment.name, schema: PaymentSchema },
     ]),
+    RefundsModule,
   ],
   controllers: [BookingPoliciesController, PaymentsController],
   providers: [
