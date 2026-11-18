@@ -417,6 +417,35 @@ describe('PaymentsService', () => {
       ]);
     });
 
+    it('re-detects the amount mismatch on a retried webhook after a transient refund failure, instead of wrongly confirming', async () => {
+      acceptPolicies();
+      const created = await service.create(user(OWNER_ID), { bookingType: BookingType.FLIGHT, bookingId: BOOKING_ID });
+      const row = (await paymentModel.findById(created.id).lean().exec()) as PaymentLean;
+      refunds.failNextIssueOnce = true;
+
+      await expect(
+        service.handleWebhookEvent(paymentIntentEvent('payment_intent.succeeded', row.stripePaymentIntentId, 1, 'usd')),
+      ).rejects.toThrow('transient refund-gateway hiccup');
+
+      // Both the status rollback AND the amountCents correction must be undone together — a stale
+      // corrected amountCents with a reverted status would make the retry below see
+      // intent.amount === payment.amountCents and wrongly take the normal confirm path.
+      const afterFailure = (await paymentModel.findById(created.id).lean().exec()) as PaymentLean;
+      expect(afterFailure.status).toBe(PaymentStatus.REQUIRES_PAYMENT);
+      expect(afterFailure.amountCents).toBe(25_000);
+      expect(refunds.issued).toHaveLength(0);
+
+      await expect(
+        service.handleWebhookEvent(paymentIntentEvent('payment_intent.succeeded', row.stripePaymentIntentId, 1, 'usd')),
+      ).resolves.toBeUndefined();
+
+      expect(flights.status(BOOKING_ID)).toBe(BookingStatus.PENDING_PAYMENT); // never wrongly confirmed
+      const afterRetry = (await paymentModel.findById(created.id).lean().exec()) as PaymentLean;
+      expect(afterRetry.status).toBe(PaymentStatus.SUCCEEDED);
+      expect(afterRetry.amountCents).toBe(1);
+      expect(refunds.issued).toHaveLength(1);
+    });
+
     it('does not auto-refund when the currency itself disagrees, leaving it for manual review', async () => {
       acceptPolicies();
       const created = await service.create(user(OWNER_ID), { bookingType: BookingType.FLIGHT, bookingId: BOOKING_ID });

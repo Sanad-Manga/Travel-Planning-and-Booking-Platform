@@ -156,11 +156,17 @@ export class PaymentsService {
         `PaymentIntent ${intent.id} succeeded with amount ${intent.amount} ${intent.currency}, expected ${payment.amountCents} ${payment.currency}`,
       );
       if (intent.currency.toUpperCase() === payment.currency.toUpperCase()) {
-        // Same currency, only the amount disagrees: refund exactly what Stripe actually charged,
-        // correcting our own record first so RefundsService.issue's own "never refund more than
-        // was paid" guard compares against reality rather than our (wrong) expectation.
-        payment.amountCents = intent.amount;
-        await this.issueRefundForUnconfirmedPayment(payment, intent.amount, 'Charged amount did not match the expected amount for this booking');
+        // Same currency, only the amount disagrees: refund exactly what Stripe actually charged.
+        // The amountCents correction is applied by the helper itself, alongside the status change
+        // (and rolled back together with it on a transient failure) — never written here on its
+        // own, or a failed-then-retried refund would see intent.amount === payment.amountCents on
+        // the retry and wrongly take the normal confirm path instead of re-entering this branch.
+        await this.issueRefundForUnconfirmedPayment(
+          payment,
+          intent.amount,
+          'Charged amount did not match the expected amount for this booking',
+          intent.amount,
+        );
       } else {
         // The currency itself disagrees (PAY-04: this platform only ever uses one) — too unusual
         // to resolve automatically; stays visible for manual review rather than guessing.
@@ -197,9 +203,16 @@ export class PaymentsService {
    * PR #106). `RefundsService.issue` is itself idempotent — a retry after it already succeeded
    * throws `ConflictException`, which is treated as "already done", not an error.
    */
-  private async issueRefundForUnconfirmedPayment(payment: PaymentDocument, refundAmountCents: number, reason: string): Promise<void> {
+  private async issueRefundForUnconfirmedPayment(
+    payment: PaymentDocument,
+    refundAmountCents: number,
+    reason: string,
+    correctedAmountCents?: number,
+  ): Promise<void> {
     const previousStatus = payment.status;
+    const previousAmountCents = payment.amountCents;
     payment.status = PaymentStatus.SUCCEEDED;
+    if (correctedAmountCents !== undefined) payment.amountCents = correctedAmountCents;
     await payment.save();
     try {
       await this.refunds.issue({
@@ -210,7 +223,11 @@ export class PaymentsService {
       });
     } catch (error) {
       if (error instanceof ConflictException) return; // already issued by a prior attempt — fine
+      // Both fields roll back together: a stale corrected amountCents with a reverted status would
+      // make a Stripe retry wrongly see intent.amount === payment.amountCents and take the normal
+      // confirm path instead of re-entering the mismatch branch above.
       payment.status = previousStatus;
+      payment.amountCents = previousAmountCents;
       await payment.save();
       throw error;
     }
