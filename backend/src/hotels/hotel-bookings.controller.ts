@@ -1,4 +1,4 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Get, NotFoundException, Param, Post } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
@@ -6,6 +6,7 @@ import {
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
+  ApiOkResponse,
   ApiOperation,
   ApiTags,
   ApiUnauthorizedResponse,
@@ -21,6 +22,23 @@ import { HotelBookingsService } from './hotel-bookings.service';
 @Controller('hotel-bookings')
 export class HotelBookingsController {
   constructor(private readonly bookings: HotelBookingsService) {}
+
+  @Get(':id')
+  @Roles(Role.USER)
+  @ApiOperation({
+    summary: 'Get an owned hotel reservation and its payment confirmation (HTL-17)',
+    description: 'Returns the authenticated traveler’s hotel reservation, including CONFIRMED status and bookingReference after successful payment.',
+  })
+  @ApiOkResponse({ type: HotelBookingResponseDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto, description: 'Hotel booking not found' })
+  async getById(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+  ): Promise<HotelBookingResponseDto> {
+    const booking = await this.bookings.getForUser(id, user.userId);
+    if (!booking) throw new NotFoundException('Hotel booking not found');
+    return booking;
+  }
 
   @Post()
   @Roles(Role.USER)

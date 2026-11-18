@@ -1727,6 +1727,15 @@ Verification completed for the corrected integration worktree (2026-11-17): focu
 Final checks passed: exactly 16 intended integration paths; no conflicts, unrelated implementation changes or environment files; original and backup hashes/branch/HEAD/status plus both AI histories preserved. The complete integration snapshot is staged (12 modified, 4 added) but uncommitted; original work remains 12 unstaged modifications and 4 untracked files. Exact status/log captures are outside the repositories. No commits, pushes, merges/rebases, PR/Jira changes or destructive cleanup occurred.
 ================================================
 Date: 2026-11-18
+Student: Hessain Elrefaey
+Tool: Copilot (VS Code)
+Related Requirement: HTL-17 (Confirm reservation after payment)
+Prompt:
+Implement only HTL-17 on a fresh branch from latest develop. After payment, all rooms in the reservation are CONFIRMED, one unique booking reference is generated, and the traveler receives an in-app notification. Confirmation must be idempotent and work through BookingLifecycle's late-paid expiry path without assuming a Stripe event object. Confirmation must be visible from GET /api/hotel-bookings/:id. Add Swagger, tests, and API docs; preserve separate ticket scope.
+How the output was used:
+Verified that the merged HTL-18/base already has transactional and idempotent HotelBookingsService.markConfirmed, the unique bookingReference index, one-time confirmation notification, and BookingLifecycle's PaymentActivity-driven late-paid path. Added the missing owner-scoped GET /api/hotel-bookings/:id endpoint and mapped bookingReference plus nullable holdExpiresAt in the response DTO. Expanded E2E coverage for repeated confirmation, multi-room confirmation, unique references, single notifications, owner-only confirmation lookup, and a late-paid lifecycle result without a Stripe event object. Updated Swagger and hotel booking API documentation. No Payments module files were changed.
+================================================
+Date: 2026-11-18
 Student: Yusuf Ugurhan
 Tool: Claude Code
 Related Requirement: BLG-10 (SCRUM-78), rework of Mohamed Walid's branch (scrum master asked us to redo the ticket)

@@ -274,6 +274,15 @@ export class HotelBookingsService implements RoomReservations, BookingProvider, 
     return outcome.kind !== 'REFUSED';
   }
 
+  async getForUser(id: string, userId: string): Promise<HotelBookingResponseDto | null> {
+    if (!Types.ObjectId.isValid(id) || !Types.ObjectId.isValid(userId)) return null;
+    const booking = await this.bookings
+      .findOne({ _id: new Types.ObjectId(id), userId: new Types.ObjectId(userId) })
+      .lean<HotelBookingLean>()
+      .exec();
+    return booking ? HotelBookingResponseDto.from(booking) : null;
+  }
+
   async getPolicies(id: string): Promise<BookingPolicies | null> {
     if (!Types.ObjectId.isValid(id)) return null;
     const booking = await this.bookings
