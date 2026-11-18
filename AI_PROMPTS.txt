@@ -1988,6 +1988,43 @@ Verification: tsc --noEmit and eslint clean. New tests: `stripe-payment-activity
 unreachable Stripe, in-flight row left untouched) and two in `payments.service.spec.ts` (create/retry each
 return ServiceUnavailableException when Stripe is down). Scoped unit (`src/payments`, `src/refunds`): 146/146
 pass. Related e2e (`payments-webhook`, `payments-concurrency`, capped at 2 workers): 5/5 pass.
+Date: 2026-11-18
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-07 (SCRUM-111, bonus) Email-based forgotten password
+Prompt:
+Implement only SCRUM-111 / ACC-07 following docs/contracts.md: POST /api/auth/forgot-password (always the same 200,
+only an ACTIVE account is emailed, sending happens after the response and a failed send changes nothing) and
+POST /api/auth/reset-password (token = 32 random bytes base64url, only its SHA-256 hash stored, 30 minute expiry,
+single use via one compare-and-set, a newer request invalidates older links, one generic 400 on `token`, new bcrypt
+hash with compare-and-set on the old hash, tokenVersion bump, lockout and temporary-password state cleared, no
+auto-login). Use EmailService from the email module, add unit and e2e tests (parallel resets, parallel requests,
+expiry, session kill), docs/api/forgot-password.md, Swagger on both routes, and report assumptions and gaps.
+How the output was used:
+Added PasswordResetService, the passwordResetTokens schema (one row per user, so one atomic upsert supersedes older
+links even for parallel requests), two DTOs, the two @Public() routes in AuthController, and
+UsersService.completeEmailPasswordReset (the only change outside the auth folder files). Found by the e2e test that an
+upsert stored userId as a string, and fixed it with an explicit ObjectId. Verified: lint and build clean; full unit
+(--runInBand) 76 suites / 1140 tests pass; full e2e (--runInBand) 58 suites / 1408 tests pass. A parallel unit run
+showed mongodb-memory-server start-up timeouts in unrelated suites; they pass when run serially.
+
+Date: 2026-11-18
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: SCRUM-111 / ACC-07 review follow-up (rate limiting on forgot-password)
+Prompt:
+Sanad asked for rate limiting on PR #128. In the auth module only, no new dependency: a 60 second per-email cooldown on POST /api/auth/forgot-password (no token, no email, identical 200, old link stays valid, check and write in one atomic conditional upsert), and an in-memory fixed-window per-IP limiter (10 requests per 15 minutes, separate counters per route, 429 in the standard error shape with Retry-After, purged and overridable for tests) on forgot-password and reset-password. Update Swagger and docs/api/forgot-password.md, add unit and e2e tests.
+How the output was used:
+The assistant added requestedAt to the password reset token row and changed storeToken into one conditional upsert whose filter only matches a row older than the cooldown (or without requestedAt); a row inside the cooldown makes the upsert hit the unique userId index (11000), which is treated as the silent cooldown, so parallel requests send exactly one email. It added auth-rate-limit.ts (AuthRateLimiter, AuthRateLimitGuard, AuthRateLimited marker, AUTH_RATE_LIMIT_CONFIG token registered in AuthModule so tests can override it), put the guard on the two routes, added the 429 Swagger responses and rewrote the rate limiting section of the doc. Existing ACC-07 e2e tests that sent a second request for the same account now move requestedAt back, and that spec raises the IP limit. I reviewed the code, ran lint, build, unit and e2e tests.
+
+Date: 2026-11-18
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: SCRUM-111 / ACC-07 review follow-up (rate limiting on forgot-password)
+Prompt:
+Sanad asked for rate limiting on PR #128. In the auth module only, no new dependency: a 60 second per-email cooldown on POST /api/auth/forgot-password (no token, no email, identical 200, old link stays valid, check and write in one atomic conditional upsert), and an in-memory fixed-window per-IP limiter (10 requests per 15 minutes, separate counters per route, 429 in the standard error shape with Retry-After, purged and overridable for tests) on forgot-password and reset-password. Update Swagger and docs/api/forgot-password.md, add unit and e2e tests.
+How the output was used:
+The assistant added requestedAt to the password reset token row and changed storeToken into one conditional upsert whose filter only matches a row older than the cooldown (or without requestedAt); a row inside the cooldown makes the upsert hit the unique userId index (11000), which is treated as the silent cooldown, so parallel requests send exactly one email. It added auth-rate-limit.ts (AuthRateLimiter, AuthRateLimitGuard, AuthRateLimited marker, AUTH_RATE_LIMIT_CONFIG token registered in AuthModule so tests can override it), put the guard on the two routes, added the 429 Swagger responses and rewrote the rate limiting section of the doc. Existing ACC-07 e2e tests that sent a second request for the same account now move requestedAt back, and that spec raises the IP limit. I reviewed the code, ran lint, build, unit and e2e tests.
 
 Date: 2026-11-18
 Student: Abdulrahman Mohamad Hosny
