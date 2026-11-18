@@ -4,6 +4,9 @@ import { APP_GUARD } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ACCOUNT_STATUS_CHECKER, JwtAuthGuard, RolesGuard } from '../common';
+import { EmailModule } from '../email';
+import { EmailVerificationService } from './email-verification.service';
+import { EmailVerificationToken, EmailVerificationTokenSchema } from './schemas/email-verification-token.schema';
 import { UsersModule } from '../users/users.module';
 import { UsersService } from '../users/users.service';
 import { ACCESS_TOKEN_TTL_SECONDS } from './auth-cookies';
@@ -16,7 +19,11 @@ import { TokenRevocationService } from './token-revocation.service';
 @Module({
   imports: [
     UsersModule,
-    MongooseModule.forFeature([{ name: RevokedToken.name, schema: RevokedTokenSchema }]),
+    EmailModule,
+    MongooseModule.forFeature([
+      { name: RevokedToken.name, schema: RevokedTokenSchema },
+      { name: EmailVerificationToken.name, schema: EmailVerificationTokenSchema },
+    ]),
     // The factory runs at start-up: readJwtSecrets throws if a secret is missing or shorter than 32 characters.
     // The module-level secret is the ACCESS secret; refresh tokens will pass their own secret explicitly.
     JwtModule.registerAsync({
@@ -31,6 +38,7 @@ import { TokenRevocationService } from './token-revocation.service';
   controllers: [AuthController],
   providers: [
     AuthService,
+    EmailVerificationService,
     TokenRevocationService,
     // JwtAuthGuard reads ACTIVE status, tokenVersion and forced-change state on every protected request.
     { provide: ACCOUNT_STATUS_CHECKER, useExisting: UsersService },

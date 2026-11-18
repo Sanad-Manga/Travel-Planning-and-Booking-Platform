@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Patch, Post, Req, Res, UnauthorizedException } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Patch, Post, Query, Req, Res, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   ApiBadRequestResponse,
@@ -17,6 +17,9 @@ import { Request, Response } from 'express';
 import { AllowWhenMustChange, AuthenticatedUser, CurrentUser, ErrorResponseDto, Public, REFRESH_TOKEN_COOKIE } from '../common';
 import { clearAuthCookies, setAuthCookies } from './auth-cookies';
 import { AuthService } from './auth.service';
+import { EmailVerificationService } from './email-verification.service';
+import { VerifyEmailQueryDto } from './dto/verify-email-query.dto';
+import { VerifyEmailResponseDto } from './dto/verify-email-response.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { LogoutResponseDto } from './dto/logout-response.dto';
@@ -28,17 +31,37 @@ import { UserResponseDto } from './dto/user-response.dto';
 export class AuthController {
   constructor(
     private readonly authService: AuthService,
+    private readonly emailVerification: EmailVerificationService,
     private readonly config: ConfigService,
   ) {}
 
   @Public()
   @Post('register')
-  @ApiOperation({ summary: 'Register a new user account (role USER). Does not log the user in.' })
+  @ApiOperation({
+    summary: 'Register a new user account (role USER). Does not log the user in.',
+    description: 'Also emails a verification link (ACC-02, sent in the background; a send failure never fails registration). The account starts with emailVerified=false; GET /api/auth/verify-email verifies it.',
+  })
   @ApiCreatedResponse({ type: UserResponseDto })
   @ApiBadRequestResponse({ type: ErrorResponseDto, description: 'Invalid email, weak password, missing consent or unknown field' })
   @ApiConflictResponse({ type: ErrorResponseDto, description: 'Email already registered' })
   register(@Body() dto: RegisterDto): Promise<UserResponseDto> {
     return this.authService.register(dto);
+  }
+
+  // @Public: the user clicks the link from an email and has no session. The token itself is the credential.
+  @Public()
+  @Get('verify-email')
+  @ApiOperation({
+    summary: 'Verify the email address with the token from the registration email (ACC-02).',
+    description: 'The token is single use and valid for 24 hours. Until the email is verified, booking-creation routes protected with @RequireVerifiedEmail() answer 403.',
+  })
+  @ApiOkResponse({ type: VerifyEmailResponseDto, description: 'Email verified (or already verified).' })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: 'Field-level error on `token`: missing, or "invalid or expired verification link" (unknown, expired, already used, or the account is not ACTIVE).',
+  })
+  verifyEmail(@Query() query: VerifyEmailQueryDto): Promise<VerifyEmailResponseDto> {
+    return this.emailVerification.verify(query.token);
   }
 
   @Public()

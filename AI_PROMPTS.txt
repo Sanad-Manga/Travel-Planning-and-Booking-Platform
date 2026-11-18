@@ -1980,3 +1980,12 @@ Verification: tsc --noEmit and eslint clean. New tests: `stripe-payment-activity
 unreachable Stripe, in-flight row left untouched) and two in `payments.service.spec.ts` (create/retry each
 return ServiceUnavailableException when Stripe is down). Scoped unit (`src/payments`, `src/refunds`): 146/146
 pass. Related e2e (`payments-webhook`, `payments-concurrency`, capped at 2 workers): 5/5 pass.
+
+Date: 2026-11-18
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: SCRUM-110 / ACC-02 (bonus) Email verification before booking
+Prompt:
+Implement only SCRUM-110 / ACC-02 following contracts.md, in the auth module plus the smallest additions to the User schema, UserResponseDto and users.service: a verification link emailed after registration (background, failure never fails registration), GET /api/auth/verify-email (public, single-use token stored only as a SHA-256 hash, 24 hour expiry, one generic field-level 400 for bad tokens), an emailVerified flag where only an explicit false blocks, and an exported RequireVerifiedEmail() decorator for the booking owners, without touching any booking controller, the email module or common/. Add unit and e2e tests (using a test-only controller) and docs/api/email-verification.md.
+How the output was used:
+The assistant added the emailVerificationTokens schema (userId unique, TTL index on expiresAt), EmailVerificationService (issue, issueAndSend, sendInBackground, verify using one atomic findOneAndDelete so only one of several parallel requests wins), the verify-email route with a VerifyEmailQueryDto, UsersService helpers (markEmailVerified, isEmailUnverified, isEmailVerifiedActive), and RequireVerifiedEmailGuard. The guard reads emailVerified through ModuleRef because the principal built by the global JwtAuthGuard (common/) does not carry it. Registration now saves emailVerified: false and starts the send in the background. I reviewed the design, ran lint, build, unit and e2e tests, and will open the PR myself.

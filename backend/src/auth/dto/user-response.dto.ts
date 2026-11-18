@@ -22,6 +22,9 @@ export class UserResponseDto {
   @ApiProperty({ enum: AccountStatus, example: AccountStatus.ACTIVE })
   status: AccountStatus;
 
+  @ApiProperty({ example: true, description: 'False only while the registration email link has not been used yet; booking is blocked until then. Accounts without the flag count as verified.' })
+  emailVerified: boolean;
+
   @ApiPropertyOptional({ description: 'Only for airline moderators.' })
   airlineId?: string;
 
@@ -48,6 +51,7 @@ export class UserResponseDto {
       email: user.email,
       role: user.role,
       status: user.status,
+      emailVerified: user.emailVerified !== false,
       ...(user.airlineId ? { airlineId: user.airlineId.toString() } : {}),
       ...(user.hotelId ? { hotelId: user.hotelId.toString() } : {}),
       preferredCurrency: user.preferredCurrency,
