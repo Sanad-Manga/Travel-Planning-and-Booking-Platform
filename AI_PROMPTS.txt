@@ -1837,6 +1837,50 @@ How the output was used:
 The suite passed all 1325 tests; only afterAll(app.close) failed. It could not be reproduced by running the suite alone or in parallel, but the database-failure test was the suspect: it mocked countDocuments to throw synchronously, and paginate() builds Promise.all([find.exec(), countDocuments.exec()]) so the find was already running when the throw skipped Promise.all, leaving that query orphaned; closing the client in afterAll then interrupted it. Proved by running only that test (the error appeared 12 of 12 times across the three suites with the same pattern: admin-accounts, audit, airports) and by the same runs after the fix (0 of 9). Fix: the three mocks now return an object whose exec() rejects, like a real driver failure. No production code changed. Verification: lint, build, 1089 unit and 1330 e2e pass.
 ================================================
 Date: 2026-11-18
+Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code, Sonnet 5)
+Related Requirement: GEN-01-B (SCRUM-112, bonus) Email notifications via SMTP
+Prompt:
+Implement GEN-01-B against docs/contracts.md and the ticket's acceptance criteria/checklist: the existing GEN-01
+in-app notifications (plus moderator invitations) are also sent by email via SMTP, with a test inbox used in
+development, SMTP credentials only ever in env and never logged, an email failure must never break the in-app
+notification, and the sender must expose a simple API Ziad (ACC-02, ACC-07) can call directly. Confirmed in Jira
+first that this ticket's only real blocker (GEN-01) is Done — the "only after mandatory tickets pass" line in its
+description is informal guidance, not a Jira dependency. The moderator-invite email itself fires from
+backend/src/admin/moderator-accounts.service.ts, owned by Mohamed Walid, not me — build and publish the
+capability, do not touch his file.
+How the output was used:
+Added a new `email` module (sibling to `fx`/`refunds`/`payments`, per contracts.md's module list), using the
+`nodemailer` dependency that was already installed but unused. `EmailSender` interface + `EMAIL_SENDER` token +
+`SmtpEmailSender` (lazy transporter, same reasoning as StripePaymentGateway's lazy client: several e2e specs boot
+modules that pull this in without SMTP configured) + `FakeEmailSender` for tests, mirroring the StripeGateway/
+ExchangeRateProvider pattern exactly. With no SMTP_HOST configured, `SmtpEmailSender` creates and caches a
+throwaway Nodemailer Ethereal test account on first use and logs only the preview URL (never credentials) for
+each sent message — satisfies "a test inbox is used in development" with zero manual account setup. The published
+`EmailService.send({ to, subject, text, html? })` is a deliberately separate capability from
+`NotificationsService.notify()`, not a parameter on it: a moderator invite carries a plaintext temporary password,
+and routing that through `notify()` would persist it into the `notifications` collection (readable via
+GET /api/notifications) — a real data-hygiene bug. So `notify()` itself was extended (after the in-app
+Notification document is already saved, in its own try/catch) to also email the recipient the same title/message,
+resolving their address via the existing `UsersService.findById` (confirmed no import cycle: UsersModule only
+imports ReferenceDataModule); an email failure is logged and swallowed there, never affecting the already-saved
+in-app notification. SMTP_HOST/PORT/USER/PASSWORD/FROM were added to env.validation.ts as optional (same
+lazy-validation precedent as STRIPE_SECRET_KEY/FX_API_KEY — validated inside SmtpEmailSender itself, not at
+bootstrap) and to .env.example. docs/contracts.md section 7 gained an `EmailService.send` row, and section 9's
+Auth/Admin/Payments rows were updated so Ziad and Mohamed Walid know to call it from their own files.
+Verification: tsc --noEmit and eslint clean. New email-sender.spec.ts (mocks the nodemailer module: real-SMTP
+branch builds a transporter from env vars and never touches the test-account API; no-SMTP_HOST branch creates and
+caches one Ethereal test account across two send() calls; preview URL is logged, the test-account password never
+is) and email.service.spec.ts. Extended notifications.service.spec.ts: notify() emails the resolved address,
+skips silently when no email is resolvable, and an email failure is logged without affecting the already-saved
+notification or making notify() reject. The existing notifications.integration.spec.ts (real in-memory Mongo,
+full module graph) passed unmodified once UsersModule/EmailModule were wired in — no override needed. Scoped run
+(src/email, src/notifications): 6 suites / 63 tests pass. Not done: wiring EmailService.send into
+ModeratorAccountsService.create() or Ziad's ACC-02/ACC-07 — those are Mohamed Walid's and Ziad's own files per
+the module-ownership rule, flagged in the PR rather than touched.
+
+================================================
+Date: 2026-11-18
 Student: Hessain Elrefaey
 Tool: Copilot (VS Code)
 Related Requirement: Blog comment validation regression (audit of develop at 0e30eb5)
