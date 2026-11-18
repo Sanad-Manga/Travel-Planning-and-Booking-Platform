@@ -19,7 +19,12 @@ import {
 } from '../common';
 import { AirlinesService } from '../airlines';
 import { BookingLifecycle } from '../payments';
+import { RefundsService, RefundSummary } from '../refunds';
 import { FlightInventoryService } from './flight-inventory.service';
+import {
+  FlightBookingRefundDto,
+  FlightBookingSummaryResponseDto,
+} from './dto/flight-booking-summary-response.dto';
 import {
   FlightBookingResponseDto,
   toBookingPassengerResponse,
@@ -27,7 +32,6 @@ import {
   toFlightBookingResponse,
 } from './dto/flight-booking-response.dto';
 import { CreateFlightBookingDto } from './dto/create-flight-booking.dto';
-import { FlightBookingSummaryResponseDto } from './dto/flight-booking-summary-response.dto';
 import { HoldFlightBookingDto } from './dto/hold-flight-booking.dto';
 import { FlightBookingProvider } from './flight-booking.provider';
 import {
@@ -116,6 +120,7 @@ export class FlightBookingsService {
     private readonly bookingProvider: FlightBookingProvider,
     private readonly bookingLifecycle: BookingLifecycle,
     private readonly etickets: FlightETicketService,
+    private readonly refunds: RefundsService,
   ) {}
 
   /** FLT-19: derive passenger types from date of birth and create the pending booking with baggage details. */
@@ -347,6 +352,12 @@ export class FlightBookingsService {
       );
     }
 
+    // PAY-03's published read contract: the refund is its exact summary, or null when none was issued.
+    const refund =
+      booking.status === BookingStatus.CONFIRMED
+        ? await this.refunds.getLatestForBooking(BookingType.FLIGHT, id)
+        : null;
+
     return {
       id: booking._id.toString(),
       flight: outboundSummary.flight,
@@ -366,6 +377,22 @@ export class FlightBookingsService {
       ...(booking.bookingReference
         ? { bookingReference: booking.bookingReference }
         : {}),
+      ...(booking.status === BookingStatus.CONFIRMED
+        ? { refund: refund ? this.toRefundResponse(refund) : null }
+        : {}),
+    };
+  }
+
+  private toRefundResponse(refund: RefundSummary): FlightBookingRefundDto {
+    return {
+      id: refund.id,
+      bookingType: refund.bookingType,
+      bookingId: refund.bookingId,
+      status: refund.status,
+      amountCents: refund.amountCents,
+      currency: refund.currency,
+      ...(refund.reason !== undefined ? { reason: refund.reason } : {}),
+      createdAt: refund.createdAt,
     };
   }
 

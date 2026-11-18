@@ -272,9 +272,13 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
     jest.restoreAllMocks();
     nextPrepareExpiry = 'EXPIRE';
     await Promise.all(
-      ['flights', 'cabins', 'flightBookings', 'notifications'].map((name) =>
-        connection.collection(name).deleteMany({}),
-      ),
+      [
+        'flights',
+        'cabins',
+        'flightBookings',
+        'refunds',
+        'notifications',
+      ].map((name) => connection.collection(name).deleteMany({})),
     );
     await connection
       .collection('airlines')
@@ -1158,6 +1162,7 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
         'passportOrIdNumber',
       );
       expect(summary.body).not.toHaveProperty('bookingReference');
+      expect(summary.body).not.toHaveProperty('refund');
       expect(summary.body.holdExpiresAt).not.toBeNull();
     });
 
@@ -1216,6 +1221,7 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
         passengerCounts: { adults: 1, children: 0, infants: 0 },
         currency: 'USD',
         totalCents: 45000,
+        refund: null,
       });
       expect(details.body.flight).toMatchObject({
         id: flightId,
@@ -1283,6 +1289,7 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       expect(details.body.status).toBe('CONFIRMED');
       expect(details.body.bookingReference).toMatch(/^FLT-[0-9A-F]{16}$/);
       expect(details.body.holdExpiresAt).toBeNull();
+      expect(details.body.refund).toBeNull();
       expect(details.body.segments).toHaveLength(2);
       const segments = details.body.segments as Array<{
         flightId: string;
@@ -1308,6 +1315,62 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       expect(details.body.passengers[0]).not.toHaveProperty(
         'passportOrIdNumber',
       );
+    });
+
+    it("shows the latest refund through PAY-03's getLatestForBooking contract", async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10, 0, 0, 45000);
+      const bookingId = await hold(flightId);
+      await lifecycle.confirmPaid(
+        BookingType.FLIGHT,
+        bookingId,
+        'pi_summary_refund',
+      );
+      await connection.collection('refunds').insertMany([
+        {
+          bookingType: 'FLIGHT',
+          bookingId: new Types.ObjectId(bookingId),
+          userId: new Types.ObjectId(travelerId),
+          stripePaymentIntentId: 'pi_summary_refund',
+          stripeRefundId: 're_summary_older',
+          amountCents: 10000,
+          currency: 'USD',
+          status: 'PENDING',
+          createdAt: new Date('2026-11-18T09:00:00.000Z'),
+          updatedAt: new Date('2026-11-18T09:00:00.000Z'),
+        },
+        {
+          bookingType: 'FLIGHT',
+          bookingId: new Types.ObjectId(bookingId),
+          userId: new Types.ObjectId(travelerId),
+          stripePaymentIntentId: 'pi_summary_refund_2',
+          stripeRefundId: 're_summary_latest',
+          amountCents: 45000,
+          currency: 'USD',
+          status: 'REFUNDED',
+          reason: 'Cancelled per tier 2',
+          createdAt: new Date('2026-11-18T10:00:00.000Z'),
+          updatedAt: new Date('2026-11-18T10:00:00.000Z'),
+        },
+      ]);
+
+      const details = await http()
+        .get(`${BOOKING}/${bookingId}`)
+        .set('Cookie', traveler)
+        .expect(200);
+
+      expect(details.body.refund).toMatchObject({
+        bookingType: 'FLIGHT',
+        bookingId,
+        status: 'REFUNDED',
+        amountCents: 45000,
+        currency: 'USD',
+        reason: 'Cancelled per tier 2',
+        createdAt: '2026-11-18T10:00:00.000Z',
+      });
+      expect(details.body.refund).not.toHaveProperty('stripeRefundId');
+      expect(details.body.refund).not.toHaveProperty('stripePaymentIntentId');
+      expect(details.body.refund).not.toHaveProperty('userId');
     });
 
     it('hides a confirmed booking from another traveler', async () => {

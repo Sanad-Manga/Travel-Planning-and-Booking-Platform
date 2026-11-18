@@ -96,8 +96,9 @@ export class FlightBookingsController {
       'Returns flight, passenger, baggage and payable-total details for the booking owner. ' +
       'While the booking waits for payment this is the pending summary and the total is read from the same ' +
       'getPayable amount used by Payments. After payment it returns the confirmed booking with its unique ' +
-      'booking reference, status CONFIRMED, null hold expiry and every one-way or round-trip segment. ' +
-      'Passport/identity-document numbers and payment credentials are never included.',
+      'booking reference, status CONFIRMED, null hold expiry, every one-way or round-trip segment, and the ' +
+      'latest refund read through PAY-03\'s getLatestForBooking (null when none was issued). ' +
+      'Passport/identity-document numbers, Stripe ids and payment credentials are never included.',
   })
   @ApiOkResponse({ type: FlightBookingSummaryResponseDto })
   @ApiForbiddenResponse({
