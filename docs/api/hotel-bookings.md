@@ -133,3 +133,14 @@ Another traveler receives 404 for attempts to edit or delete it.
 Visible review averages and counts are recalculated after create, edit, and delete. The public
 `GET /api/hotels/:id` response includes `averageRating`, `reviewCount`, and visible reviews newest first. Hidden reviews
 are excluded. Reviews by deactivated authors show `Deleted user`.
+
+## Public hotel reviews (HTL-24)
+
+`GET /api/hotels/:id/reviews?page=1&limit=10` is available to guests. Only an existing active hotel is returned;
+malformed, missing, or inactive hotel ids answer 404. The response includes the average rating and count across
+visible reviews, plus a page of those reviews in newest-first order. Hidden reviews are excluded from both the page
+and its rating summary. Reviews by deactivated or missing authors show `Deleted user`.
+
+Pagination follows the shared contract: `page` defaults to 1, `limit` defaults to 10 and cannot exceed 50. The
+`reviews` property contains the standard `items`, `page`, `limit`, `total`, and `totalPages` envelope.
+`averageRating` is null when there are no visible reviews; `reviewCount` matches `reviews.total`.

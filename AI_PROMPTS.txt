@@ -2026,6 +2026,26 @@ Sanad asked for rate limiting on PR #128. In the auth module only, no new depend
 How the output was used:
 The assistant added requestedAt to the password reset token row and changed storeToken into one conditional upsert whose filter only matches a row older than the cooldown (or without requestedAt); a row inside the cooldown makes the upsert hit the unique userId index (11000), which is treated as the silent cooldown, so parallel requests send exactly one email. It added auth-rate-limit.ts (AuthRateLimiter, AuthRateLimitGuard, AuthRateLimited marker, AUTH_RATE_LIMIT_CONFIG token registered in AuthModule so tests can override it), put the guard on the two routes, added the 429 Swagger responses and rewrote the rate limiting section of the doc. Existing ACC-07 e2e tests that sent a second request for the same account now move requestedAt back, and that spec raises the IP limit. I reviewed the code, ran lint, build, unit and e2e tests.
 
+================================================
+Date: 2026-11-18
+Student: Hessain Elrefaey
+Tool: Copilot (VS Code)
+Related Requirement: HTL-24 (view hotel rating and reviews)
+Prompt:
+Implement HTL-24 after HTL-23: add a guest-accessible GET /api/hotels/:id/reviews endpoint with the visible average
+rating, rating/review count, newest-first pagination (default page size 10), hidden-review exclusion, and
+"Deleted user" for deactivated authors. Reuse HTL-23 review behavior, update Swagger, tests, and directly related docs,
+and keep the changes separate from other tickets.
+How the output was used:
+Added the public reviews route to the existing HotelDetailsController and delegated to HotelReviewsService. The service
+validates active hotels, paginates visible reviews through the shared PaginationDto/paginate contract, sorts by
+createdAt then _id descending, populates only author display fields, and calculates the visible average separately.
+Added response DTO documentation, E2E coverage for guest access, paging, hidden reviews, rating aggregation,
+deactivated authors, validation, 404s and Swagger, registered the route in the whole-app pagination E2E table, and
+documented HTL-24 in the hotel API docs. Changes are limited to the Hotels module and directly related tests/docs and
+AI_PROMPTS.txt. Verification: backend build and focused ESLint passed; `hotel-reviews.e2e-spec.ts`,
+`hotel-details.e2e-spec.ts`, and `pagination.e2e-spec.ts` passed (265 tests total).
+
 Date: 2026-11-18
 Student: Abdulrahman Mohamad Hosny
 Tool: OpenCode (DeepSeek V4.1 Flash Free)
@@ -2054,3 +2074,30 @@ RefundsModule (one line, flagged in the PR); no other module was edited. Known l
 reservation stays CANCELLED and the refund needs manual handling. Mutation checks: removing the owner filter failed the ownership test, and
 disabling the status guard failed five tests.
 Verification: lint and build pass; 1173 unit (81 suites) and 1480 e2e (60 suites, 3 workers) pass. Not done: a manual Swagger click-through against Atlas.
+
+Date: 2026-11-19
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: GitHub issue #119 (parallel Jest runs time out)
+Prompt:
+Take issue #119 (default npx jest and npm run test:e2e fail with hook timeouts because every worker starts its own in-memory mongod) and propose a fix.
+How the output was used:
+The assistant reproduced the failure, measured that mongod starts queue behind each other (about 2.4 s each, 4 concurrent already hit the 10 s launch limit) and that other sessions running tests at the same time make it worse, then added one Jest setup file (test/helpers/mongo-launch-timeout.ts) that raises the library launch timeout to 60 s for MongoMemoryServer and MongoMemoryReplSet, plus testTimeout 60000 in both Jest configs. Under the same machine load the control run without it failed on 1530 launch timeouts, with it 57 e2e suites (1429 tests) and 78 unit suites (1141 tests) passed with default workers. I read every file and ran lint, build and both suites.
+
+Date: 2026-11-18
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: SCRUM-110 / ACC-02 (bonus) Email verification before booking
+Prompt:
+Implement only SCRUM-110 / ACC-02 following contracts.md, in the auth module plus the smallest additions to the User schema, UserResponseDto and users.service: a verification link emailed after registration (background, failure never fails registration), GET /api/auth/verify-email (public, single-use token stored only as a SHA-256 hash, 24 hour expiry, one generic field-level 400 for bad tokens), an emailVerified flag where only an explicit false blocks, and an exported RequireVerifiedEmail() decorator for the booking owners, without touching any booking controller, the email module or common/. Add unit and e2e tests (using a test-only controller) and docs/api/email-verification.md.
+How the output was used:
+The assistant added the emailVerificationTokens schema (userId unique, TTL index on expiresAt), EmailVerificationService (issue, issueAndSend, sendInBackground, verify using one atomic findOneAndDelete so only one of several parallel requests wins), the verify-email route with a VerifyEmailQueryDto, UsersService helpers (markEmailVerified, isEmailUnverified, isEmailVerifiedActive), and RequireVerifiedEmailGuard. The guard reads emailVerified through ModuleRef because the principal built by the global JwtAuthGuard (common/) does not carry it. Registration now saves emailVerified: false and starts the send in the background. I reviewed the design, ran lint, build, unit and e2e tests, and will open the PR myself.
+
+Date: 2026-11-18
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: SCRUM-110 / ACC-02 review follow-up (resend verification link, PUBLIC_API_URL in configuration)
+Prompt:
+Sanad asked for two changes on PR #130. (1) POST /api/auth/resend-verification for the logged-in user, no body, not public: already verified (flag true or missing) gives 200 and no email; otherwise a new token (the one-row-per-user upsert invalidates the old link) is emailed in the background, a failed send never changes the response; a 60 second cooldown gives 429 with Retry-After, and the cooldown check plus token write are one atomic conditional upsert so parallel resends send one email; no IP limiter. (2) Read PUBLIC_API_URL through the shared configuration.ts and ConfigService, optional with default http://localhost:3001. Add unit and e2e tests, Swagger and docs.
+How the output was used:
+The assistant added requestedAt to the email verification token row and changed issue() into one conditional upsert that matches only a row older than the cooldown (or without requestedAt); a row inside the cooldown makes the upsert hit the unique userId index (11000), which resend() turns into ResendCooldownException (429, the controller sets Retry-After). Registration reuses the same issue(). A publicApiUrl setting was added to config/configuration.ts and the service reads it via ConfigService. I reviewed the code, ran lint, build, unit and e2e tests.

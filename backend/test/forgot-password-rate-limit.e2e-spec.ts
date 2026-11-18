@@ -70,7 +70,8 @@ describe('forgot-password rate limiting (e2e)', () => {
       await resets.whenIdle();
       return res;
     };
-    const sentTo = (email: string) => sender.sent.filter((m) => m.to === email);
+    // ACC-02 registration also emails a verification link; only the reset email is counted here.
+    const sentTo = (email: string) => sender.sent.filter((m) => m.to === email && m.subject === 'Reset your password');
 
     beforeAll(async () => {
       ({ app, connection, resets } = await boot(10_000));

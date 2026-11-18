@@ -80,6 +80,10 @@
     "transform": {
       "^.+\\.ts$": "ts-jest"
     },
-    "testEnvironment": "node"
+    "testEnvironment": "node",
+    "setupFiles": [
+      "<rootDir>/../test/helpers/mongo-launch-timeout.ts"
+    ],
+    "testTimeout": 60000
   }
 }
