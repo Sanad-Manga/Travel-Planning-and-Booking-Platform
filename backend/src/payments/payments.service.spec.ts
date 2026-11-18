@@ -13,6 +13,19 @@ import { PaymentsService } from './payments.service';
 import { PolicyAcceptanceService } from './policy-acceptance.service';
 import { Payment, PaymentLean } from './schemas/payment.schema';
 import { PolicyAcceptance, PolicyAcceptanceLean } from './schemas/policy-acceptance.schema';
+import { IssueRefundInput, RefundsService } from '../refunds/refunds.service';
+
+/** Hand-rolled stand-in for RefundsService — only the two methods PaymentsService calls. */
+class FakeRefundsService {
+  readonly issued: IssueRefundInput[] = [];
+
+  async issue(input: IssueRefundInput) {
+    this.issued.push(input);
+    return {} as Awaited<ReturnType<RefundsService['issue']>>;
+  }
+
+  async applyStripeRefundEvent(): Promise<void> {}
+}
 
 /** Never expires on its own in these tests — only confirmPaid/transition (called directly) matter. */
 class NeverExpirePaymentActivity implements PaymentActivity {
@@ -103,6 +116,7 @@ describe('PaymentsService', () => {
   let policyModel: Map<string, PolicyAcceptanceLean>;
   let service: PaymentsService;
   let lifecycle: BookingLifecycle;
+  let refunds: FakeRefundsService;
 
   beforeEach(() => {
     flights = new FakeBookingProvider();
@@ -124,12 +138,14 @@ describe('PaymentsService', () => {
 
     stripe = new FakeStripeGateway();
     paymentModel = new FakePaymentModel();
+    refunds = new FakeRefundsService();
     service = new PaymentsService(
       paymentModel as unknown as Model<Payment>,
       registry,
       policyAcceptance,
       lifecycle,
       stripe,
+      refunds as unknown as RefundsService,
     );
   });
 
@@ -211,6 +227,7 @@ describe('PaymentsService', () => {
         policyAcceptance,
         new BookingLifecycle(registry, new NeverExpirePaymentActivity()),
         new FakeStripeGateway(),
+        new FakeRefundsService() as unknown as RefundsService,
       );
       await expect(
         hotelService.create(user(OWNER_ID), { bookingType: BookingType.HOTEL, bookingId: BOOKING_ID }),
@@ -309,7 +326,7 @@ describe('PaymentsService', () => {
       expect(updated.status).toBe(PaymentStatus.FAILED);
     });
 
-    it('does not throw when the booking can no longer be confirmed (already expired) — known PAY-03 gap', async () => {
+    it('issues a refund when the booking can no longer be confirmed (already expired)', async () => {
       acceptPolicies();
       const created = await service.create(user(OWNER_ID), { bookingType: BookingType.FLIGHT, bookingId: BOOKING_ID });
       const row = (await paymentModel.findById(created.id).lean().exec()) as PaymentLean;
@@ -320,6 +337,10 @@ describe('PaymentsService', () => {
       await expect(
         service.handleWebhookEvent(paymentIntentEvent('payment_intent.succeeded', row.stripePaymentIntentId)),
       ).resolves.toBeUndefined();
+
+      expect(refunds.issued).toEqual([
+        { bookingType: BookingType.FLIGHT, bookingId: BOOKING_ID, amountCents: 25_000, reason: expect.any(String) },
+      ]);
     });
 
     it('ignores an unknown PaymentIntent id', async () => {
@@ -388,6 +409,7 @@ describe('PaymentsService', () => {
         unusedPolicyAcceptance,
         new BookingLifecycle(flakyRegistry, new NeverExpirePaymentActivity()),
         stripe,
+        refunds as unknown as RefundsService,
       );
 
       await expect(

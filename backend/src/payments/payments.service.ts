@@ -10,6 +10,7 @@ import { Model, Types } from 'mongoose';
 import Stripe from 'stripe';
 import { AuthenticatedUser, BookingStatus, BookingType, PaymentStatus } from '../common';
 import { assertOwner } from '../common/ownership';
+import { RefundsService } from '../refunds';
 import { BookingLifecycle } from './booking-lifecycle.service';
 import { Payable } from './booking-provider.interface';
 import { BookingProviderRegistry } from './booking-provider.registry';
@@ -35,6 +36,7 @@ export class PaymentsService {
     private readonly policyAcceptance: PolicyAcceptanceService,
     private readonly lifecycle: BookingLifecycle,
     @Inject(STRIPE_GATEWAY) private readonly stripe: StripeGateway,
+    private readonly refunds: RefundsService,
   ) {}
 
   async create(user: AuthenticatedUser, dto: CreatePaymentDto): Promise<PaymentResponseDto> {
@@ -126,6 +128,9 @@ export class PaymentsService {
       case 'payment_intent.canceled':
         await this.setNonSuccessStatus(event.data.object as Stripe.PaymentIntent, PaymentStatus.CANCELLED);
         return;
+      case 'refund.updated':
+        await this.refunds.applyStripeRefundEvent(event);
+        return;
       default:
         return; // unhandled event types are acknowledged, not errors (Stripe's own guidance)
     }
@@ -161,13 +166,17 @@ export class PaymentsService {
     } catch (error) {
       if (error instanceof ConflictException || error instanceof NotFoundException) {
         // The booking is no longer PENDING_PAYMENT (e.g. it already expired while this payment
-        // was in flight). docs/contracts.md section 8: Payments must refund automatically here
-        // and never revive the booking — that's PAY-03's job (not built yet). Recorded as a known
-        // gap, not silently dropped: the payment is still marked SUCCEEDED below so the mismatch
-        // stays visible for a manual/PAY-03 refund, rather than retried forever.
-        // TODO(PAY-03): issue a refund for `payment.stripePaymentIntentId` and notify the user.
+        // was in flight). docs/contracts.md section 8: Payments refunds it automatically here and
+        // never revives the booking. Mark SUCCEEDED first so `issue`'s "SUCCEEDED payment exists"
+        // lookup finds this row even if the refund call itself fails transiently.
         payment.status = PaymentStatus.SUCCEEDED;
         await payment.save();
+        await this.refunds.issue({
+          bookingType: payment.bookingType,
+          bookingId: payment.bookingId.toString(),
+          amountCents: payment.amountCents,
+          reason: 'Payment succeeded for a booking that had already expired',
+        });
         return;
       }
       throw error; // transient failure: stays non-SUCCEEDED so Stripe's retry tries confirmPaid again
