@@ -1787,3 +1787,14 @@ Prompt:
 Check the shutdown error (MongoClientClosedError in afterAll of the admin-accounts e2e suite on develop's CI) and find the cause before calling it a flake.
 How the output was used:
 The suite passed all 1325 tests; only afterAll(app.close) failed. It could not be reproduced by running the suite alone or in parallel, but the database-failure test was the suspect: it mocked countDocuments to throw synchronously, and paginate() builds Promise.all([find.exec(), countDocuments.exec()]) so the find was already running when the throw skipped Promise.all, leaving that query orphaned; closing the client in afterAll then interrupted it. Proved by running only that test (the error appeared 12 of 12 times across the three suites with the same pattern: admin-accounts, audit, airports) and by the same runs after the fix (0 of 9). Fix: the three mocks now return an object whose exec() rejects, like a real driver failure. No production code changed. Verification: lint, build, 1089 unit and 1330 e2e pass.
+
+================================================
+Date: 2026-11-18
+Student: Yusuf Eser
+Tool: Claude (Claude Code, Opus 5.5)
+Related Requirement: BLG-12 (SCRUM-102) Public author page (posts + public itineraries)
+Prompt:
+Implement BLG-12 following contracts.md: public GET /api/authors/:id showing the author's name, join date, published posts and public itineraries; a deactivated author is 404; no private user data; lists paginated with PaginationDto/paginate(); malformed id 404. Do not edit the itineraries or users modules; read them through their services or models via DI. Add e2e tests and docs.
+How the output was used:
+The assistant added AuthorsController (@Public, Swagger with AuthorPageDto and 404/400 ErrorResponseDto), AuthorsService and AuthorPageDto in the blog module. The service reads the user through UsersService.findById (404 for unknown, malformed or DEACTIVATED), lists PUBLISHED and not hidden posts with paginate() and the existing PostListRowDto, and lists PUBLIC and not hidden itineraries with paginate() and the itineraries module's own toPublicItineraryRow mapper. ItinerariesModule has no "public itineraries of one author" method, so BlogModule registers the Itinerary schema read-only instead of editing that module; a message to the owner suggests listPublicByAuthor so Blog can switch later. Choices I accepted: page and limit apply to both lists; a SUSPENDED author's page shows posts but no itineraries (ITN-20 shows public itineraries only for ACTIVE authors). One line was added to NOT_LISTS in test/pagination.e2e-spec.ts (the route returns one object holding two paginated lists). Verification: build, lint, the new e2e suite (7 tests) and the blog, itineraries, pagination and account-status e2e suites pass with --runInBand; blog unit/integration specs pass. Not done: a manual Swagger click-through against Atlas.
+================================================
