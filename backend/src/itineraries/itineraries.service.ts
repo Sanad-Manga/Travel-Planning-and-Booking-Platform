@@ -269,12 +269,20 @@ export class ItinerariesService {
   async withActivities(
     itinerary: ItineraryLean,
   ): Promise<ItineraryResponseDto> {
-    const [activities, transportCosts, budgets] = await Promise.all([
-      this.activities.listByItinerary(itinerary._id),
-      this.transportCosts.listByItinerary(itinerary._id),
-      this.budgets.listByItinerary(itinerary._id),
-    ]);
-    return toItineraryResponse(itinerary, activities, transportCosts, budgets);
+    const [activities, transportCosts, budgets, linkedBookings] =
+      await Promise.all([
+        this.activities.listByItinerary(itinerary._id),
+        this.transportCosts.listByItinerary(itinerary._id),
+        this.budgets.listByItinerary(itinerary._id),
+        this.budgets.linkedBookingCosts(itinerary._id),
+      ]);
+    return toItineraryResponse(
+      itinerary,
+      activities,
+      transportCosts,
+      budgets,
+      linkedBookings,
+    );
   }
 
   /**

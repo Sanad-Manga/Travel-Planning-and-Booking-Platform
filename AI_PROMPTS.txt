@@ -2082,3 +2082,21 @@ Prompt:
 Sanad asked for two changes on PR #130. (1) POST /api/auth/resend-verification for the logged-in user, no body, not public: already verified (flag true or missing) gives 200 and no email; otherwise a new token (the one-row-per-user upsert invalidates the old link) is emailed in the background, a failed send never changes the response; a 60 second cooldown gives 429 with Retry-After, and the cooldown check plus token write are one atomic conditional upsert so parallel resends send one email; no IP limiter. (2) Read PUBLIC_API_URL through the shared configuration.ts and ConfigService, optional with default http://localhost:3001. Add unit and e2e tests, Swagger and docs.
 How the output was used:
 The assistant added requestedAt to the email verification token row and changed issue() into one conditional upsert that matches only a row older than the cooldown (or without requestedAt); a row inside the cooldown makes the upsert hit the unique userId index (11000), which resend() turns into ResendCooldownException (429, the controller sets Retry-After). Registration reuses the same issue(). A publicApiUrl setting was added to config/configuration.ts and the service reads it via ConfigService. I reviewed the code, ran lint, build, unit and e2e tests.
+Student: Yassin Yahya
+Tool: Claude (Claude Code)
+Related Requirement: ITN-27 (SCRUM-119) Link confirmed bookings to itinerary days (bonus)
+Prompt:
+Implement ITN-27 (asked together with HTL-21, which is a separate branch and PR): POST /api/itineraries/:id/bookings links one of the
+user's own CONFIRMED flight or hotel bookings to a day of their own itinerary, and the linked amounts feed the budget without double counting.
+How the output was used:
+Read the ticket, the budget code (BudgetsService, buildBudgetSummary, city-group subtotals) and the booking provider contract (BookingProviderRegistry,
+getPayable, getStatus). Tests first (19 HTTP tests on an in-memory replica set with real Flights and Hotels booking providers), watched them fail, then
+wrote a new itineraryBookings collection (unique on itinerary + booking type + booking id, so a booking is linked once and cannot be counted twice, atomically),
+ItineraryBookingsService and its controller. The booking is read through the owner-scoped getPayable of its provider, never from the Flights or Hotels
+collections: unknown and someone else's bookings are 404, a booking that is not CONFIRMED is 409. The amount is a snapshot taken when linking; whether it still
+counts is read from getStatus each time the budget is added up (confirmed or completed counts, cancelled does not). A hotel booking counts under ACCOMMODATION,
+a flight booking under INTERCITY_TRANSPORT, in the budget summary, the day totals and the city-group subtotals (buildBudgetSummary got one optional parameter).
+Links are removed with their day or itinerary (through BudgetsService.removeForDay and removeForItinerary). The public view and clones leave the links out because
+a booking is private to its owner. ItinerariesModule imports PaymentsModule for the registry. Not built (not in the ticket): listing or unlinking a link.
+Mutation checks: removing the owner filter failed the ownership test, and disabling the CONFIRMED guard failed four tests.
+Verification: lint and build pass; 1188 unit (82 suites) and 1502 e2e (62 suites, 3 workers) pass. Not done: a manual Swagger click-through against Atlas.
