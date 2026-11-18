@@ -9,6 +9,7 @@ import { Connection, FilterQuery, Model, ProjectionType, Types } from 'mongoose'
 import { AuthenticatedUser, DEFAULT_PAGE, DEFAULT_PAGE_SIZE, paginate, PaginatedResponse, PaginationDto, POST_MAX_TAGS, PostStatus, Role, toPaginated } from '../common';
 import { UsersService } from '../users/users.service';
 import { CommentsService } from './comments.service';
+import { PostItineraryService } from './post-itinerary.service';
 import { BrowsePostsQueryDto } from './dto/browse-posts-query.dto';
 import { CreatePostDto } from './dto/create-post.dto';
 import { MyPostRowDto } from './dto/my-post-row.dto';
@@ -51,6 +52,7 @@ export class BlogService {
     @InjectConnection() private readonly connection: Connection,
     private readonly users: UsersService,
     private readonly commentsService: CommentsService,
+    private readonly postItinerary: PostItineraryService,
     private readonly postImages: PostImagesService,
   ) {}
 
@@ -195,11 +197,14 @@ export class BlogService {
     const authorId = post.authorId.toString();
     const names = await this.authorNames([authorId]);
     const comments = await this.commentsService.list(id, query, viewer);
+    // BLG-13: the attached itinerary, or null while it is not public.
+    const itinerary = await this.postItinerary.visibleItinerary(post.itineraryId);
 
     return PostDetailDto.fromLean(
       post,
       names.get(authorId) ?? UNKNOWN_AUTHOR,
       comments.items,
+      itinerary,
     );
   }
 
