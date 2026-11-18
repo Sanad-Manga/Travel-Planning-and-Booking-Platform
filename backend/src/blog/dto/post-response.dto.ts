@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { PostStatus } from '../../common';
 import { PostDocument } from '../schemas/post.schema';
-import { PostImageDto } from './create-post.dto';
+import { PostImageDto } from './post-image.dto';
 
 export class PostResponseDto {
   @ApiProperty({ example: '6730a1f2c3d4e5f607182930' })

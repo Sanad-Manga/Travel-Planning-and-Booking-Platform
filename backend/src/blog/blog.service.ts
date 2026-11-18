@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, FilterQuery, Model, ProjectionType, Types } from 'mongoose';
-import { AuthenticatedUser, DEFAULT_PAGE, DEFAULT_PAGE_SIZE, MAX_IMAGES_PER_ENTITY, paginate, PaginatedResponse, PaginationDto, POST_MAX_TAGS, PostStatus, Role, toPaginated } from '../common';
+import { AuthenticatedUser, DEFAULT_PAGE, DEFAULT_PAGE_SIZE, paginate, PaginatedResponse, PaginationDto, POST_MAX_TAGS, PostStatus, Role, toPaginated } from '../common';
 import { UsersService } from '../users/users.service';
 import { CommentsService } from './comments.service';
 import { BrowsePostsQueryDto } from './dto/browse-posts-query.dto';
@@ -19,6 +19,7 @@ import { PostResponseDto } from './dto/post-response.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 import { Like } from './schemas/like.schema';
 import { Post } from './schemas/post.schema';
+import { PostImagesService } from './post-images.service';
 
 // See deletePostAndDependents for the assumption behind these names.
 const DEPENDENT_COLLECTIONS = ['comments', 'likes'];
@@ -50,6 +51,7 @@ export class BlogService {
     @InjectConnection() private readonly connection: Connection,
     private readonly users: UsersService,
     private readonly commentsService: CommentsService,
+    private readonly postImages: PostImagesService,
   ) {}
 
   /**
@@ -59,7 +61,6 @@ export class BlogService {
   async create(dto: CreatePostDto, actor: AuthenticatedUser): Promise<PostResponseDto> {
     // Limits re-checked here too, so they hold for any caller of the service (contracts section 3).
     this.assertLimit('tags', dto.tags, POST_MAX_TAGS);
-    this.assertLimit('images', dto.images, MAX_IMAGES_PER_ENTITY);
 
     const status = dto.status ?? PostStatus.DRAFT;
     const post = await this.posts.create({
@@ -67,7 +68,7 @@ export class BlogService {
       title: dto.title,
       body: dto.body,
       tags: dto.tags ?? [],
-      images: dto.images ?? [],
+      images: [], // attached later through POST /posts/:id/images (BLG-10)
       status,
       isHidden: false,
       ...(status === PostStatus.PUBLISHED ? { publishedAt: new Date() } : {}),
@@ -346,8 +347,8 @@ export class BlogService {
    * post becomes PUBLISHED and kept afterwards (also if it goes back to DRAFT and is re-published).
    */
   async update(id: string, dto: UpdatePostDto, actor: AuthenticatedUser): Promise<PostResponseDto> {
-    const changes: Partial<Record<'title' | 'body' | 'tags' | 'images' | 'status', unknown>> = {};
-    for (const key of ['title', 'body', 'tags', 'images', 'status'] as const) {
+    const changes: Partial<Record<'title' | 'body' | 'tags' | 'status', unknown>> = {};
+    for (const key of ['title', 'body', 'tags', 'status'] as const) {
       const value = dto[key];
       if (value === null) {
         throw new BadRequestException({ message: 'Validation failed', details: [{ field: key, message: `${key} must not be null` }] });
@@ -358,7 +359,6 @@ export class BlogService {
       throw new BadRequestException({ message: 'Validation failed', details: [{ field: 'body', message: 'Send at least one field to update' }] });
     }
     this.assertLimit('tags', dto.tags, POST_MAX_TAGS);
-    this.assertLimit('images', dto.images, MAX_IMAGES_PER_ENTITY);
 
     const filter = this.ownedFilter(id, actor);
     const update: Record<string, unknown> = { $set: changes };
@@ -386,13 +386,15 @@ export class BlogService {
    * and the field below.
    * LIMITATION: not wrapped in a MongoDB transaction (standalone servers and the in-memory test server
    * do not support them), so the post delete and the cascade are not atomic.
+   * BLG-10: the post's image files are removed last, best effort (see PostImagesService.removeStoredImages).
    */
   async deletePostAndDependents(filter: FilterQuery<Post>): Promise<void> {
-    const post = await this.posts.findOneAndDelete(filter).select('_id').lean();
+    const post = await this.posts.findOneAndDelete(filter).select('_id images').lean();
     if (!post) throw new NotFoundException('Post not found');
     for (const name of DEPENDENT_COLLECTIONS) {
       await this.connection.collection(name).deleteMany({ postId: post._id });
     }
+    await this.postImages.removeStoredImages(post._id.toString(), post.images ?? []);
   }
 
   /** Only published posts open here. A hidden one opens only for its author and admins. Drafts never open (the author uses /mine). */

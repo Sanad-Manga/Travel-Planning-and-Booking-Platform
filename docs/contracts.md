@@ -111,7 +111,7 @@ Everything below is injected via NestJS DI. Owners publish the signature first; 
 |---|---|---|---|
 | `NotificationsService.notify` | Payments | `notify({ userId, type, title, message, link? }): Promise<void>` | everyone who tells users something |
 | `AuditService.log` | Admin | `log({ actorId, action, targetType, targetId, details? }): Promise<void>` | admin actions, moderation |
-| `UploadService.save / remove` | Admin / seeding / uploads (Walid) | `save(file, { kind, ownerId }): Promise<{ id, url }>`, `remove(id)`; enforces JPG/PNG, 5 MB, count limits | airlines, hotels, itineraries, blog |
+| `UploadService.save / remove / removeForTarget` | Admin / seeding / uploads (Walid) | `save(file, { kind, ownerId }): Promise<{ id, url }>`, `remove(id)`, `removeForTarget(id, { kind, ownerId })` (deletes the file only if it was stored for that kind and owner, otherwise does nothing; added for BLG-10, pending lead approval); enforces JPG/PNG, 5 MB, count limits | airlines, hotels, itineraries, blog |
 | `BookingLifecycle.transition` | Payments | `transition(type, bookingId, to: BookingStatus): Promise<void>`; rejects illegal transitions | booking owners |
 | `RefundsService.issue` | Payments | `issue({ bookingType, bookingId, amountCents, reason }): Promise<Refund>`; called on every cancellation with a positive refund | flight/hotel cancel, flight cancel by airline |
 | `FxService.convert` | Payments (`fx` module) | `convert(amount, from, to): Promise<{ amount, rateDate }>`; rates fetched once per day and cached in the database | itineraries (budget summary) |

@@ -57,7 +57,7 @@ export class BlogController {
   @ApiBadRequestResponse({
     type: ErrorResponseDto,
     description:
-      'Missing title/body, invalid field, more than 5 tags or images',
+      'Missing title/body, invalid or unknown field (images are attached through POST /posts/:id/images), more than 5 tags',
   })
   @ApiUnauthorizedResponse({
     type: ErrorResponseDto,
@@ -178,12 +178,12 @@ export class BlogController {
   @Patch(':id')
   @ApiOperation({
     summary:
-      'Edit my own post (partial update of title, body, tags, images, status)',
+      'Edit my own post (partial update of title, body, tags, status; images use /posts/:id/images)',
   })
   @ApiOkResponse({ type: PostResponseDto })
   @ApiBadRequestResponse({
     type: ErrorResponseDto,
-    description: 'Empty body, invalid field, more than 5 tags or images',
+    description: 'Empty body, invalid or unknown field (e.g. images), more than 5 tags',
   })
   @ApiUnauthorizedResponse({
     type: ErrorResponseDto,
@@ -204,7 +204,7 @@ export class BlogController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
-    summary: 'Delete my own post together with its comments and likes',
+    summary: 'Delete my own post together with its comments, likes and images',
   })
   @ApiNoContentResponse({ description: 'Deleted' })
   @ApiUnauthorizedResponse({
