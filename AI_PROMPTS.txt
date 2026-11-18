@@ -1988,7 +1988,6 @@ Verification: tsc --noEmit and eslint clean. New tests: `stripe-payment-activity
 unreachable Stripe, in-flight row left untouched) and two in `payments.service.spec.ts` (create/retry each
 return ServiceUnavailableException when Stripe is down). Scoped unit (`src/payments`, `src/refunds`): 146/146
 pass. Related e2e (`payments-webhook`, `payments-concurrency`, capped at 2 workers): 5/5 pass.
-=========================================================================================
 Date: 2026-11-18
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
