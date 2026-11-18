@@ -4,10 +4,12 @@ import { Model } from 'mongoose';
 import { FreeRoomsPageDto } from './dto/free-rooms-response.dto';
 import { HotelDetailsQueryDto } from './dto/hotel-details-query.dto';
 import { HotelDetailsResponseDto } from './dto/hotel-details-response.dto';
+import { HotelReviewsResponseDto } from './dto/hotel-reviews-page.dto';
 import { HotelFreeRoomsService } from './hotel-free-rooms.service';
 import { HotelReviewsService } from './hotel-reviews.service';
 import { HotelsService } from './hotels.service';
 import { Hotel } from './schemas/hotel.schema';
+import { PaginationDto } from '../common';
 
 const PROFILE_FIELDS = 'name address cityId countryCode description photos starRating amenities';
 
@@ -61,6 +63,13 @@ export class HotelDetailsService {
       ...reviews,
       rooms,
     };
+  }
+
+  getReviews(
+    hotelId: string,
+    pagination: PaginationDto,
+  ): Promise<HotelReviewsResponseDto> {
+    return this.hotelReviews.listPublicReviews(hotelId, pagination);
   }
 
   /** Both dates or neither: a single date cannot describe a stay. Returns null when no stay was asked for. */

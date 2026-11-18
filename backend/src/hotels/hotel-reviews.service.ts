@@ -11,11 +11,14 @@ import {
   AccountStatus,
   AuthenticatedUser,
   BookingStatus,
+  paginate,
+  PaginationDto,
   Role,
 } from '../common';
 import { UsersService } from '../users/users.service';
 import { CreateHotelReviewDto } from './dto/create-hotel-review.dto';
 import { HotelReviewItemDto } from './dto/hotel-details-response.dto';
+import { HotelReviewsResponseDto } from './dto/hotel-reviews-page.dto';
 import { UpdateHotelReviewDto } from './dto/update-hotel-review.dto';
 import { HotelBookingsService } from './hotel-bookings.service';
 import {
@@ -43,6 +46,10 @@ interface HotelReviewAggregation {
     createdAt: Date;
   }>;
 }
+
+type PopulatedHotelReview = Omit<HotelReviewLean, 'authorId'> & {
+  authorId: { name?: string; status?: AccountStatus } | null;
+};
 
 export interface HotelReviewSummary {
   averageRating: number | null;
@@ -210,6 +217,48 @@ export class HotelReviewsService {
       }
       await this.recalculateHotelRating(current.hotelId, session);
     });
+  }
+
+  async listPublicReviews(
+    hotelId: string,
+    pagination: PaginationDto,
+  ): Promise<HotelReviewsResponseDto> {
+    if (!/^[0-9a-f]{24}$/i.test(hotelId)) {
+      throw new NotFoundException('Hotel not found');
+    }
+
+    const hotelObjectId = new Types.ObjectId(hotelId);
+    const hotel = await this.hotels
+      .exists({ _id: hotelObjectId, isActive: true })
+      .exec();
+    if (!hotel) throw new NotFoundException('Hotel not found');
+
+    const filter = { hotelId: hotelObjectId, isHidden: { $ne: true } };
+    const [page, summary] = await Promise.all([
+      paginate(this.reviews, filter, pagination, {
+        sort: { createdAt: -1, _id: -1 },
+        populate: { path: 'authorId', select: 'name status' },
+        map: (review: PopulatedHotelReview) => this.toPublicItem(review),
+      }),
+      this.reviews
+        .aggregate<RatingSummary>([
+          { $match: filter },
+          {
+            $group: {
+              _id: null,
+              averageRating: { $avg: '$rating' },
+              reviewCount: { $sum: 1 },
+            },
+          },
+        ])
+        .exec(),
+    ]);
+
+    return {
+      averageRating: summary[0]?.averageRating ?? null,
+      reviewCount: page.total,
+      reviews: page,
+    };
   }
 
   async getSummary(hotelId: string): Promise<HotelReviewSummary> {
@@ -385,6 +434,22 @@ export class HotelReviewsService {
       rating: review.rating,
       comment: review.comment ?? '',
       authorName,
+      createdAt: review.createdAt.toISOString(),
+    };
+  }
+
+  private toPublicItem(review: PopulatedHotelReview): HotelReviewItemDto {
+    const author = review.authorId;
+    return {
+      id: review._id.toString(),
+      rating: review.rating,
+      comment: review.comment ?? '',
+      authorName:
+        !author ||
+        author.status === AccountStatus.DEACTIVATED ||
+        !author.name
+          ? 'Deleted user'
+          : author.name,
       createdAt: review.createdAt.toISOString(),
     };
   }
