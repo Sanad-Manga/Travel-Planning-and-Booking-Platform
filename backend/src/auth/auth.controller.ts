@@ -17,7 +17,7 @@ import { Request, Response } from 'express';
 import { AllowWhenMustChange, AuthenticatedUser, CurrentUser, ErrorResponseDto, Public, REFRESH_TOKEN_COOKIE } from '../common';
 import { clearAuthCookies, setAuthCookies } from './auth-cookies';
 import { AuthService } from './auth.service';
-import { EmailVerificationService } from './email-verification.service';
+import { EmailVerificationService, ResendCooldownException } from './email-verification.service';
 import { VerifyEmailQueryDto } from './dto/verify-email-query.dto';
 import { VerifyEmailResponseDto } from './dto/verify-email-response.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
@@ -62,6 +62,27 @@ export class AuthController {
   })
   verifyEmail(@Query() query: VerifyEmailQueryDto): Promise<VerifyEmailResponseDto> {
     return this.emailVerification.verify(query.token);
+  }
+
+  // Authenticated by the global JwtAuthGuard (an unverified user can log in); the user comes from the token, there is no body.
+  @Post('resend-verification')
+  @HttpCode(200)
+  @ApiCookieAuth()
+  @ApiOperation({
+    summary: 'Send a new email-verification link to the logged-in user (ACC-02).',
+    description:
+      'A new link replaces the old one (the old link stops working). Already verified accounts get 200 and no email. At most one link per 60 seconds: inside the cooldown the answer is 429 with a Retry-After header (seconds). The email is sent after the response and a failed send never changes it.',
+  })
+  @ApiOkResponse({ type: VerifyEmailResponseDto, description: 'Link sent, or the account is already verified (nothing sent).' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto, description: 'Not logged in, token invalid or expired, or account no longer active' })
+  @ApiResponse({ status: 429, type: ErrorResponseDto, description: 'A link was issued less than 60 seconds ago. Retry-After gives the seconds to wait.' })
+  async resendVerification(@CurrentUser() current: AuthenticatedUser, @Res({ passthrough: true }) res: Response): Promise<VerifyEmailResponseDto> {
+    try {
+      return await this.emailVerification.resend(current.userId);
+    } catch (error) {
+      if (error instanceof ResendCooldownException) res.setHeader('Retry-After', String(error.retryAfterSeconds));
+      throw error;
+    }
   }
 
   @Public()

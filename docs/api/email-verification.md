@@ -12,7 +12,7 @@ A new account must confirm its email address before it can create a booking.
 ## The link
 
 - After `POST /api/auth/register` (response unchanged, still 201) the API emails a link in the background. A failed send is logged (user id only) and never fails registration.
-- Link: `{PUBLIC_API_URL}/api/auth/verify-email?token=<token>`. `PUBLIC_API_URL` is optional (default `http://localhost:3001`); see `.env.example`.
+- Link: `{PUBLIC_API_URL}/api/auth/verify-email?token=<token>`. `PUBLIC_API_URL` is optional (default `http://localhost:3001`); it is read once in `config/configuration.ts` (`publicApiUrl`) and used through `ConfigService`. See `.env.example`.
 - The token is 32 random bytes (base64url). Only its SHA-256 hash is stored, in `emailVerificationTokens` (one row per user, TTL index on `expiresAt`). Valid for **24 hours**. Single use.
 
 ## `GET /api/auth/verify-email?token=...` (public)
@@ -25,7 +25,20 @@ A new account must confirm its email address before it can create a booking.
 | Unknown, expired, already used, or the account is not ACTIVE | `400`, `details: [{ field: "token", message: "invalid or expired verification link" }]` (same answer for all) |
 
 The token is consumed with one atomic delete, so of several parallel requests with the same token exactly one gets 200.
-There is no resend endpoint yet (see follow-ups in the PR).
+
+## `POST /api/auth/resend-verification` (logged in, no body)
+
+For a user who did not get the email or let the link expire. Requires the normal login cookies (an unverified user can log in).
+
+| Case | Response |
+|---|---|
+| Unverified account | `200 { "message": "Verification email sent" }`. A **new** link is emailed in the background and the old link stops working. A failed send is logged (user id only) and never changes the response. |
+| Already verified (`emailVerified: true`, or the field is missing) | `200 { "message": "Email already verified" }`, nothing sent |
+| A link was issued less than **60 seconds** ago (registration counts) | `429` in the standard error shape with a `Retry-After` header (seconds). Nothing is sent. |
+| Not logged in | `401` |
+
+The cooldown check and the token write are one atomic conditional upsert, so two parallel resends send exactly one email.
+There is no IP limiter on this route yet (see follow-ups in the PR).
 
 ## The guard (for booking owners)
 

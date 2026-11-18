@@ -14,6 +14,10 @@ export class EmailVerificationToken {
   @Prop({ type: String, required: true, unique: true })
   tokenHash: string;
 
+  // When the link was last issued; the resend cooldown compares against it inside the same atomic upsert.
+  @Prop({ type: Date })
+  requestedAt?: Date;
+
   // TTL index (expireAfterSeconds: 0): MongoDB removes the row once this moment has passed.
   // The service also filters on expiresAt, because the TTL monitor only runs about once a minute.
   @Prop({ type: Date, required: true, index: { expireAfterSeconds: 0 } })

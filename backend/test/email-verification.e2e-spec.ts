@@ -174,4 +174,99 @@ describe('Email verification before booking (ACC-02, e2e)', () => {
     // Login still works.
     await loginCookie('smtpdown@example.com');
   });
+
+  describe('POST /api/auth/resend-verification', () => {
+    const resend = (cookie?: string) => {
+      const req = http().post('/api/auth/resend-verification');
+      return cookie ? req.set('Cookie', cookie) : req;
+    };
+    const mailsTo = (email: string) => sender.sent.filter((m) => m.to === email);
+    const tokenOf = (mail: { text: string }) => new URL(/https?:\/\/\S+/.exec(mail.text)![0]).searchParams.get('token')!;
+    const endCooldown = (email: string) =>
+      connection
+        .collection('users')
+        .findOne({ email })
+        .then((u) => connection.collection('emailVerificationTokens').updateOne({ userId: u!._id }, { $set: { requestedAt: new Date(Date.now() - 61_000) } }));
+
+    it('a guest gets 401', async () => {
+      await resend().expect(401);
+    });
+
+    it('an unverified user resends: a new working link, and the old link fails', async () => {
+      const email = 'resend1@example.com';
+      await register(email).expect(201);
+      const oldToken = await linkTokenFor(email);
+      const cookie = await loginCookie(email);
+      await endCooldown(email);
+
+      const res = await resend(cookie).expect(200);
+      expect(res.body).toEqual({ message: 'Verification email sent' });
+      await linkTokenFor(email); // wait for the background send
+      for (let i = 0; i < 50 && mailsTo(email).length < 2; i++) await new Promise((r) => setTimeout(r, 20));
+      expect(mailsTo(email)).toHaveLength(2);
+      const newToken = tokenOf(mailsTo(email)[1]);
+      expect(newToken).not.toBe(oldToken);
+
+      await http().get('/api/auth/verify-email').query({ token: oldToken }).expect(400);
+      await http().get('/api/auth/verify-email').query({ token: newToken }).expect(200);
+      await http().post('/api/test-bookings').set('Cookie', cookie).expect(201);
+    });
+
+    it('a second resend inside 60 seconds: 429 in the standard error shape with Retry-After, and no email', async () => {
+      const email = 'resend2@example.com';
+      await register(email).expect(201); // registration already issued a link just now
+      await linkTokenFor(email);
+      const cookie = await loginCookie(email);
+      const res = await resend(cookie).expect(429);
+      expect(res.body).toEqual({
+        statusCode: 429,
+        error: 'Too Many Requests',
+        message: expect.any(String),
+        path: '/api/auth/resend-verification',
+        timestamp: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/),
+      });
+      const retryAfter = Number(res.headers['retry-after']);
+      expect(retryAfter).toBeGreaterThan(0);
+      expect(retryAfter).toBeLessThanOrEqual(60);
+      await new Promise((r) => setTimeout(r, 100));
+      expect(mailsTo(email)).toHaveLength(1);
+    });
+
+    it('a verified user gets 200 and no email (flag true, and field missing)', async () => {
+      const email = 'resend3@example.com';
+      await register(email).expect(201);
+      await linkTokenFor(email);
+      const cookie = await loginCookie(email);
+      await http().get('/api/auth/verify-email').query({ token: await linkTokenFor(email) }).expect(200);
+      await endCooldown(email).catch(() => undefined);
+      expect((await resend(cookie).expect(200)).body).toEqual({ message: 'Email already verified' });
+
+      await connection.collection('users').updateOne({ email }, { $unset: { emailVerified: 1 } });
+      expect((await resend(cookie).expect(200)).body).toEqual({ message: 'Email already verified' });
+      await new Promise((r) => setTimeout(r, 100));
+      expect(mailsTo(email)).toHaveLength(1); // only the registration email
+    });
+
+    it('two parallel resends send exactly one email', async () => {
+      const email = 'resend4@example.com';
+      await register(email).expect(201);
+      await linkTokenFor(email);
+      const cookie = await loginCookie(email);
+      await endCooldown(email);
+      const results = await Promise.all([resend(cookie), resend(cookie)]);
+      expect(results.map((r) => r.status).sort()).toEqual([200, 429]);
+      await new Promise((r) => setTimeout(r, 150));
+      expect(mailsTo(email)).toHaveLength(2); // registration + one resend
+    });
+
+    it('a failed send does not change the response', async () => {
+      const email = 'resend5@example.com';
+      await register(email).expect(201);
+      await linkTokenFor(email);
+      const cookie = await loginCookie(email);
+      await endCooldown(email);
+      sender.failNextSendOnce = true;
+      expect((await resend(cookie).expect(200)).body).toEqual({ message: 'Verification email sent' });
+    });
+  });
 });
