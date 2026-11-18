@@ -138,6 +138,13 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
     },
     // BON-02: the user's own favourites
     { swagger: '/api/favourites', url: '/api/favourites', auth: 'user', total: 25 },
+    // FLT-25: the user's own flight bookings (25 seeded below; the flight is joined for grouping)
+    {
+      swagger: '/api/flight-bookings',
+      url: '/api/flight-bookings',
+      auth: 'user',
+      total: 25,
+    },
     {
       swagger: '/api/itineraries/public/search',
       url: '/api/itineraries/public/search',
@@ -335,6 +342,42 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
         title: `Title ${i}`,
         message: `Message ${i}`,
         isRead: false,
+        createdAt: new Date(now.getTime() - i * 1000),
+        updatedAt: now,
+      })),
+    );
+    // FLT-25: 25 of the user's own flight bookings. The list joins the outbound flight to group them,
+    // so the flight must exist; the bookings are legacy confirmed rows (no segments, no reference).
+    const pagingFlightId = new Types.ObjectId();
+    await db.collection('flights').insertOne({
+      _id: pagingFlightId,
+      airlineId: new Types.ObjectId(),
+      flightNumber: 'PG100',
+      departureAirport: 'CAI',
+      arrivalAirport: 'JFK',
+      departureAt: new Date('2099-01-01T10:00:00.000Z'),
+      arrivalAt: new Date('2099-01-01T16:00:00.000Z'),
+      departureTimeZone: 'Africa/Cairo',
+      arrivalTimeZone: 'America/New_York',
+      departureLocalDate: '2099-01-01',
+      status: 'SCHEDULED',
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.collection('flightBookings').insertMany(
+      rows(25, (i) => ({
+        userId,
+        airlineId: new Types.ObjectId(),
+        flightId: pagingFlightId,
+        cabinClass: 'ECONOMY',
+        passengerCounts: { adults: 1, children: 0, infants: 0 },
+        seats: 1,
+        farePerPassengerCents: 45000,
+        infantFareCents: 4500,
+        totalCents: 45000,
+        baggageFeeCents: 0,
+        currency: 'USD',
+        status: 'CONFIRMED',
         createdAt: new Date(now.getTime() - i * 1000),
         updatedAt: now,
       })),
