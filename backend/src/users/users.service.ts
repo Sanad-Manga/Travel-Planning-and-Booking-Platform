@@ -16,6 +16,8 @@ export interface CreateUserInput {
   email: string;
   passwordHash: string;
   consentAcceptedAt: Date;
+  /** ACC-02: registration passes false; leave it out for accounts that never need verification. */
+  emailVerified?: boolean;
 }
 
 /** Data access for users. Hashing and registration rules live in AuthService; this only reads and writes. */
@@ -224,6 +226,28 @@ export class UsersService {
   /** A successful login: counter back to 0 and any finished lock removed. */
   async resetFailedLogins(id: string): Promise<void> {
     await this.userModel.updateOne({ _id: id }, { $set: { failedAttempts: 0 }, $unset: { lockedUntil: 1 } }).exec();
+  }
+
+  /** ACC-02: true only when the user exists and `emailVerified` is explicitly false (a missing field counts as verified). */
+  async isEmailUnverified(id: string): Promise<boolean> {
+    if (!Types.ObjectId.isValid(id)) return false;
+    const user = await this.userModel.findById(id).select('emailVerified').lean().exec();
+    return user?.emailVerified === false;
+  }
+
+  /** ACC-02: ONE conditional update, only for an ACTIVE account that is not verified yet. False when nothing matched. */
+  async markEmailVerified(id: string): Promise<boolean> {
+    if (!Types.ObjectId.isValid(id)) return false;
+    const result = await this.userModel
+      .updateOne({ _id: id, status: AccountStatus.ACTIVE, emailVerified: { $ne: true } }, { $set: { emailVerified: true } })
+      .exec();
+    return result.modifiedCount === 1;
+  }
+
+  /** ACC-02: an ACTIVE account whose email is verified (used for the "already verified" answer). */
+  async isEmailVerifiedActive(id: string): Promise<boolean> {
+    if (!Types.ObjectId.isValid(id)) return false;
+    return (await this.userModel.exists({ _id: id, status: AccountStatus.ACTIVE, emailVerified: true })) !== null;
   }
 
   /** New users are always role USER / status ACTIVE (schema defaults). */

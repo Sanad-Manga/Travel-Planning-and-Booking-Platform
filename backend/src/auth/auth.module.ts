@@ -5,6 +5,8 @@ import { JwtModule } from '@nestjs/jwt';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ACCOUNT_STATUS_CHECKER, JwtAuthGuard, RolesGuard } from '../common';
 import { EmailModule } from '../email';
+import { EmailVerificationService } from './email-verification.service';
+import { EmailVerificationToken, EmailVerificationTokenSchema } from './schemas/email-verification-token.schema';
 import { UsersModule } from '../users/users.module';
 import { UsersService } from '../users/users.service';
 import { ACCESS_TOKEN_TTL_SECONDS } from './auth-cookies';
@@ -23,6 +25,7 @@ import { TokenRevocationService } from './token-revocation.service';
     EmailModule,
     MongooseModule.forFeature([
       { name: RevokedToken.name, schema: RevokedTokenSchema },
+      { name: EmailVerificationToken.name, schema: EmailVerificationTokenSchema },
       { name: PasswordResetToken.name, schema: PasswordResetTokenSchema },
     ]),
     // The factory runs at start-up: readJwtSecrets throws if a secret is missing or shorter than 32 characters.
@@ -39,6 +42,7 @@ import { TokenRevocationService } from './token-revocation.service';
   controllers: [AuthController],
   providers: [
     AuthService,
+    EmailVerificationService,
     PasswordResetService,
     // Overridable in tests: 10 requests per IP and route per 15 minutes by default.
     { provide: AUTH_RATE_LIMIT_CONFIG, useValue: DEFAULT_AUTH_RATE_LIMIT },
