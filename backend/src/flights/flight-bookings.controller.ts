@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   Post,
+  Query,
   Res,
   StreamableFile,
 } from '@nestjs/common';
@@ -25,13 +26,16 @@ import {
   AuthenticatedUser,
   CurrentUser,
   ErrorResponseDto,
+  ApiPaginatedResponse,
   Role,
   Roles,
 } from '../common';
 import { FlightBookingResponseDto } from './dto/flight-booking-response.dto';
 import { CreateFlightBookingDto } from './dto/create-flight-booking.dto';
+import { FlightBookingListRowDto } from './dto/flight-booking-list-row.dto';
 import { FlightBookingSummaryResponseDto } from './dto/flight-booking-summary-response.dto';
 import { HoldFlightBookingDto } from './dto/hold-flight-booking.dto';
+import { MyFlightBookingsQueryDto } from './dto/my-flight-bookings-query.dto';
 import { FlightBookingsService } from './flight-bookings.service';
 
 @ApiTags('flight-bookings')
@@ -43,6 +47,37 @@ import { FlightBookingsService } from './flight-bookings.service';
 @Controller('flight-bookings')
 export class FlightBookingsController {
   constructor(private readonly bookings: FlightBookingsService) {}
+
+  @Get()
+  @Roles(Role.USER)
+  @ApiOperation({
+    summary: "List the traveler's own flight bookings - FLT-25",
+    description:
+      "Returns only the authenticated traveler's flight bookings, newest first, as the shared paginated envelope " +
+      '`{ items, page, limit, total, totalPages }`: `page` defaults to 1 and `limit` to 10 (maximum 50). ' +
+      'Each item carries the booking reference (absent on historical bookings confirmed before FLT-23), its `group`, status, cabin, ' +
+      'the outbound flight and every one-way or round-trip segment with flight details, passengers and the booking total. ' +
+      "Grouping: a CANCELLED booking is always CANCELLED; every other status is UPCOMING when the outbound segment's UTC " +
+      'departureAt is after now, otherwise PAST. A round trip is grouped by its outbound segment and still returns both segments. ' +
+      "Use the optional `group` query parameter to request one group. Another traveler's bookings are never returned, and " +
+      'passport/identity-document numbers, payment references, Stripe ids and payment credentials are never included.',
+  })
+  @ApiPaginatedResponse(FlightBookingListRowDto)
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description:
+      'Invalid pagination (page < 1, limit outside 1-50) or an unknown group value',
+  })
+  @ApiForbiddenResponse({
+    type: ErrorResponseDto,
+    description: 'Only travelers (role USER) can list their flight bookings',
+  })
+  listMine(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: MyFlightBookingsQueryDto,
+  ) {
+    return this.bookings.listMine(user, query);
+  }
 
   @Get(':id/e-ticket')
   @Roles(Role.USER)
