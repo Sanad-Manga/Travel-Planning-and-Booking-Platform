@@ -111,7 +111,7 @@ Everything below is injected via NestJS DI. Owners publish the signature first; 
 |---|---|---|---|
 | `NotificationsService.notify` | Payments | `notify({ userId, type, title, message, link? }): Promise<void>` | everyone who tells users something |
 | `AuditService.log` | Admin | `log({ actorId, action, targetType, targetId, details? }): Promise<void>` | admin actions, moderation |
-| `UploadService.save / remove` | Admin / seeding / uploads (Walid) | `save(file, { kind, ownerId }): Promise<{ id, url }>`, `remove(id)`; enforces JPG/PNG, 5 MB, count limits | airlines, hotels, itineraries, blog |
+| `UploadService.save / remove / removeForTarget` | Admin / seeding / uploads (Walid) | `save(file, { kind, ownerId }): Promise<{ id, url }>`, `remove(id)`, `removeForTarget(id, { kind, ownerId })` (deletes the file only if it was stored for that kind and owner, otherwise does nothing; added for BLG-10, pending lead approval); enforces JPG/PNG, 5 MB, count limits | airlines, hotels, itineraries, blog |
 | `BookingLifecycle.transition` | Payments | `transition(type, bookingId, to: BookingStatus): Promise<void>`; rejects illegal transitions | booking owners |
 | `RefundsService.issue` | Payments (`refunds` module) | `issue({ bookingType, bookingId, amountCents, reason }): Promise<RefundSummary>`; called on every cancellation with a positive refund; validates against the booking's SUCCEEDED Payment (never refunds more than was paid, never twice) | flight/hotel cancel, flight cancel by airline |
 | `RefundsService.getLatestForBooking` | Payments (`refunds` module) | `getLatestForBooking(bookingType, bookingId): Promise<RefundSummary \| null>`; read the current refund status to show on a booking's own details response | flight/hotel booking-details |
