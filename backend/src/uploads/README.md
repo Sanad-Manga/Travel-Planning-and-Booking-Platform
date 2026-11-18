@@ -9,6 +9,7 @@ serving at `/uploads/`, but no standalone upload POST or DELETE endpoint.
 ```typescript
 save(file: UploadFile, target: UploadTarget): Promise<{ id: string; url: string }>
 remove(id: string): Promise<void>
+removeForTarget(id: string, target: UploadTarget): Promise<void> // deletes only if stored for that kind/ownerId, else no-op
 ```
 
 `UploadFile` accepts a buffered Multer file: `{ buffer, size, mimetype }`.

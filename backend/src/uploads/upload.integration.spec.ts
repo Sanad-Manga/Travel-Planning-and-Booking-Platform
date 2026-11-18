@@ -74,6 +74,15 @@ describe('UploadService real MongoDB, filesystem, concurrency and recovery', () 
     if (root) await fs.rm(root, { recursive: true, force: true });
   });
 
+  it('removeForTarget only deletes a file stored for that kind and owner (BLG-10)', async () => {
+    const ref = await service.save(file, { kind: 'post', ownerId: 'postA' });
+    await service.removeForTarget(ref.id, { kind: 'post', ownerId: 'postB' });
+    await service.removeForTarget(ref.id, { kind: 'hotel', ownerId: 'postA' });
+    expect(await model.findById(ref.id).lean()).toMatchObject({ state: 'ready', ownerId: 'postA' });
+    await service.removeForTarget(ref.id, { kind: 'post', ownerId: 'postA' });
+    expect(await model.findById(ref.id)).toBeNull();
+  });
+
   it('persists verified metadata and original bytes with safe filenames, then removes idempotently', async () => {
     const result = await service.save(
       { ...file, originalname: '../../secret.png' } as UploadFile,

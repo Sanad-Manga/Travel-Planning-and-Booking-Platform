@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Post } from '../schemas/post.schema';
 import { CommentResponseDto } from './comment-response.dto';
-import { PostImageDto } from './create-post.dto';
+import { PostImageDto } from './post-image.dto';
 import { PostAuthorDto } from './post-list-row.dto';
 
 /** GET /api/posts/:id (BLG-02): the full post page. */

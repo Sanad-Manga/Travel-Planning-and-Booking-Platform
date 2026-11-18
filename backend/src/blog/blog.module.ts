@@ -2,8 +2,11 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Itinerary, ItinerarySchema } from '../itineraries/schemas/itinerary.schema';
 import { UsersModule } from '../users/users.module';
+import { UploadsModule } from '../uploads';
 import { AuthorsController } from './authors.controller';
 import { AuthorsService } from './authors.service';
+import { PostImagesController } from './post-images.controller';
+import { PostImagesService } from './post-images.service';
 import { BlogController } from './blog.controller';
 import { BlogService } from './blog.service';
 import { CommentItemController } from './comment-item.controller';
@@ -24,9 +27,10 @@ import { TagsController } from './tags.controller';
       { name: Itinerary.name, schema: ItinerarySchema },
     ]),
     UsersModule,
+    UploadsModule,
   ],
-  controllers: [BlogController, TagsController, CommentsController, CommentItemController, AuthorsController],
-  providers: [BlogService, CommentsService, AuthorsService],
+  controllers: [BlogController, TagsController, CommentsController, CommentItemController, PostImagesController, AuthorsController],
+  providers: [BlogService, CommentsService, PostImagesService, AuthorsService],
   // Comments, likes and search (other BLG tickets) will inject BlogService / the Post model from here.
   exports: [BlogService, MongooseModule],
 })
