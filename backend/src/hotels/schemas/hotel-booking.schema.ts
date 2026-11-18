@@ -89,4 +89,5 @@ export const HotelBookingSchema = SchemaFactory.createForClass(HotelBooking);
 HotelBookingSchema.index({ userId: 1, status: 1, checkIn: 1 });
 HotelBookingSchema.index({ 'rooms.roomId': 1, status: 1, checkIn: 1, checkOut: 1 });
 HotelBookingSchema.index({ status: 1, holdExpiresAt: 1, _id: 1 });
+HotelBookingSchema.index({ status: 1, checkOut: 1, _id: 1 });
 HotelBookingSchema.index({ bookingReference: 1 }, { unique: true, sparse: true });

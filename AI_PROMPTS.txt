@@ -1937,6 +1937,14 @@ How the output was used:
 The assistant added an optional itineraryId to the Post schema, AttachItineraryDto (a valid id, or null to remove), PostItineraryController and PostItineraryService in the blog module (same separate-controller pattern as BLG-10 images). attach() gives 404 for a missing or someone else's post, then 404 for an itinerary that is missing or not the caller's own, then sets the field with one update filtered on post id and author. GET /api/posts/:id now returns `itinerary` (the public itinerary row) only when it is PUBLIC, not hidden and its author ACTIVE (same rule as ITN-20/21), otherwise null; PostResponseDto returns itineraryId. It reuses the read-only Itinerary model from BLG-12, so this branch is based on feature/BLG-12-author-page. Finding: the global JwtAuthGuard returns early on @Public routes, so GET /api/posts/:id never knows the reader; an "author always sees it" exception was dropped because it could never run. Verification: build, lint, the new e2e suite (8 tests) and the blog, author-page, blog-images, pagination and account-status e2e suites (341 tests) plus 46 blog unit/integration tests pass with --runInBand. Not done: a manual Swagger click-through against Atlas.
 
 Date: 2026-11-18
+Student: Hessain Elrefaey
+Tool: Copilot (VS Code)
+Related Requirement: HTL-23 (complete stays and reservation reviews)
+Prompt:
+Implement HTL-23 only: complete CONFIRMED hotel reservations after checkout through BookingLifecycle, add one owner-only rating/review per completed reservation with editable/deletable author-only endpoints, recalculate the hotel rating, and connect reviews to the existing HTL-02 hotel details response. Respect the existing review item shape, add Swagger, tests and docs, and do not add another hotel details route or change unrelated modules.
+How the output was used:
+Added a UTC daily checkout-completion sweep and lazy completion during an owned booking read. Added a HotelReview schema with a unique bookingId index, validated create/update DTOs, nested review creation, author edit/delete endpoints, visible review averages/counts, and deactivated-author display as "Deleted user". Connected HotelDetailsService.loadReviews to the new service without adding a GET route. Added E2E coverage for checkout completion, authorization, duplicate/concurrent submissions, validation, edit/delete, aggregation, hidden reviews, deactivated authors, and Swagger; updated the hotel booking/details docs. Updated the HotelDetailsService unit-test fixture to inject the new review-summary dependency. Changes are limited to the Hotels module and directly related tests/docs plus this prompt log. Verification: backend build, focused lint, hotel-bookings and hotel-details E2E suites, and full backend Jest (75 suites, 1121 tests).
+================================================
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
 Related Requirement: GitHub issue #115 (ACC-06 follow-up) Old refresh token still works after refresh and after logout
@@ -1980,6 +1988,17 @@ Verification: tsc --noEmit and eslint clean. New tests: `stripe-payment-activity
 unreachable Stripe, in-flight row left untouched) and two in `payments.service.spec.ts` (create/retry each
 return ServiceUnavailableException when Stripe is down). Scoped unit (`src/payments`, `src/refunds`): 146/146
 pass. Related e2e (`payments-webhook`, `payments-concurrency`, capped at 2 workers): 5/5 pass.
+
+Date: 2026-11-18
+Student: Abdulrahman Mohamad Hosny
+Tool: OpenCode (DeepSeek V4.1 Flash Free)
+Related Requirement: FLT-25
+Prompt:
+Implement FLT-25 "My flight bookings" in the flights module only: GET /api/flight-bookings (owner-only, paginated with the shared PaginationDto, default size 10) grouped Upcoming/Past/Cancelled, each row showing reference, flight, date, passengers, cabin and status; keep GET /api/flight-bookings/:id as the full owner-only detail including refund status; update Swagger, docs/contracts.md and AI_PROMPTS.txt; add focused tests and validate with build, lint, unit and flight E2E.
+How the output was used:
+Added FlightBookingsService.listMine() (plus GET /api/flight-bookings on the existing controller) and a flights-module MyFlightBookingsQueryDto/FlightBookingListRowDto. Ownership is part of the MongoDB query (the shared bookingVisibilityFilter narrowed to the caller's userId for role USER, so it can never widen), and the group is derived in the pipeline from the outbound segment's flight departureAt through one $lookup, so the group filter, skip/limit and total are computed in the database and pages stay stable (createdAt desc, _id desc). Legacy records without a segments array fall back to the top-level flightId, and a missing bookingReference stays absent instead of being generated. List rows reuse the existing segment/passenger mappers, so passport/identity numbers, paymentRef and Stripe ids never appear. GET /:id was left unchanged and still reads the latest refund through RefundsService.getLatestForBooking. Updated Swagger (route, query params, paginated schema, 400/401/403), docs/contracts.md and the flight E2E suite (grouping, cancellation precedence, round-trip grouping, legacy one-way, owner isolation, pagination/default/invalid pages, Swagger) plus a mapper unit test. No common/ or other module files were changed.
+Verification: npm run build passed; npm run lint passed; npx jest flight-booking-list-row --runInBand 3/3 passed; npx jest --config ./test/jest-e2e.json flight-bookings-hold --runInBand 68/68 passed.
+
 
 Date: 2026-11-18
 Student: Ziad Mohamed
