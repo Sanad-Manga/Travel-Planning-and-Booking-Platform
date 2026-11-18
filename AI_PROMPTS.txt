@@ -2109,6 +2109,13 @@ setup-app, UploadService/storage and dependency files were unchanged by this fix
 GH-116 was open with no issue comments when independently checked; no Ahmed/Yusuf
 policy approval was verified. Implementation is local for independent review;
 team approval remains pending. No commit, push, feature merge, PR or Jira change.
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: GitHub issue #119 (parallel Jest runs time out)
+Prompt:
+Take issue #119 (default npx jest and npm run test:e2e fail with hook timeouts because every worker starts its own in-memory mongod) and propose a fix.
+How the output was used:
+The assistant reproduced the failure, measured that mongod starts queue behind each other (about 2.4 s each, 4 concurrent already hit the 10 s launch limit) and that other sessions running tests at the same time make it worse, then added one Jest setup file (test/helpers/mongo-launch-timeout.ts) that raises the library launch timeout to 60 s for MongoMemoryServer and MongoMemoryReplSet, plus testTimeout 60000 in both Jest configs. Under the same machine load the control run without it failed on 1530 launch timeouts, with it 57 e2e suites (1429 tests) and 78 unit suites (1141 tests) passed with default workers. I read every file and ran lint, build and both suites.
 
 Date: 2026-11-18
 Student: Ziad Mohamed
