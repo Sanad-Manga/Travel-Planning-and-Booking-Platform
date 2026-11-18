@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
+import { Itinerary, ItinerarySchema } from '../itineraries/schemas/itinerary.schema';
 import { UsersModule } from '../users/users.module';
+import { AuthorsController } from './authors.controller';
+import { AuthorsService } from './authors.service';
 import { BlogController } from './blog.controller';
 import { BlogService } from './blog.service';
 import { CommentItemController } from './comment-item.controller';
@@ -17,11 +20,13 @@ import { TagsController } from './tags.controller';
       { name: Post.name, schema: PostSchema },
       { name: Comment.name, schema: CommentSchema },
       { name: Like.name, schema: LikeSchema },
+      // BLG-12: read only, for the author page's public itineraries. Blog never writes to this collection.
+      { name: Itinerary.name, schema: ItinerarySchema },
     ]),
     UsersModule,
   ],
-  controllers: [BlogController, TagsController, CommentsController, CommentItemController],
-  providers: [BlogService, CommentsService],
+  controllers: [BlogController, TagsController, CommentsController, CommentItemController, AuthorsController],
+  providers: [BlogService, CommentsService, AuthorsService],
   // Comments, likes and search (other BLG tickets) will inject BlogService / the Post model from here.
   exports: [BlogService, MongooseModule],
 })
