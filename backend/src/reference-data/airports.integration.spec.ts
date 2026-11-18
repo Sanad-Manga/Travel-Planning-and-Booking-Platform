@@ -322,7 +322,10 @@ describe('GET /api/airports through the real AppModule', () => {
 
   it('uses the shared error filter without leaking database error details', async () => {
     jest.spyOn(models.airports, 'countDocuments').mockImplementationOnce(() => {
-      throw new Error('internal-database-details');
+      // Reject from exec() like a real driver failure. A synchronous throw here would leave the
+      // already-started find() of Promise.all orphaned, and closing the client in afterAll then
+      // interrupts it (MongoClientClosedError).
+      return { exec: () => Promise.reject(new Error('internal-database-details')) } as never;
     });
     const response = await request(app.getHttpServer())
       .get('/api/airports')

@@ -1746,3 +1746,11 @@ that module is not mine, so ItinerariesModule provides the same classes (as ITN-
 One line was added to NOT_LISTS in test/pagination.e2e-spec.ts (the GEN-05 test): the route takes page and limit but answers one
 flight-search page per airport, not one list. Mutation check: removing the owner filter failed the ownership test.
 Verification: lint, build, 1065 unit and 1325 e2e (3 workers) pass. Not done: a manual Swagger click-through against Atlas.
+
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: none (test-only fix found while checking PR #106)
+Prompt:
+Check the shutdown error (MongoClientClosedError in afterAll of the admin-accounts e2e suite on develop's CI) and find the cause before calling it a flake.
+How the output was used:
+The suite passed all 1325 tests; only afterAll(app.close) failed. It could not be reproduced by running the suite alone or in parallel, but the database-failure test was the suspect: it mocked countDocuments to throw synchronously, and paginate() builds Promise.all([find.exec(), countDocuments.exec()]) so the find was already running when the throw skipped Promise.all, leaving that query orphaned; closing the client in afterAll then interrupted it. Proved by running only that test (the error appeared 12 of 12 times across the three suites with the same pattern: admin-accounts, audit, airports) and by the same runs after the fix (0 of 9). Fix: the three mocks now return an object whose exec() rejects, like a real driver failure. No production code changed. Verification: lint, build, 1089 unit and 1330 e2e pass.
