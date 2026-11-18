@@ -5,6 +5,9 @@ import {
 } from '@nestjs/common';
 import { Model, Types } from 'mongoose';
 import { AuthenticatedUser, NotificationType, Role } from '../common';
+import { EmailService } from '../email';
+import { FakeEmailSender } from '../email/fake-email-sender';
+import { UsersService } from '../users/users.service';
 import { NotificationsService } from './notifications.service';
 import { Notification, NotificationLean } from './schemas/notification.schema';
 
@@ -44,13 +47,21 @@ describe('NotificationsService', () => {
   };
   let service: NotificationsService;
   let errorLog: jest.SpyInstance;
+  let usersService: { findById: jest.Mock };
+  let emailSender: FakeEmailSender;
 
   beforeEach(() => {
     jest.resetAllMocks();
     errorLog = jest
       .spyOn(Logger.prototype, 'error')
       .mockImplementation(() => undefined);
-    service = new NotificationsService(model as unknown as Model<Notification>);
+    usersService = { findById: jest.fn().mockResolvedValue(null) };
+    emailSender = new FakeEmailSender();
+    service = new NotificationsService(
+      model as unknown as Model<Notification>,
+      usersService as unknown as UsersService,
+      new EmailService(emailSender),
+    );
   });
 
   afterEach(() => {
@@ -148,6 +159,47 @@ describe('NotificationsService', () => {
         }),
       ).resolves.toBeUndefined();
       expect(model.create).not.toHaveBeenCalled();
+      expect(errorLog).toHaveBeenCalledTimes(1);
+    });
+
+    it('GEN-01-B: also emails the recipient once the in-app notification is saved', async () => {
+      model.create.mockResolvedValue({});
+      usersService.findById.mockResolvedValue({ email: 'traveler@example.com' });
+
+      await service.notify({
+        userId: USER_ID,
+        type: NotificationType.REFUND_UPDATE,
+        title: 'Refund issued',
+        message: 'We refunded your booking.',
+      });
+
+      expect(emailSender.sent).toEqual([
+        { to: 'traveler@example.com', subject: 'Refund issued', text: 'We refunded your booking.' },
+      ]);
+    });
+
+    it('skips the email silently when the user has no resolvable email', async () => {
+      model.create.mockResolvedValue({});
+      usersService.findById.mockResolvedValue(null);
+
+      await expect(
+        service.notify({ userId: USER_ID, type: NotificationType.BOOKING_CONFIRMED, title: 't', message: 'm' }),
+      ).resolves.toBeUndefined();
+
+      expect(emailSender.sent).toHaveLength(0);
+      expect(errorLog).not.toHaveBeenCalled();
+    });
+
+    it('logs and swallows an email failure — the already-saved in-app notification is unaffected', async () => {
+      model.create.mockResolvedValue({});
+      usersService.findById.mockResolvedValue({ email: 'traveler@example.com' });
+      emailSender.failNextSendOnce = true;
+
+      await expect(
+        service.notify({ userId: USER_ID, type: NotificationType.BOOKING_CONFIRMED, title: 't', message: 'm' }),
+      ).resolves.toBeUndefined();
+
+      expect(model.create).toHaveBeenCalledTimes(1); // already persisted before the email was even attempted
       expect(errorLog).toHaveBeenCalledTimes(1);
     });
   });

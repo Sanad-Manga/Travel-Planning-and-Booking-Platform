@@ -8,6 +8,7 @@ import { AuthModule } from './auth/auth.module';
 import { BlogModule } from './blog/blog.module';
 import configuration from './config/configuration';
 import { validateEnv } from './config/env.validation';
+import { EmailModule } from './email';
 import { FlightsModule } from './flights';
 import { FxModule } from './fx';
 import { ItinerariesModule } from './itineraries';
@@ -33,6 +34,7 @@ import { UploadsModule } from './uploads';
     }),
     PaymentsModule,
     FxModule,
+    EmailModule,
     BlogModule,
     AuthModule,
     NotificationsModule,

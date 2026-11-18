@@ -12,6 +12,8 @@ import {
   paginate,
   PaginatedResponse,
 } from '../common';
+import { EmailService } from '../email';
+import { UsersService } from '../users/users.service';
 import { ListNotificationsDto } from './dto/list-notifications.dto';
 import {
   NotificationResponseDto,
@@ -52,12 +54,18 @@ export class NotificationsService {
 
   constructor(
     @InjectModel(Notification.name) private readonly model: Model<Notification>,
+    private readonly users: UsersService,
+    private readonly email: EmailService,
   ) {}
 
   /**
    * Called by every module that tells a user something. It never throws: telling the user is secondary,
    * so a failure here (bad id, database hiccup) is logged and must not break the booking, refund
    * or suspension that triggered it.
+   *
+   * GEN-01-B: also emails the same title/message once the in-app notification is saved — never
+   * before, and in its own try/catch, so an email failure can never stop the in-app notification
+   * from being created, and never stops a notification that otherwise saved from counting as saved.
    */
   async notify(input: NotifyInput): Promise<void> {
     try {
@@ -77,6 +85,19 @@ export class NotificationsService {
     } catch (error) {
       this.logger.error(
         `Could not save ${input.type} notification for user ${input.userId}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      return;
+    }
+
+    try {
+      const recipient = await this.users.findById(input.userId);
+      if (recipient?.email) {
+        await this.email.send({ to: recipient.email, subject: input.title, text: input.message });
+      }
+    } catch (error) {
+      this.logger.error(
+        `Could not email user ${input.userId} a ${input.type} notification`,
         error instanceof Error ? error.stack : String(error),
       );
     }
