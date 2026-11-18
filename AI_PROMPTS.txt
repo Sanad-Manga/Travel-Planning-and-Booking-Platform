@@ -1945,3 +1945,23 @@ Verification: tsc --noEmit and eslint clean. New tests: `stripe-payment-activity
 unreachable Stripe, in-flight row left untouched) and two in `payments.service.spec.ts` (create/retry each
 return ServiceUnavailableException when Stripe is down). Scoped unit (`src/payments`, `src/refunds`): 146/146
 pass. Related e2e (`payments-webhook`, `payments-concurrency`, capped at 2 workers): 5/5 pass.
+=========================================================================================
+Date: 2026-11-18
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-07 (SCRUM-111, bonus) Email-based forgotten password
+Prompt:
+Implement only SCRUM-111 / ACC-07 following docs/contracts.md: POST /api/auth/forgot-password (always the same 200,
+only an ACTIVE account is emailed, sending happens after the response and a failed send changes nothing) and
+POST /api/auth/reset-password (token = 32 random bytes base64url, only its SHA-256 hash stored, 30 minute expiry,
+single use via one compare-and-set, a newer request invalidates older links, one generic 400 on `token`, new bcrypt
+hash with compare-and-set on the old hash, tokenVersion bump, lockout and temporary-password state cleared, no
+auto-login). Use EmailService from the email module, add unit and e2e tests (parallel resets, parallel requests,
+expiry, session kill), docs/api/forgot-password.md, Swagger on both routes, and report assumptions and gaps.
+How the output was used:
+Added PasswordResetService, the passwordResetTokens schema (one row per user, so one atomic upsert supersedes older
+links even for parallel requests), two DTOs, the two @Public() routes in AuthController, and
+UsersService.completeEmailPasswordReset (the only change outside the auth folder files). Found by the e2e test that an
+upsert stored userId as a string, and fixed it with an explicit ObjectId. Verified: lint and build clean; full unit
+(--runInBand) 76 suites / 1140 tests pass; full e2e (--runInBand) 58 suites / 1408 tests pass. A parallel unit run
+showed mongodb-memory-server start-up timeouts in unrelated suites; they pass when run serially.
