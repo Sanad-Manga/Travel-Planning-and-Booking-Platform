@@ -1727,6 +1727,15 @@ Verification completed for the corrected integration worktree (2026-11-17): focu
 Final checks passed: exactly 16 intended integration paths; no conflicts, unrelated implementation changes or environment files; original and backup hashes/branch/HEAD/status plus both AI histories preserved. The complete integration snapshot is staged (12 modified, 4 added) but uncommitted; original work remains 12 unstaged modifications and 4 untracked files. Exact status/log captures are outside the repositories. No commits, pushes, merges/rebases, PR/Jira changes or destructive cleanup occurred.
 ================================================
 Date: 2026-11-18
+Student: Hessain Elrefaey
+Tool: Copilot (VS Code)
+Related Requirement: HTL-17 (Confirm reservation after payment)
+Prompt:
+Implement only HTL-17 on a fresh branch from latest develop. After payment, all rooms in the reservation are CONFIRMED, one unique booking reference is generated, and the traveler receives an in-app notification. Confirmation must be idempotent and work through BookingLifecycle's late-paid expiry path without assuming a Stripe event object. Confirmation must be visible from GET /api/hotel-bookings/:id. Add Swagger, tests, and API docs; preserve separate ticket scope.
+How the output was used:
+Verified that the merged HTL-18/base already has transactional and idempotent HotelBookingsService.markConfirmed, the unique bookingReference index, one-time confirmation notification, and BookingLifecycle's PaymentActivity-driven late-paid path. Added the missing owner-scoped GET /api/hotel-bookings/:id endpoint and mapped bookingReference plus nullable holdExpiresAt in the response DTO. Expanded E2E coverage for repeated confirmation, multi-room confirmation, unique references, single notifications, owner-only confirmation lookup, and a late-paid lifecycle result without a Stripe event object. Updated Swagger and hotel booking API documentation. No Payments module files were changed.
+================================================
+Date: 2026-11-18
 Student: Yusuf Ugurhan
 Tool: Claude Code
 Related Requirement: BLG-10 (SCRUM-78), rework of Mohamed Walid's branch (scrum master asked us to redo the ticket)
@@ -1826,14 +1835,40 @@ Prompt:
 Check the shutdown error (MongoClientClosedError in afterAll of the admin-accounts e2e suite on develop's CI) and find the cause before calling it a flake.
 How the output was used:
 The suite passed all 1325 tests; only afterAll(app.close) failed. It could not be reproduced by running the suite alone or in parallel, but the database-failure test was the suspect: it mocked countDocuments to throw synchronously, and paginate() builds Promise.all([find.exec(), countDocuments.exec()]) so the find was already running when the throw skipped Promise.all, leaving that query orphaned; closing the client in afterAll then interrupted it. Proved by running only that test (the error appeared 12 of 12 times across the three suites with the same pattern: admin-accounts, audit, airports) and by the same runs after the fix (0 of 9). Fix: the three mocks now return an object whose exec() rejects, like a real driver failure. No production code changed. Verification: lint, build, 1089 unit and 1330 e2e pass.
-
 ================================================
+Date: 2026-11-18
+Student: Hessain Elrefaey
+Tool: Copilot (VS Code)
+Related Requirement: Blog comment validation regression (audit of develop at 0e30eb5)
+Prompt:
+Investigate the report that POST /api/posts/:id/comments with an empty body returns contradictory 400 messages for the 500-character limit and non-empty requirement. Add a test asserting the empty-body response contains only the applicable non-empty message.
+How the output was used:
+Created a separate feature/BLG-comment-empty-validation branch from 0e30eb5. The initial check used {"body":""}, which correctly returned only "Comment must not be empty" and missed the failing payload. Probed the actual endpoint with an omitted body property ({}), a null body, and no JSON body; each returned three details, including the misleading "Comment must be at most 500 characters" alongside "Comment must not be empty" and "body must be a string". Empty-string and whitespace-only strings returned only the non-empty message. Fixed this by defaulting a missing DTO body to an empty string and normalizing null to an empty string before validation. Added E2E cases for empty, whitespace, omitted, null, and no-body requests. Verification: comments E2E 28/28 and focused ESLint passed.
+Related Requirement: HTL-17 (SCRUM-86 review follow-up)
+Prompt:
+Address the HTL-17 review: make GET /api/hotel-bookings/:id lazily expire an overdue hold before returning it, add an overdue-hold E2E test, and replace the Jira placeholder in the PR body with SCRUM-86.
+How the output was used:
+Updated HotelBookingsService.getForUser to confirm the booking belongs to the caller first, call BookingLifecycle.expireIfDue(BookingType.HOTEL, id, now), then re-read and return the booking. Added an E2E regression showing an owner GET changes an overdue PENDING_PAYMENT booking to EXPIRED and clears holdExpiresAt. Hotel-bookings E2E (18/18), focused ESLint, and backend build pass. Updated the PR Jira key to SCRUM-86.
+
 Date: 2026-11-18
 Student: Yusuf Eser
 Tool: Claude (Claude Code, Opus 5.5)
+Related Requirement: BON-02 (SCRUM-117, bonus) Favourites list (hotels and public itineraries)
+Prompt:
+Implement BON-02 following contracts.md: new /api/favourites endpoints where a registered user saves hotels and public itineraries and views their list. Guest 401, no duplicates, only existing hotels and public itineraries, a user sees only their own list. Reference other modules' entities by id only and do not edit them.
+How the output was used:
+The assistant created a new favourites module: Favourite schema (userId, type HOTEL|ITINERARY, itemId; unique index on all three), AddFavouriteDto, FavouriteDto, FavouritesService and FavouritesController (POST, GET paginated with paginate(), DELETE /:id), registered in app.module.ts. A hotel must exist and be active (read through the Hotel model that HotelsModule exports); an itinerary must pass ItinerariesPublicService.loadPublic (PUBLIC, not hidden, author ACTIVE). A duplicate save is caught through the unique index (E11000) and returns the existing favourite with 200 instead of 201, which also covers two requests at the same time. Items that stop being available stay listed with available=false and name=null, so a title made private never leaks. Every query filters on the caller's id. I accepted DELETE as part of "a favourites list" (flagged in the PR). One row was added to the GEN-05 table in test/pagination.e2e-spec.ts. Verification: build, lint, the new e2e suite (8 tests incl. a 3-request race) and the pagination, account-status, guest-401, validation, hotel-search and itineraries e2e suites pass with --runInBand. Not done: a manual Swagger click-through against Atlas.
 Related Requirement: BLG-12 (SCRUM-102) Public author page (posts + public itineraries)
 Prompt:
 Implement BLG-12 following contracts.md: public GET /api/authors/:id showing the author's name, join date, published posts and public itineraries; a deactivated author is 404; no private user data; lists paginated with PaginationDto/paginate(); malformed id 404. Do not edit the itineraries or users modules; read them through their services or models via DI. Add e2e tests and docs.
 How the output was used:
 The assistant added AuthorsController (@Public, Swagger with AuthorPageDto and 404/400 ErrorResponseDto), AuthorsService and AuthorPageDto in the blog module. The service reads the user through UsersService.findById (404 for unknown, malformed or DEACTIVATED), lists PUBLISHED and not hidden posts with paginate() and the existing PostListRowDto, and lists PUBLIC and not hidden itineraries with paginate() and the itineraries module's own toPublicItineraryRow mapper. ItinerariesModule has no "public itineraries of one author" method, so BlogModule registers the Itinerary schema read-only instead of editing that module; a message to the owner suggests listPublicByAuthor so Blog can switch later. Choices I accepted: page and limit apply to both lists; a SUSPENDED author's page shows posts but no itineraries (ITN-20 shows public itineraries only for ACTIVE authors). One line was added to NOT_LISTS in test/pagination.e2e-spec.ts (the route returns one object holding two paginated lists). Verification: build, lint, the new e2e suite (7 tests) and the blog, itineraries, pagination and account-status e2e suites pass with --runInBand; blog unit/integration specs pass. Not done: a manual Swagger click-through against Atlas.
-================================================
+
+Date: 2026-11-18
+Student: Yusuf Eser
+Tool: Claude (Claude Code, Opus 5.5)
+Related Requirement: BLG-13 (SCRUM-116, bonus) Attach an itinerary to a post
+Prompt:
+Implement BLG-13 following contracts.md: PATCH /api/posts/:id/itinerary, the author attaches one of their own itineraries to their own post; readers see it only if the itinerary is public. Read Yassin's itineraries only, do not edit his module. Add e2e tests and docs.
+How the output was used:
+The assistant added an optional itineraryId to the Post schema, AttachItineraryDto (a valid id, or null to remove), PostItineraryController and PostItineraryService in the blog module (same separate-controller pattern as BLG-10 images). attach() gives 404 for a missing or someone else's post, then 404 for an itinerary that is missing or not the caller's own, then sets the field with one update filtered on post id and author. GET /api/posts/:id now returns `itinerary` (the public itinerary row) only when it is PUBLIC, not hidden and its author ACTIVE (same rule as ITN-20/21), otherwise null; PostResponseDto returns itineraryId. It reuses the read-only Itinerary model from BLG-12, so this branch is based on feature/BLG-12-author-page. Finding: the global JwtAuthGuard returns early on @Public routes, so GET /api/posts/:id never knows the reader; an "author always sees it" exception was dropped because it could never run. Verification: build, lint, the new e2e suite (8 tests) and the blog, author-page, blog-images, pagination and account-status e2e suites (341 tests) plus 46 blog unit/integration tests pass with --runInBand. Not done: a manual Swagger click-through against Atlas.
