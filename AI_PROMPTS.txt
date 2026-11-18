@@ -1727,6 +1727,15 @@ Verification completed for the corrected integration worktree (2026-11-17): focu
 Final checks passed: exactly 16 intended integration paths; no conflicts, unrelated implementation changes or environment files; original and backup hashes/branch/HEAD/status plus both AI histories preserved. The complete integration snapshot is staged (12 modified, 4 added) but uncommitted; original work remains 12 unstaged modifications and 4 untracked files. Exact status/log captures are outside the repositories. No commits, pushes, merges/rebases, PR/Jira changes or destructive cleanup occurred.
 ================================================
 Date: 2026-11-18
+Student: Hessain Elrefaey
+Tool: Copilot (VS Code)
+Related Requirement: HTL-17 (Confirm reservation after payment)
+Prompt:
+Implement only HTL-17 on a fresh branch from latest develop. After payment, all rooms in the reservation are CONFIRMED, one unique booking reference is generated, and the traveler receives an in-app notification. Confirmation must be idempotent and work through BookingLifecycle's late-paid expiry path without assuming a Stripe event object. Confirmation must be visible from GET /api/hotel-bookings/:id. Add Swagger, tests, and API docs; preserve separate ticket scope.
+How the output was used:
+Verified that the merged HTL-18/base already has transactional and idempotent HotelBookingsService.markConfirmed, the unique bookingReference index, one-time confirmation notification, and BookingLifecycle's PaymentActivity-driven late-paid path. Added the missing owner-scoped GET /api/hotel-bookings/:id endpoint and mapped bookingReference plus nullable holdExpiresAt in the response DTO. Expanded E2E coverage for repeated confirmation, multi-room confirmation, unique references, single notifications, owner-only confirmation lookup, and a late-paid lifecycle result without a Stripe event object. Updated Swagger and hotel booking API documentation. No Payments module files were changed.
+================================================
+Date: 2026-11-18
 Student: Yusuf Ugurhan
 Tool: Claude Code
 Related Requirement: BLG-10 (SCRUM-78), rework of Mohamed Walid's branch (scrum master asked us to redo the ticket)
@@ -1779,6 +1788,45 @@ that module is not mine, so ItinerariesModule provides the same classes (as ITN-
 One line was added to NOT_LISTS in test/pagination.e2e-spec.ts (the GEN-05 test): the route takes page and limit but answers one
 flight-search page per airport, not one list. Mutation check: removing the owner filter failed the ownership test.
 Verification: lint, build, 1065 unit and 1325 e2e (3 workers) pass. Not done: a manual Swagger click-through against Atlas.
+================================================
+Date: 2026-11-18
+Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code, Sonnet 5)
+Related Requirement: PAY-03 (SCRUM-91) Refunds via Stripe Refunds API, status on bookings
+Prompt:
+Implement PAY-03 against docs/contracts.md and the authoritative reviewed-requirements sheet: for every cancellation with a
+positive refund amount (user cancellations per the provider's tiers; provider-initiated at 100%), issue a refund through the
+Stripe Refunds API, record it, and show its status (Pending/Refunded/Failed) on the booking details, notifying the user. Expose
+RefundsService.issue({bookingType, bookingId, amountCents, reason}) for FLT-26/HTL-21/FLT-06 (owned by other devs) to call from
+their own cancel endpoints — do not build those endpoints myself, only publish the contract. Dependencies (PAY-01, the shared
+RefundCalculator from FLT-09/HTL-10, GEN-01 notifications) were all confirmed Done in Jira before starting.
+How the output was used:
+Added a new `refunds` module (sibling to `payments`/`fx`, per contracts.md's module list, not folded into `payments` despite the
+same owner), with its own `Refund` schema (bookingType/bookingId/userId/stripePaymentIntentId/stripeRefundId/amountCents/
+currency/status/reason, a unique index on stripePaymentIntentId so a booking's payment is ever refunded exactly once). Added
+`StripeGateway.createRefund` (+ fake) alongside the existing PAY-01 methods, storing the free-text reason in Stripe metadata
+rather than its own constrained `reason` enum. `RefundsService.issue` validates the amount is a positive integer (rejecting
+before any Stripe call, satisfying "zero refund creates no Stripe call"), looks up the booking's SUCCEEDED Payment to enforce
+"never refunds more than was paid" and "never twice" (a unique-index race becomes a 409, mirroring PaymentsService's existing
+pattern), calls Stripe, records PENDING/REFUNDED/FAILED from the synchronous response, and notifies via NotificationsService.
+A refund left PENDING settles later through a new `refund.updated` webhook case added to PaymentsService.handleWebhookEvent,
+delegating to RefundsService.applyStripeRefundEvent (idempotent: only updates a still-PENDING row, notifies only on an actual
+change). Replaced the existing TODO(PAY-03) in PaymentsService.onSucceeded (the paid-but-already-expired edge case from
+contracts.md section 8) with a real call into RefundsService.issue. To avoid a module import cycle (PaymentsModule needs
+RefundsService; RefundsModule needs the Payment schema), RefundsModule registers its own MongooseModule.forFeature binding for
+the Payment schema class (reused, read-only) instead of importing PaymentsModule. Published `issue` and a second method,
+`getLatestForBooking(bookingType, bookingId)`, for Flights/Hotels to show refund status on their own booking-details responses
+(their files, not mine) — both documented in docs/contracts.md section 7 with the final signatures.
+Verification: tsc --noEmit and eslint clean. New refunds.service.spec.ts (hand-rolled fakes, no real DB): zero/negative amount
+rejected pre-Stripe-call, over-paid rejected, duplicate-refund-for-one-payment rejected (both the pre-check and the unique-index
+race path), REFUNDED-immediately and left-PENDING-then-settled-via-webhook paths, webhook idempotency (no duplicate notify).
+Extended payments.service.spec.ts's already-expired-booking test to assert RefundsService.issue is actually called. New
+refunds.module.spec.ts and an updated payments.module.spec.ts (overriding the new Refund/Notification model tokens) for DI
+wiring. Scoped run (src/refunds, src/payments) and the two related e2e specs (payments-webhook, payments-concurrency) all pass.
+Full unit suite reran under --ci: 73 suites / 1104 tests pass (an earlier non---ci run showed 47 flaky failures from an unrelated
+Windows temp-dir race in a seeding integration spec, not reproducing on rerun). The full e2e suite could not be completed in this
+session — repeated environment/session restarts killed the in-memory Mongo mid-run each time; not a known code issue, but
+genuinely not verified end-to-end as of this PR, flagged for CI to confirm.
 
 Student: Ahmed Sanad
 Tool: Claude (Claude Code)
@@ -1798,6 +1846,20 @@ Added `bookingReference` to the flight booking schema with a sparse unique index
 Verification: `npx jest flight-eticket --runInBand` 4/4 unit tests (round trip, legacy one-way, no identity numbers, real PDF buffer); `npx jest --config ./test/jest-e2e.json flight-bookings-hold --runInBand` 59/59 (including first confirmation, same-reference repeat, different reference, late-paid PAID path, owner PDF, non-owner 404, role 403/401, unknown/malformed 404, pending/no-reference 409, round-trip both segments, one-way, Swagger PDF documentation); `npm run build` and `npm run lint` passed. The E2E deliberately logs the existing rollback-test `Error: boom`; the suite still passes.
 
 Date: 2026-11-18
+Student: Hessain Elrefaey
+Tool: Copilot (VS Code)
+Related Requirement: Blog comment validation regression (audit of develop at 0e30eb5)
+Prompt:
+Investigate the report that POST /api/posts/:id/comments with an empty body returns contradictory 400 messages for the 500-character limit and non-empty requirement. Add a test asserting the empty-body response contains only the applicable non-empty message.
+How the output was used:
+Created a separate feature/BLG-comment-empty-validation branch from 0e30eb5. The initial check used {"body":""}, which correctly returned only "Comment must not be empty" and missed the failing payload. Probed the actual endpoint with an omitted body property ({}), a null body, and no JSON body; each returned three details, including the misleading "Comment must be at most 500 characters" alongside "Comment must not be empty" and "body must be a string". Empty-string and whitespace-only strings returned only the non-empty message. Fixed this by defaulting a missing DTO body to an empty string and normalizing null to an empty string before validation. Added E2E cases for empty, whitespace, omitted, null, and no-body requests. Verification: comments E2E 28/28 and focused ESLint passed.
+Related Requirement: HTL-17 (SCRUM-86 review follow-up)
+Prompt:
+Address the HTL-17 review: make GET /api/hotel-bookings/:id lazily expire an overdue hold before returning it, add an overdue-hold E2E test, and replace the Jira placeholder in the PR body with SCRUM-86.
+How the output was used:
+Updated HotelBookingsService.getForUser to confirm the booking belongs to the caller first, call BookingLifecycle.expireIfDue(BookingType.HOTEL, id, now), then re-read and return the booking. Added an E2E regression showing an owner GET changes an overdue PENDING_PAYMENT booking to EXPIRED and clears holdExpiresAt. Hotel-bookings E2E (18/18), focused ESLint, and backend build pass. Updated the PR Jira key to SCRUM-86.
+
+Date: 2026-11-18
 Student: Yusuf Eser
 Tool: Claude (Claude Code, Opus 5.5)
 Related Requirement: BON-02 (SCRUM-117, bonus) Favourites list (hotels and public itineraries)
@@ -1810,7 +1872,6 @@ Prompt:
 Implement BLG-12 following contracts.md: public GET /api/authors/:id showing the author's name, join date, published posts and public itineraries; a deactivated author is 404; no private user data; lists paginated with PaginationDto/paginate(); malformed id 404. Do not edit the itineraries or users modules; read them through their services or models via DI. Add e2e tests and docs.
 How the output was used:
 The assistant added AuthorsController (@Public, Swagger with AuthorPageDto and 404/400 ErrorResponseDto), AuthorsService and AuthorPageDto in the blog module. The service reads the user through UsersService.findById (404 for unknown, malformed or DEACTIVATED), lists PUBLISHED and not hidden posts with paginate() and the existing PostListRowDto, and lists PUBLIC and not hidden itineraries with paginate() and the itineraries module's own toPublicItineraryRow mapper. ItinerariesModule has no "public itineraries of one author" method, so BlogModule registers the Itinerary schema read-only instead of editing that module; a message to the owner suggests listPublicByAuthor so Blog can switch later. Choices I accepted: page and limit apply to both lists; a SUSPENDED author's page shows posts but no itineraries (ITN-20 shows public itineraries only for ACTIVE authors). One line was added to NOT_LISTS in test/pagination.e2e-spec.ts (the route returns one object holding two paginated lists). Verification: build, lint, the new e2e suite (7 tests) and the blog, itineraries, pagination and account-status e2e suites pass with --runInBand; blog unit/integration specs pass. Not done: a manual Swagger click-through against Atlas.
-================================================
 
 Date: 2026-11-18
 Student: Abdulrahman Mohamad Hosny
@@ -1821,4 +1882,12 @@ Work on the existing FLT-23 PR #124 branch and fix issue #118 without opening a 
 How the output was used:
 Extended FlightBookingsService.getSummary so a booking whose owner matches can be read while PENDING_PAYMENT (unchanged contract) or CONFIRMED. The confirmed response reuses the same shape and adds the unique bookingReference, status CONFIRMED and a null holdExpiresAt, with every one-way or round-trip segment resolved to its flight details; expired/cancelled bookings still answer 409 and another traveler or unknown id still answers 404. The passport/ID number remains excluded by the shared passenger mapper, and no paymentRef, Stripe event or payment credential is exposed. Added an optional bookingReference to FlightBookingSummaryResponseDto and updated the route's Swagger description and 409 documentation. No hotel, refund, cancellation or Payments production changes; hotel readback remains the separate HTL-17 / SCRUM-86 follow-up, and refund status is not fabricated because no refund read contract exists on this branch (PAY-03 is separate). Updated docs/contracts.md with the confirmed readback contract and the refund-status limitation.
 Verification: npm run build passed; npm run lint passed; npx jest flight-eticket --runInBand 4/4 unit tests passed; npx jest --config ./test/jest-e2e.json flight-bookings-hold --runInBand 61/61 E2E tests passed, including the new confirmed one-way readback, confirmed round-trip readback and non-owner 404 tests, the unchanged pending summary, the late-paid path, idempotent confirmation and e-ticket access. The suite logs the existing intentional rollback-test "Error: boom" and still passes.
-================================================
+
+Date: 2026-11-18
+Student: Yusuf Eser
+Tool: Claude (Claude Code, Opus 5.5)
+Related Requirement: BLG-13 (SCRUM-116, bonus) Attach an itinerary to a post
+Prompt:
+Implement BLG-13 following contracts.md: PATCH /api/posts/:id/itinerary, the author attaches one of their own itineraries to their own post; readers see it only if the itinerary is public. Read Yassin's itineraries only, do not edit his module. Add e2e tests and docs.
+How the output was used:
+The assistant added an optional itineraryId to the Post schema, AttachItineraryDto (a valid id, or null to remove), PostItineraryController and PostItineraryService in the blog module (same separate-controller pattern as BLG-10 images). attach() gives 404 for a missing or someone else's post, then 404 for an itinerary that is missing or not the caller's own, then sets the field with one update filtered on post id and author. GET /api/posts/:id now returns `itinerary` (the public itinerary row) only when it is PUBLIC, not hidden and its author ACTIVE (same rule as ITN-20/21), otherwise null; PostResponseDto returns itineraryId. It reuses the read-only Itinerary model from BLG-12, so this branch is based on feature/BLG-12-author-page. Finding: the global JwtAuthGuard returns early on @Public routes, so GET /api/posts/:id never knows the reader; an "author always sees it" exception was dropped because it could never run. Verification: build, lint, the new e2e suite (8 tests) and the blog, author-page, blog-images, pagination and account-status e2e suites (341 tests) plus 46 blog unit/integration tests pass with --runInBand. Not done: a manual Swagger click-through against Atlas.

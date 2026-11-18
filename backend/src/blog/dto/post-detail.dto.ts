@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { PublicItineraryRowDto } from '../../itineraries/dto/public-itinerary-row.dto';
 import { Post } from '../schemas/post.schema';
 import { CommentResponseDto } from './comment-response.dto';
 import { PostImageDto } from './post-image.dto';
@@ -46,10 +47,19 @@ export class PostDetailDto {
   })
   comments: CommentResponseDto[];
 
+  @ApiProperty({
+    type: PublicItineraryRowDto,
+    nullable: true,
+    description:
+      'The attached itinerary (BLG-13), shown only while it is public (not hidden, author active); otherwise null.',
+  })
+  itinerary: PublicItineraryRowDto | null;
+
   static fromLean(
     doc: Post & { _id: { toString(): string } },
     authorName: string,
     comments: CommentResponseDto[] = [],
+    itinerary: PublicItineraryRowDto | null = null,
   ): PostDetailDto {
     return {
       id: doc._id.toString(),
@@ -65,6 +75,7 @@ export class PostDetailDto {
       likeCount: doc.likeCount ?? 0,
       commentCount: doc.commentCount ?? 0,
       comments,
+      itinerary,
     };
   }
 }

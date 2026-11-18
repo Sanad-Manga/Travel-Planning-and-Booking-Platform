@@ -38,6 +38,17 @@ changes do not alter the reservation.
 
 Response: the created reservation DTO (`id`, hotel, dates, room snapshots, total, status and `holdExpiresAt`).
 
+## Payment confirmation (HTL-17)
+
+After payment succeeds, the booking provider atomically changes the single reservation to `CONFIRMED`, removes the
+hold expiry, generates a unique `bookingReference`, and creates an in-app notification. Repeated confirmation for the
+same payment reference is idempotent. The same provider method is used when `BookingLifecycle` resolves a late-paid
+hold; it receives the payment reference and does not depend on a Stripe event object.
+
+The owning traveler can read the reservation and confirmation with `GET /api/hotel-bookings/:id`. The endpoint
+returns 404 for an invalid, missing, or another traveler's booking. In the response, `bookingReference` is null until
+confirmation and `holdExpiresAt` is null once the hold has been consumed.
+
 ## Atomic room holds (HTL-18)
 
 The same `POST /api/hotel-bookings` request creates one `PENDING_PAYMENT` reservation and holds every selected room
