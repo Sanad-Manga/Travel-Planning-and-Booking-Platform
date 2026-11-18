@@ -1788,6 +1788,45 @@ that module is not mine, so ItinerariesModule provides the same classes (as ITN-
 One line was added to NOT_LISTS in test/pagination.e2e-spec.ts (the GEN-05 test): the route takes page and limit but answers one
 flight-search page per airport, not one list. Mutation check: removing the owner filter failed the ownership test.
 Verification: lint, build, 1065 unit and 1325 e2e (3 workers) pass. Not done: a manual Swagger click-through against Atlas.
+================================================
+Date: 2026-11-18
+Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code, Sonnet 5)
+Related Requirement: PAY-03 (SCRUM-91) Refunds via Stripe Refunds API, status on bookings
+Prompt:
+Implement PAY-03 against docs/contracts.md and the authoritative reviewed-requirements sheet: for every cancellation with a
+positive refund amount (user cancellations per the provider's tiers; provider-initiated at 100%), issue a refund through the
+Stripe Refunds API, record it, and show its status (Pending/Refunded/Failed) on the booking details, notifying the user. Expose
+RefundsService.issue({bookingType, bookingId, amountCents, reason}) for FLT-26/HTL-21/FLT-06 (owned by other devs) to call from
+their own cancel endpoints — do not build those endpoints myself, only publish the contract. Dependencies (PAY-01, the shared
+RefundCalculator from FLT-09/HTL-10, GEN-01 notifications) were all confirmed Done in Jira before starting.
+How the output was used:
+Added a new `refunds` module (sibling to `payments`/`fx`, per contracts.md's module list, not folded into `payments` despite the
+same owner), with its own `Refund` schema (bookingType/bookingId/userId/stripePaymentIntentId/stripeRefundId/amountCents/
+currency/status/reason, a unique index on stripePaymentIntentId so a booking's payment is ever refunded exactly once). Added
+`StripeGateway.createRefund` (+ fake) alongside the existing PAY-01 methods, storing the free-text reason in Stripe metadata
+rather than its own constrained `reason` enum. `RefundsService.issue` validates the amount is a positive integer (rejecting
+before any Stripe call, satisfying "zero refund creates no Stripe call"), looks up the booking's SUCCEEDED Payment to enforce
+"never refunds more than was paid" and "never twice" (a unique-index race becomes a 409, mirroring PaymentsService's existing
+pattern), calls Stripe, records PENDING/REFUNDED/FAILED from the synchronous response, and notifies via NotificationsService.
+A refund left PENDING settles later through a new `refund.updated` webhook case added to PaymentsService.handleWebhookEvent,
+delegating to RefundsService.applyStripeRefundEvent (idempotent: only updates a still-PENDING row, notifies only on an actual
+change). Replaced the existing TODO(PAY-03) in PaymentsService.onSucceeded (the paid-but-already-expired edge case from
+contracts.md section 8) with a real call into RefundsService.issue. To avoid a module import cycle (PaymentsModule needs
+RefundsService; RefundsModule needs the Payment schema), RefundsModule registers its own MongooseModule.forFeature binding for
+the Payment schema class (reused, read-only) instead of importing PaymentsModule. Published `issue` and a second method,
+`getLatestForBooking(bookingType, bookingId)`, for Flights/Hotels to show refund status on their own booking-details responses
+(their files, not mine) — both documented in docs/contracts.md section 7 with the final signatures.
+Verification: tsc --noEmit and eslint clean. New refunds.service.spec.ts (hand-rolled fakes, no real DB): zero/negative amount
+rejected pre-Stripe-call, over-paid rejected, duplicate-refund-for-one-payment rejected (both the pre-check and the unique-index
+race path), REFUNDED-immediately and left-PENDING-then-settled-via-webhook paths, webhook idempotency (no duplicate notify).
+Extended payments.service.spec.ts's already-expired-booking test to assert RefundsService.issue is actually called. New
+refunds.module.spec.ts and an updated payments.module.spec.ts (overriding the new Refund/Notification model tokens) for DI
+wiring. Scoped run (src/refunds, src/payments) and the two related e2e specs (payments-webhook, payments-concurrency) all pass.
+Full unit suite reran under --ci: 73 suites / 1104 tests pass (an earlier non---ci run showed 47 flaky failures from an unrelated
+Windows temp-dir race in a seeding integration spec, not reproducing on rerun). The full e2e suite could not be completed in this
+session — repeated environment/session restarts killed the in-memory Mongo mid-run each time; not a known code issue, but
+genuinely not verified end-to-end as of this PR, flagged for CI to confirm.
 
 Student: Ahmed Sanad
 Tool: Claude (Claude Code)

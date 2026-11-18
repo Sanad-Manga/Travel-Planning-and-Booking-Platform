@@ -1,5 +1,5 @@
 import Stripe from 'stripe';
-import { CreatedIntent, RetrievedIntent, StripeGateway } from './stripe-gateway';
+import { CreatedIntent, CreatedRefund, RetrievedIntent, StripeGateway } from './stripe-gateway';
 
 interface FakeIntent {
   status: string;
@@ -7,10 +7,21 @@ interface FakeIntent {
   currency: string;
 }
 
+interface FakeRefund {
+  status: string;
+  amountCents: number;
+  paymentIntentId: string;
+}
+
 /** In-memory stand-in for StripeGateway, in the style of FakeBookingProvider/FakeExchangeRateProvider. */
 export class FakeStripeGateway implements StripeGateway {
   readonly intents = new Map<string, FakeIntent>();
+  readonly refunds = new Map<string, FakeRefund>();
+  private readonly refundsByIdempotencyKey = new Map<string, string>();
   private nextId = 1;
+  private nextRefundId = 1;
+  /** Overrides the status the next `createRefund` call returns; default is 'succeeded'. */
+  private nextRefundStatus: string | null = null;
   /** Queued event for the next `constructWebhookEvent` call; null = verify fails (bad signature). */
   private nextEvent: Stripe.Event | 'INVALID_SIGNATURE' | null = null;
 
@@ -37,6 +48,34 @@ export class FakeStripeGateway implements StripeGateway {
   setStatus(id: string, status: string): void {
     const intent = this.intents.get(id);
     if (intent) intent.status = status;
+  }
+
+  async createRefund(paymentIntentId: string, amountCents: number, _reason?: string, idempotencyKey?: string): Promise<CreatedRefund> {
+    // Mirrors real Stripe: a repeated idempotency key returns the SAME refund instead of a new one.
+    if (idempotencyKey) {
+      const existingId = this.refundsByIdempotencyKey.get(idempotencyKey);
+      if (existingId) {
+        const existing = this.refunds.get(existingId)!;
+        return { id: existingId, status: existing.status };
+      }
+    }
+    const id = `re_fake_${this.nextRefundId++}`;
+    const status = this.nextRefundStatus ?? 'succeeded';
+    this.nextRefundStatus = null;
+    this.refunds.set(id, { status, amountCents, paymentIntentId });
+    if (idempotencyKey) this.refundsByIdempotencyKey.set(idempotencyKey, id);
+    return { id, status };
+  }
+
+  /** Test helper: makes the NEXT `createRefund` call return this status instead of 'succeeded'. */
+  queueNextRefundStatus(status: string): void {
+    this.nextRefundStatus = status;
+  }
+
+  /** Test helper: move a fake Refund to any Stripe status without a real API call. */
+  setRefundStatus(id: string, status: string): void {
+    const refund = this.refunds.get(id);
+    if (refund) refund.status = status;
   }
 
   /** Test helper: what the next `constructWebhookEvent` call returns, or 'INVALID_SIGNATURE' to make it throw. */

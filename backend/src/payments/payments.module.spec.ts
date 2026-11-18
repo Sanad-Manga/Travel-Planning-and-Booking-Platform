@@ -8,6 +8,8 @@ import { PaymentsModule } from './payments.module';
 import { Payment } from './schemas/payment.schema';
 import { PolicyAcceptance } from './schemas/policy-acceptance.schema';
 import { StripePaymentActivity } from './stripe-payment-activity';
+import { Refund } from '../refunds/schemas/refund.schema';
+import { Notification } from '../notifications/schemas/notification.schema';
 
 describe('PaymentsModule wiring', () => {
   it('provides the lifecycle, real Stripe payment activity, and registers the every-minute hold-expiry cron job', async () => {
@@ -21,6 +23,10 @@ describe('PaymentsModule wiring', () => {
       .overrideProvider(getModelToken(PolicyAcceptance.name))
       .useValue({})
       .overrideProvider(getModelToken(Payment.name))
+      .useValue({})
+      .overrideProvider(getModelToken(Refund.name))
+      .useValue({})
+      .overrideProvider(getModelToken(Notification.name))
       .useValue({})
       .compile();
     const app = moduleRef.createNestApplication();

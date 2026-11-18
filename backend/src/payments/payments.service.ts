@@ -10,13 +10,14 @@ import { Model, Types } from 'mongoose';
 import Stripe from 'stripe';
 import { AuthenticatedUser, BookingStatus, BookingType, PaymentStatus } from '../common';
 import { assertOwner } from '../common/ownership';
+import { RefundsService } from '../refunds';
 import { BookingLifecycle } from './booking-lifecycle.service';
 import { Payable } from './booking-provider.interface';
 import { BookingProviderRegistry } from './booking-provider.registry';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { PaymentResponseDto } from './dto/payment-response.dto';
 import { PolicyAcceptanceService } from './policy-acceptance.service';
-import { Payment, PaymentLean } from './schemas/payment.schema';
+import { Payment, PaymentDocument, PaymentLean } from './schemas/payment.schema';
 import { STRIPE_GATEWAY, StripeGateway } from './stripe-gateway';
 
 /**
@@ -35,6 +36,7 @@ export class PaymentsService {
     private readonly policyAcceptance: PolicyAcceptanceService,
     private readonly lifecycle: BookingLifecycle,
     @Inject(STRIPE_GATEWAY) private readonly stripe: StripeGateway,
+    private readonly refunds: RefundsService,
   ) {}
 
   async create(user: AuthenticatedUser, dto: CreatePaymentDto): Promise<PaymentResponseDto> {
@@ -126,6 +128,9 @@ export class PaymentsService {
       case 'payment_intent.canceled':
         await this.setNonSuccessStatus(event.data.object as Stripe.PaymentIntent, PaymentStatus.CANCELLED);
         return;
+      case 'refund.updated':
+        await this.refunds.applyStripeRefundEvent(event);
+        return;
       default:
         return; // unhandled event types are acknowledged, not errors (Stripe's own guidance)
     }
@@ -145,14 +150,29 @@ export class PaymentsService {
 
     if (intent.amount !== payment.amountCents || intent.currency.toUpperCase() !== payment.currency.toUpperCase()) {
       // Stripe's own charged amount disagrees with what we recorded at creation — something is
-      // wrong (integration bug, or the intent was tampered with outside our flow). The money was
-      // genuinely collected, so it must stay visible for manual resolution/PAY-03, but the booking
-      // must NOT be auto-confirmed for a mismatched amount.
+      // wrong (integration bug, or the intent was tampered with outside our flow). The booking
+      // must NOT be auto-confirmed for a mismatched amount, either way.
       this.logger.error(
-        `PaymentIntent ${intent.id} succeeded with amount ${intent.amount} ${intent.currency}, expected ${payment.amountCents} ${payment.currency} — booking NOT confirmed, needs manual review`,
+        `PaymentIntent ${intent.id} succeeded with amount ${intent.amount} ${intent.currency}, expected ${payment.amountCents} ${payment.currency}`,
       );
-      payment.status = PaymentStatus.SUCCEEDED;
-      await payment.save();
+      if (intent.currency.toUpperCase() === payment.currency.toUpperCase()) {
+        // Same currency, only the amount disagrees: refund exactly what Stripe actually charged.
+        // The amountCents correction is applied by the helper itself, alongside the status change
+        // (and rolled back together with it on a transient failure) — never written here on its
+        // own, or a failed-then-retried refund would see intent.amount === payment.amountCents on
+        // the retry and wrongly take the normal confirm path instead of re-entering this branch.
+        await this.issueRefundForUnconfirmedPayment(
+          payment,
+          intent.amount,
+          'Charged amount did not match the expected amount for this booking',
+          intent.amount,
+        );
+      } else {
+        // The currency itself disagrees (PAY-04: this platform only ever uses one) — too unusual
+        // to resolve automatically; stays visible for manual review rather than guessing.
+        payment.status = PaymentStatus.SUCCEEDED;
+        await payment.save();
+      }
       return;
     }
 
@@ -161,13 +181,9 @@ export class PaymentsService {
     } catch (error) {
       if (error instanceof ConflictException || error instanceof NotFoundException) {
         // The booking is no longer PENDING_PAYMENT (e.g. it already expired while this payment
-        // was in flight). docs/contracts.md section 8: Payments must refund automatically here
-        // and never revive the booking — that's PAY-03's job (not built yet). Recorded as a known
-        // gap, not silently dropped: the payment is still marked SUCCEEDED below so the mismatch
-        // stays visible for a manual/PAY-03 refund, rather than retried forever.
-        // TODO(PAY-03): issue a refund for `payment.stripePaymentIntentId` and notify the user.
-        payment.status = PaymentStatus.SUCCEEDED;
-        await payment.save();
+        // was in flight). docs/contracts.md section 8: Payments refunds it automatically here and
+        // never revives the booking.
+        await this.issueRefundForUnconfirmedPayment(payment, payment.amountCents, 'Payment succeeded for a booking that had already expired');
         return;
       }
       throw error; // transient failure: stays non-SUCCEEDED so Stripe's retry tries confirmPaid again
@@ -175,6 +191,46 @@ export class PaymentsService {
 
     payment.status = PaymentStatus.SUCCEEDED;
     await payment.save();
+  }
+
+  /**
+   * Marks a payment SUCCEEDED (required for `RefundsService.issue`'s own "there's a SUCCEEDED
+   * payment for this booking" lookup) and immediately refunds it, for the two cases where Stripe
+   * genuinely charged the customer but the booking will never be confirmed from this payment. On
+   * a transient refund failure, rolls the status back so Stripe's webhook retry re-enters
+   * `onSucceeded` instead of short-circuiting on the SUCCEEDED idempotency check there and leaving
+   * the booking paid but never refunded (the same class of bug fixed for confirmation itself in
+   * PR #106). `RefundsService.issue` is itself idempotent — a retry after it already succeeded
+   * throws `ConflictException`, which is treated as "already done", not an error.
+   */
+  private async issueRefundForUnconfirmedPayment(
+    payment: PaymentDocument,
+    refundAmountCents: number,
+    reason: string,
+    correctedAmountCents?: number,
+  ): Promise<void> {
+    const previousStatus = payment.status;
+    const previousAmountCents = payment.amountCents;
+    payment.status = PaymentStatus.SUCCEEDED;
+    if (correctedAmountCents !== undefined) payment.amountCents = correctedAmountCents;
+    await payment.save();
+    try {
+      await this.refunds.issue({
+        bookingType: payment.bookingType,
+        bookingId: payment.bookingId.toString(),
+        amountCents: refundAmountCents,
+        reason,
+      });
+    } catch (error) {
+      if (error instanceof ConflictException) return; // already issued by a prior attempt — fine
+      // Both fields roll back together: a stale corrected amountCents with a reverted status would
+      // make a Stripe retry wrongly see intent.amount === payment.amountCents and take the normal
+      // confirm path instead of re-entering the mismatch branch above.
+      payment.status = previousStatus;
+      payment.amountCents = previousAmountCents;
+      await payment.save();
+      throw error;
+    }
   }
 
   private async setNonSuccessStatus(
