@@ -60,6 +60,47 @@ rooms. Concurrent attempts for the same room are serialized so only one can succ
 The `BookingLifecycle` expiry sweep changes due holds to `EXPIRED`; expired reservations no longer count as inventory
 claims, so the rooms become available again. Check-out must be after check-in, and check-in cannot be in the past.
 
+## Cancel a whole reservation (HTL-21)
+
+Both routes are for the authenticated `USER` who owns the reservation (admins and moderators get 403). Someone else's
+reservation, an unknown id and a malformed id answer 404.
+
+`GET /api/hotel-bookings/:id/cancel-preview` shows the refund before cancelling and changes nothing:
+
+```json
+{
+  "bookingId": "6730a1f2c3d4e5f607182950",
+  "checkIn": "2027-03-10",
+  "checkInAt": "2027-03-10T15:00:00.000Z",
+  "daysBeforeCheckIn": 12.5,
+  "totalCents": 25500,
+  "currency": "USD",
+  "refundCents": 12750,
+  "nonRefundableCents": 12750
+}
+```
+
+`POST /api/hotel-bookings/:id/cancel` (no body) cancels the reservation as a whole. There is no partial cancellation.
+It answers 200 with `{ booking, refund }`: `booking` is the reservation, now `CANCELLED`, and `refund` is the refund
+PAY-03 created (`id`, `status`, `amountCents`, `currency`, `createdAt`) or `null` when no tier applies.
+
+Rules:
+
+- Only a `CONFIRMED` reservation can be cancelled, and only before check-in. Any other status, or a check-in moment that
+  has passed, is a 409 (the preview answers the same 409).
+- The check-in moment is the check-in date at the hotel's check-in time (HTL-09), in UTC. A hotel that never set a time
+  counts from 00:00 of the check-in day.
+- The refund is `RefundCalculator.compute` (Payments) applied to the hotel's cancellation tiers (HTL-10), the days from
+  now to the check-in moment and the full reservation total. It is the same amount the preview showed. A hotel without
+  tiers, or a cancellation closer to check-in than every tier, refunds 0: the reservation is still cancelled, nothing is
+  sent to Stripe and `refund` is `null`.
+- The status change goes through `BookingLifecycle` (`CONFIRMED` to `CANCELLED`). It is one atomic write, so two
+  simultaneous cancellations give one 200 and one 409, and only the winner creates a refund. A `CANCELLED` reservation
+  no longer holds its rooms: they are available again for those dates in the same write.
+- The refund is created with `RefundsService.issue` (PAY-03), after the status change. If that call fails (for example
+  Stripe is down) the reservation stays `CANCELLED`, the error is logged and returned, and the refund has to be handled
+  by hand: a second cancel is a 409.
+
 ## Reservation lookups
 
 `RoomReservations.findReservedRoomIds(roomIds, startDate, endDate)` returns rooms with an overlapping `CONFIRMED`
