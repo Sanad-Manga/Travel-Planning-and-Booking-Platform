@@ -323,7 +323,10 @@ describe('ACC-14 real AppModule account list, database filtering and authorizati
   });
   it('sanitizes database failures without leaking raw driver messages', async () => {
     jest.spyOn(users, 'countDocuments').mockImplementationOnce(() => {
-      throw new Error('synthetic-private-database-diagnostic');
+      // Reject from exec() like a real driver failure. A synchronous throw here would leave the
+      // already-started find() of Promise.all orphaned, and closing the client in afterAll then
+      // interrupts it (MongoClientClosedError).
+      return { exec: () => Promise.reject(new Error('synthetic-private-database-diagnostic')) } as never;
     });
     const res = await list().expect(500);
     expect(res.body.message).toBe('Accounts could not be retrieved');

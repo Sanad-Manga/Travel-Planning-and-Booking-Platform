@@ -320,7 +320,10 @@ describe('AuditModule persistence, exported DI and authenticated HTTP listing', 
     );
     expect(await records.countDocuments()).toBe(0);
     jest.spyOn(records, 'countDocuments').mockImplementationOnce(() => {
-      throw new Error('mongodb://synthetic-private-database-diagnostic');
+      // Reject from exec() like a real driver failure. A synchronous throw here would leave the
+      // already-started find() of Promise.all orphaned, and closing the client in afterAll then
+      // interrupts it (MongoClientClosedError).
+      return { exec: () => Promise.reject(new Error('mongodb://synthetic-private-database-diagnostic')) } as never;
     });
     const response = await list().expect(500);
     expect(response.body.message).toBe('Audit records could not be retrieved');
