@@ -1800,13 +1800,17 @@ The suite passed all 1325 tests; only afterAll(app.close) failed. It could not b
 Date: 2026-11-18
 Student: Hessain Elrefaey
 Tool: Copilot (VS Code)
+Related Requirement: Blog comment validation regression (audit of develop at 0e30eb5)
+Prompt:
+Investigate the report that POST /api/posts/:id/comments with an empty body returns contradictory 400 messages for the 500-character limit and non-empty requirement. Add a test asserting the empty-body response contains only the applicable non-empty message.
+How the output was used:
+Created a separate feature/BLG-comment-empty-validation branch from 0e30eb5. The initial check used {"body":""}, which correctly returned only "Comment must not be empty" and missed the failing payload. Probed the actual endpoint with an omitted body property ({}), a null body, and no JSON body; each returned three details, including the misleading "Comment must be at most 500 characters" alongside "Comment must not be empty" and "body must be a string". Empty-string and whitespace-only strings returned only the non-empty message. Fixed this by defaulting a missing DTO body to an empty string and normalizing null to an empty string before validation. Added E2E cases for empty, whitespace, omitted, null, and no-body requests. Verification: comments E2E 28/28 and focused ESLint passed.
 Related Requirement: HTL-17 (SCRUM-86 review follow-up)
 Prompt:
 Address the HTL-17 review: make GET /api/hotel-bookings/:id lazily expire an overdue hold before returning it, add an overdue-hold E2E test, and replace the Jira placeholder in the PR body with SCRUM-86.
 How the output was used:
 Updated HotelBookingsService.getForUser to confirm the booking belongs to the caller first, call BookingLifecycle.expireIfDue(BookingType.HOTEL, id, now), then re-read and return the booking. Added an E2E regression showing an owner GET changes an overdue PENDING_PAYMENT booking to EXPIRED and clears holdExpiresAt. Hotel-bookings E2E (18/18), focused ESLint, and backend build pass. Updated the PR Jira key to SCRUM-86.
 
-================================================
 Date: 2026-11-18
 Student: Yusuf Eser
 Tool: Claude (Claude Code, Opus 5.5)
@@ -1820,9 +1824,7 @@ Prompt:
 Implement BLG-12 following contracts.md: public GET /api/authors/:id showing the author's name, join date, published posts and public itineraries; a deactivated author is 404; no private user data; lists paginated with PaginationDto/paginate(); malformed id 404. Do not edit the itineraries or users modules; read them through their services or models via DI. Add e2e tests and docs.
 How the output was used:
 The assistant added AuthorsController (@Public, Swagger with AuthorPageDto and 404/400 ErrorResponseDto), AuthorsService and AuthorPageDto in the blog module. The service reads the user through UsersService.findById (404 for unknown, malformed or DEACTIVATED), lists PUBLISHED and not hidden posts with paginate() and the existing PostListRowDto, and lists PUBLIC and not hidden itineraries with paginate() and the itineraries module's own toPublicItineraryRow mapper. ItinerariesModule has no "public itineraries of one author" method, so BlogModule registers the Itinerary schema read-only instead of editing that module; a message to the owner suggests listPublicByAuthor so Blog can switch later. Choices I accepted: page and limit apply to both lists; a SUSPENDED author's page shows posts but no itineraries (ITN-20 shows public itineraries only for ACTIVE authors). One line was added to NOT_LISTS in test/pagination.e2e-spec.ts (the route returns one object holding two paginated lists). Verification: build, lint, the new e2e suite (7 tests) and the blog, itineraries, pagination and account-status e2e suites pass with --runInBand; blog unit/integration specs pass. Not done: a manual Swagger click-through against Atlas.
-================================================
 
-================================================
 Date: 2026-11-18
 Student: Yusuf Eser
 Tool: Claude (Claude Code, Opus 5.5)
@@ -1831,4 +1833,3 @@ Prompt:
 Implement BLG-13 following contracts.md: PATCH /api/posts/:id/itinerary, the author attaches one of their own itineraries to their own post; readers see it only if the itinerary is public. Read Yassin's itineraries only, do not edit his module. Add e2e tests and docs.
 How the output was used:
 The assistant added an optional itineraryId to the Post schema, AttachItineraryDto (a valid id, or null to remove), PostItineraryController and PostItineraryService in the blog module (same separate-controller pattern as BLG-10 images). attach() gives 404 for a missing or someone else's post, then 404 for an itinerary that is missing or not the caller's own, then sets the field with one update filtered on post id and author. GET /api/posts/:id now returns `itinerary` (the public itinerary row) only when it is PUBLIC, not hidden and its author ACTIVE (same rule as ITN-20/21), otherwise null; PostResponseDto returns itineraryId. It reuses the read-only Itinerary model from BLG-12, so this branch is based on feature/BLG-12-author-page. Finding: the global JwtAuthGuard returns early on @Public routes, so GET /api/posts/:id never knows the reader; an "author always sees it" exception was dropped because it could never run. Verification: build, lint, the new e2e suite (8 tests) and the blog, author-page, blog-images, pagination and account-status e2e suites (341 tests) plus 46 blog unit/integration tests pass with --runInBand. Not done: a manual Swagger click-through against Atlas.
-================================================
