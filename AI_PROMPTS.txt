@@ -1998,3 +1998,57 @@ Implement FLT-25 "My flight bookings" in the flights module only: GET /api/fligh
 How the output was used:
 Added FlightBookingsService.listMine() (plus GET /api/flight-bookings on the existing controller) and a flights-module MyFlightBookingsQueryDto/FlightBookingListRowDto. Ownership is part of the MongoDB query (the shared bookingVisibilityFilter narrowed to the caller's userId for role USER, so it can never widen), and the group is derived in the pipeline from the outbound segment's flight departureAt through one $lookup, so the group filter, skip/limit and total are computed in the database and pages stay stable (createdAt desc, _id desc). Legacy records without a segments array fall back to the top-level flightId, and a missing bookingReference stays absent instead of being generated. List rows reuse the existing segment/passenger mappers, so passport/identity numbers, paymentRef and Stripe ids never appear. GET /:id was left unchanged and still reads the latest refund through RefundsService.getLatestForBooking. Updated Swagger (route, query params, paginated schema, 400/401/403), docs/contracts.md and the flight E2E suite (grouping, cancellation precedence, round-trip grouping, legacy one-way, owner isolation, pagination/default/invalid pages, Swagger) plus a mapper unit test. No common/ or other module files were changed.
 Verification: npm run build passed; npm run lint passed; npx jest flight-booking-list-row --runInBand 3/3 passed; npx jest --config ./test/jest-e2e.json flight-bookings-hold --runInBand 68/68 passed.
+
+Date: 2026-11-19
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: GH-116 / SCRUM-78 (BLG-10), SCRUM-22 (GEN-08)
+Prompt:
+Fix private Blog images exposed at /uploads using the existing GH116 worktree;
+verify middleware ordering against actual AppModule/static serving, reuse the
+complete JwtAuthGuard, fail closed on database errors, preserve public upload
+consumers and existing URLs, stay within the file whitelist, and leave changes
+local for independent review. Ahmed/Yusuf privacy-policy approval remains pending.
+How the output was used:
+Confirmed fix/GH-116-upload-privacy was clean, fetched origin/develop and applied
+the authorized fast-forward-only update from b6aab1810cac63757c2751a05e82ee953e3cc3d0
+to 1316126ac4b9f18e78090566adba318152009553. Reproduced the vulnerability first:
+the real draft Post API returned 404 while its anonymous direct image URL returned
+200, causing the new regression assertion to fail as intended.
+Retained ServeStaticModule and mounted a narrowly scoped root /uploads gate in
+UploadsModule.configure(), before static registration. Matching ready upload
+metadata and actual Post attachment are required. Published visible images stay
+public; drafts allow their author only; hidden published images allow author or
+ADMIN. Inaccessible/missing/orphan images return 404; failed metadata/Post/account
+reads return sanitized 503 without serving bytes or altering files/metadata.
+The middleware calls the unchanged JwtAuthGuard with existing UsersService,
+Reflector and official readJwtSecrets/HS256 configuration. It preserves account,
+credential-version, forced-change and existing logout/access-token semantics.
+No JWT authentication logic was copied, protected auth files changed, or new
+serving controller introduced. Blog responses use no-store and Vary: Cookie;
+external caches must be purged and /uploads must route through Nest. An in-flight
+transfer authorized before a concurrent visibility change cannot be recalled.
+Added 67 real AppModule E2E cases covering GET/HEAD policy, invalid authentication,
+credential replay, conditional/range requests, URL variants, lookup failures,
+missing metadata/files, JPEG/PNG bytes and all three public upload kinds. Changed
+only the shared GEN-08 public fixture's target kind from synthetic unattached post
+to hotel, preserving its existing assertions. Updated only the allowed upload
+README and Blog images documentation; this entry is append-only.
+Verification:
+Focused E2E 148/148 (6 suites); focused Jest 111/111 (8 suites).
+Full Jest --runInBand: 1,141/1,141, 78 suites.
+Standard full E2E --runInBand: 1,496/1,496, 58 suites.
+Shared uploads: 37/37 Jest and 7/7 E2E; BLG-10 E2E 12/12; auth E2E 24/24;
+activity images Jest 13/13; hotel E2E 18/18; airline E2E 20/20;
+itinerary E2E 149/149. Privacy E2E 67/67 includes 14 dedicated authentication/
+spoofing tests and 3 public-kind regressions. Build passed. Full ESLint passed
+after fixing three computed-property line-break lint errors in the new test;
+privacy E2E rerun after that test-helper-only cleanup passed 67/67. Full E2E
+emitted listener-count warnings during existing suites; no test failures.
+All databases, users and uploaded fixtures were disposable/synthetic. No real
+.env contents were read, shared Atlas used, or dependencies installed. Contracts,
+auth/common/users/Blog production files, other modules, schemas, AppModule,
+setup-app, UploadService/storage and dependency files were unchanged by this fix.
+GH-116 was open with no issue comments when independently checked; no Ahmed/Yusuf
+policy approval was verified. Implementation is local for independent review;
+team approval remains pending. No commit, push, feature merge, PR or Jira change.
