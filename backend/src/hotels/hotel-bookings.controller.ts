@@ -13,15 +13,21 @@ import {
 } from '@nestjs/swagger';
 import { AuthenticatedUser, CurrentUser, ErrorResponseDto, Role, Roles } from '../common';
 import { CreateHotelBookingDto } from './dto/create-hotel-booking.dto';
+import { CreateHotelReviewDto } from './dto/create-hotel-review.dto';
 import { HotelBookingResponseDto } from './dto/hotel-booking-response.dto';
 import { HotelBookingsService } from './hotel-bookings.service';
+import { HotelReviewsService } from './hotel-reviews.service';
+import { HotelReviewItemDto } from './dto/hotel-details-response.dto';
 
 @ApiTags('hotel-bookings')
 @ApiCookieAuth()
 @ApiUnauthorizedResponse({ type: ErrorResponseDto, description: 'Not logged in' })
 @Controller('hotel-bookings')
 export class HotelBookingsController {
-  constructor(private readonly bookings: HotelBookingsService) {}
+  constructor(
+    private readonly bookings: HotelBookingsService,
+    private readonly reviews: HotelReviewsService,
+  ) {}
 
   @Get(':id')
   @Roles(Role.USER)
@@ -58,5 +64,25 @@ export class HotelBookingsController {
     @Body() dto: CreateHotelBookingDto,
   ): Promise<HotelBookingResponseDto> {
     return this.bookings.create(user, dto);
+  }
+
+  @Post(':id/review')
+  @Roles(Role.USER)
+  @ApiOperation({
+    summary: 'Review a completed hotel reservation (HTL-23)',
+    description:
+      'The reservation owner may submit one 1-5 star rating and an optional written review of at most 1000 characters after check-out.',
+  })
+  @ApiCreatedResponse({ type: HotelReviewItemDto })
+  @ApiBadRequestResponse({ type: ErrorResponseDto, description: 'Rating or review text is invalid' })
+  @ApiForbiddenResponse({ type: ErrorResponseDto, description: 'Only a traveler can submit a review' })
+  @ApiNotFoundResponse({ type: ErrorResponseDto, description: 'Hotel booking not found' })
+  @ApiConflictResponse({ type: ErrorResponseDto, description: 'The stay is not completed or already has a review' })
+  createReview(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: CreateHotelReviewDto,
+  ): Promise<HotelReviewItemDto> {
+    return this.reviews.createForBooking(id, user, dto);
   }
 }
