@@ -29,6 +29,9 @@ describe('hotel bookings (HTL-16) over HTTP', () => {
   let otherHotelId: Types.ObjectId;
   let travelerCookie: string;
   let travelerId: string;
+  let otherTravelerCookie: string;
+  let otherTravelerId: string;
+  let adminCookie: string;
   let lifecycle: BookingLifecycle;
 
   const roomIds = {
@@ -39,6 +42,38 @@ describe('hotel bookings (HTL-16) over HTTP', () => {
   };
   const http = () => request(app.getHttpServer());
   const bookingCount = () => db.collection('hotelBookings').countDocuments();
+  const completedStayFixture = async (
+    checkOut = day(-1),
+    roomsCount = 1,
+    userId = travelerId,
+    ownerHotelId = hotelId,
+  ): Promise<Types.ObjectId> => {
+    const id = new Types.ObjectId();
+    await db.collection('hotelBookings').insertOne({
+      _id: id,
+      userId: new Types.ObjectId(userId),
+      hotelId: ownerHotelId,
+      checkIn: day(-3),
+      checkOut,
+      rooms: Array.from({ length: roomsCount }, () => ({
+        roomId: roomIds.standard,
+        adults: 1,
+        children: 0,
+        name: 'Standard',
+        type: 'Double',
+        maxOccupancy: 3,
+        pricePerNightCents: 8_500,
+        totalCents: 17_000,
+      })),
+      nights: 2,
+      totalCents: roomsCount * 17_000,
+      currency: 'USD',
+      status: BookingStatus.CONFIRMED,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    return id;
+  };
   const requestBody = (roomId: Types.ObjectId, extra: Record<string, unknown> = {}) => ({
     checkIn: day(2),
     checkOut: day(5),
@@ -120,6 +155,7 @@ describe('hotel bookings (HTL-16) over HTTP', () => {
 
     await db.model('User').init();
     await db.model(HotelBooking.name).init();
+    await db.model('HotelReview').init();
     hotelId = new Types.ObjectId();
     otherHotelId = new Types.ObjectId();
     await db.collection('hotels').insertMany([hotel(hotelId, 'Alpha'), hotel(otherHotelId, 'Beta')]);
@@ -130,12 +166,58 @@ describe('hotel bookings (HTL-16) over HTTP', () => {
       room(roomIds.inactive, hotelId, 'Inactive', 1_000, 2, false),
     ]);
     await loginAsTraveler();
+    await db.collection('users').insertOne({
+      name: 'Other Hotel Traveler',
+      email: 'other-hotel-traveler@example.com',
+      passwordHash: hashSync(PASSWORD, 4),
+      role: Role.USER,
+      status: 'ACTIVE',
+      consentAcceptedAt: new Date(),
+      preferredCurrency: 'USD',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const otherLogin = await http()
+      .post('/api/auth/login')
+      .send({ email: 'other-hotel-traveler@example.com', password: PASSWORD })
+      .expect(200);
+    otherTravelerId = otherLogin.body.id;
+    otherTravelerCookie = (otherLogin.headers['set-cookie'] as unknown as string[])
+      .map((cookie) => cookie.split(';')[0])
+      .join('; ');
+    await db.collection('users').insertOne({
+      name: 'Hotel Admin',
+      email: 'hotel-admin@example.com',
+      passwordHash: hashSync(PASSWORD, 4),
+      role: Role.ADMIN,
+      status: 'ACTIVE',
+      consentAcceptedAt: new Date(),
+      preferredCurrency: 'USD',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const adminLogin = await http()
+      .post('/api/auth/login')
+      .send({ email: 'hotel-admin@example.com', password: PASSWORD })
+      .expect(200);
+    adminCookie = (adminLogin.headers['set-cookie'] as unknown as string[])
+      .map((cookie) => cookie.split(';')[0])
+      .join('; ');
   }, 180_000);
 
   beforeEach(async () => {
     await db.collection('hotelBookings').deleteMany({});
+    await db.collection('hotelReviews').deleteMany({});
+    await db.collection('hotels').updateMany({}, { $set: { averageRating: null, reviewCount: 0 } });
     await db.collection('notifications').deleteMany({ userId: new Types.ObjectId(travelerId) });
     await db.collection('rooms').updateOne({ _id: roomIds.standard }, { $unset: { blockedRanges: '' } });
+  });
+
+  afterEach(async () => {
+    await db.collection('users').updateOne(
+      { _id: new Types.ObjectId(otherTravelerId) },
+      { $set: { status: 'ACTIVE' } },
+    );
   });
 
   afterAll(async () => {
@@ -458,25 +540,205 @@ describe('hotel bookings (HTL-16) over HTTP', () => {
     await http().get(`/api/hotel-bookings/${new Types.ObjectId().toHexString()}`).set('Cookie', travelerCookie).expect(404);
     await http().get(`/api/hotel-bookings/${response.body.id}`).expect(401);
 
-    await db.collection('users').insertOne({
-      name: 'Other Hotel Traveler',
-      email: 'other-hotel-traveler@example.com',
-      passwordHash: hashSync(PASSWORD, 4),
-      role: Role.USER,
-      status: 'ACTIVE',
-      consentAcceptedAt: new Date(),
-      preferredCurrency: 'USD',
-      createdAt: new Date(),
+    await http()
+      .get(`/api/hotel-bookings/${response.body.id}`)
+      .set('Cookie', otherTravelerCookie)
+      .expect(404);
+  });
+
+  it('completes confirmed stays after checkout via the sweep and owner read', async () => {
+    const swept = await completedStayFixture(day(-2));
+    const bookings = app.get(HotelBookingsService);
+
+    await expect(bookings.completePastStays(new Date())).resolves.toBe(1);
+    expect((await db.collection('hotelBookings').findOne({ _id: swept }))?.status).toBe(BookingStatus.COMPLETED);
+
+    const lazy = await completedStayFixture(day(-1));
+    const response = await http()
+      .get(`/api/hotel-bookings/${lazy.toHexString()}`)
+      .set('Cookie', travelerCookie)
+      .expect(200);
+    expect(response.body.status).toBe(BookingStatus.COMPLETED);
+    expect((await db.collection('hotelBookings').findOne({ _id: lazy }))?.status).toBe(BookingStatus.COMPLETED);
+  });
+
+  it('requires an authenticated traveler for review mutations', async () => {
+    const stay = await completedStayFixture();
+    const unauthorized = await http()
+      .post(`/api/hotel-bookings/${stay.toHexString()}/review`)
+      .send({ rating: 5 })
+      .expect(401);
+    expect(unauthorized.body.statusCode).toBe(401);
+
+    await http()
+      .post(`/api/hotel-bookings/${stay.toHexString()}/review`)
+      .set('Cookie', adminCookie)
+      .send({ rating: 5 })
+      .expect(403);
+  });
+
+  it('allows one review per completed reservation, validates fields, and recalculates the hotel average', async () => {
+    const firstStay = await completedStayFixture(day(-1), 2);
+    const secondStay = await completedStayFixture(day(-2));
+
+    const earlyStay = await completedStayFixture(day(1));
+    await http()
+      .post(`/api/hotel-bookings/${earlyStay.toHexString()}/review`)
+      .set('Cookie', travelerCookie)
+      .send({ rating: 5 })
+      .expect(409);
+
+    const pastNonCompletedStay = await completedStayFixture(day(-2));
+    await db.collection('hotelBookings').updateOne(
+      { _id: pastNonCompletedStay },
+      { $set: { status: BookingStatus.CANCELLED } },
+    );
+    await http()
+      .post(`/api/hotel-bookings/${pastNonCompletedStay.toHexString()}/review`)
+      .set('Cookie', travelerCookie)
+      .send({ rating: 5 })
+      .expect(409);
+
+    const wrongOwner = await http()
+      .post(`/api/hotel-bookings/${firstStay.toHexString()}/review`)
+      .set('Cookie', otherTravelerCookie)
+      .send({ rating: 5 })
+      .expect(404);
+    expect(wrongOwner.body.statusCode).toBe(404);
+
+    const invalidRating = await http()
+      .post(`/api/hotel-bookings/${firstStay.toHexString()}/review`)
+      .set('Cookie', travelerCookie)
+      .send({ rating: 6 })
+      .expect(400);
+    expect(invalidRating.body.details).toEqual(
+      expect.arrayContaining([expect.objectContaining({ field: 'rating' })]),
+    );
+    const invalidComment = await http()
+      .post(`/api/hotel-bookings/${firstStay.toHexString()}/review`)
+      .set('Cookie', travelerCookie)
+      .send({ rating: 5, comment: 'x'.repeat(1001) })
+      .expect(400);
+    expect(invalidComment.body.details).toEqual(
+      expect.arrayContaining([expect.objectContaining({ field: 'comment' })]),
+    );
+
+    const [created, raced] = await Promise.all([
+      http()
+        .post(`/api/hotel-bookings/${firstStay.toHexString()}/review`)
+        .set('Cookie', travelerCookie)
+        .send({ rating: 5, comment: 'Excellent stay' }),
+      http()
+        .post(`/api/hotel-bookings/${firstStay.toHexString()}/review`)
+        .set('Cookie', travelerCookie)
+        .send({ rating: 5, comment: 'Excellent stay' }),
+    ]);
+    expect([created.status, raced.status].sort()).toEqual([201, 409]);
+
+    const secondReview = await http()
+      .post(`/api/hotel-bookings/${secondStay.toHexString()}/review`)
+      .set('Cookie', travelerCookie)
+      .send({ rating: 1 })
+      .expect(201);
+    expect(secondReview.body.comment).toBe('');
+    expect(await db.collection('hotelReviews').countDocuments({})).toBe(2);
+    expect(await db.collection('hotels').findOne({ _id: hotelId })).toMatchObject({
+      averageRating: 3,
+      reviewCount: 2,
+    });
+
+    const details = await http().get(`/api/hotels/${hotelId.toHexString()}`).expect(200);
+    expect(details.body).toMatchObject({ averageRating: 3, reviewCount: 2 });
+    expect(details.body.reviews.map((review: { id: string }) => review.id)).toEqual([
+      secondReview.body.id,
+      created.status === 201 ? created.body.id : raced.body.id,
+    ]);
+  });
+
+  it('allows only the review author to edit/delete and recalculates after each change', async () => {
+    const firstStay = await completedStayFixture(day(-1), 2);
+    const secondStay = await completedStayFixture(day(-2), 1, otherTravelerId);
+    const firstReview = await http()
+      .post(`/api/hotel-bookings/${firstStay.toHexString()}/review`)
+      .set('Cookie', travelerCookie)
+      .send({ rating: 5, comment: 'Great' })
+      .expect(201);
+    const secondReview = await http()
+      .post(`/api/hotel-bookings/${secondStay.toHexString()}/review`)
+      .set('Cookie', otherTravelerCookie)
+      .send({ rating: 1 })
+      .expect(201);
+
+    await http()
+      .patch(`/api/reviews/${firstReview.body.id}`)
+      .set('Cookie', otherTravelerCookie)
+      .send({ rating: 2 })
+      .expect(404);
+    await http()
+      .delete(`/api/reviews/${firstReview.body.id}`)
+      .set('Cookie', otherTravelerCookie)
+      .expect(404);
+
+    const updated = await http()
+      .patch(`/api/reviews/${firstReview.body.id}`)
+      .set('Cookie', travelerCookie)
+      .send({ rating: 3, comment: 'Updated review' })
+      .expect(200);
+    expect(updated.body).toMatchObject({ id: firstReview.body.id, rating: 3, comment: 'Updated review' });
+    expect(await db.collection('hotels').findOne({ _id: hotelId })).toMatchObject({
+      averageRating: 2,
+      reviewCount: 2,
+    });
+
+    await http()
+      .delete(`/api/reviews/${secondReview.body.id}`)
+      .set('Cookie', otherTravelerCookie)
+      .expect(204);
+    expect(await db.collection('hotels').findOne({ _id: hotelId })).toMatchObject({
+      averageRating: 3,
+      reviewCount: 1,
+    });
+    await http()
+      .delete(`/api/reviews/${firstReview.body.id}`)
+      .set('Cookie', travelerCookie)
+      .expect(204);
+    expect(await db.collection('hotels').findOne({ _id: hotelId })).toMatchObject({
+      averageRating: null,
+      reviewCount: 0,
+    });
+  });
+
+  it('shows deactivated review authors as Deleted user and excludes hidden reviews', async () => {
+    const stay = await completedStayFixture(day(-1), 1, otherTravelerId);
+    const review = await http()
+      .post(`/api/hotel-bookings/${stay.toHexString()}/review`)
+      .set('Cookie', otherTravelerCookie)
+      .send({ rating: 4, comment: 'Visible review' })
+      .expect(201);
+
+    await db.collection('hotelReviews').insertOne({
+      bookingId: new Types.ObjectId(),
+      hotelId,
+      authorId: new Types.ObjectId(travelerId),
+      rating: 1,
+      comment: 'Hidden review',
+      isHidden: true,
+      createdAt: new Date(Date.now() + 1000),
       updatedAt: new Date(),
     });
-    const otherLogin = await http()
-      .post('/api/auth/login')
-      .send({ email: 'other-hotel-traveler@example.com', password: PASSWORD })
-      .expect(200);
-    const otherCookie = (otherLogin.headers['set-cookie'] as unknown as string[])
-      .map((cookie) => cookie.split(';')[0])
-      .join('; ');
-    await http().get(`/api/hotel-bookings/${response.body.id}`).set('Cookie', otherCookie).expect(404);
+    await db.collection('users').updateOne(
+      { _id: new Types.ObjectId(otherTravelerId) },
+      { $set: { status: 'DEACTIVATED' } },
+    );
+
+    const details = await http().get(`/api/hotels/${hotelId.toHexString()}`).expect(200);
+    expect(details.body).toMatchObject({ averageRating: 4, reviewCount: 1 });
+    expect(details.body.reviews).toHaveLength(1);
+    expect(details.body.reviews[0]).toMatchObject({
+      id: review.body.id,
+      authorName: 'Deleted user',
+      comment: 'Visible review',
+    });
   });
 
   it('expires an overdue pending hold when its owner reads the booking', async () => {
@@ -571,5 +833,8 @@ describe('hotel bookings (HTL-16) over HTTP', () => {
     const response = await http().get('/api/docs-json').expect(200);
     expect(response.body.paths['/api/hotel-bookings'].post.summary).toContain('HTL-18');
     expect(response.body.paths['/api/hotel-bookings/{id}'].get.summary).toContain('HTL-17');
+    expect(response.body.paths['/api/hotel-bookings/{id}/review'].post.summary).toContain('HTL-23');
+    expect(response.body.paths['/api/reviews/{id}'].patch.summary).toContain('HTL-23');
+    expect(response.body.paths['/api/reviews/{id}'].delete.summary).toContain('HTL-23');
   });
 });

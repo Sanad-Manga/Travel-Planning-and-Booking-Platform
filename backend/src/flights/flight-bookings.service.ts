@@ -6,17 +6,23 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
-import { Connection, Model, Types } from 'mongoose';
+import { Connection, Model, PipelineStage, Types } from 'mongoose';
 import {
   AuthenticatedUser,
   BookingStatus,
   BookingType,
   CabinClass,
+  DEFAULT_PAGE,
+  DEFAULT_PAGE_SIZE,
   HOLD_MINUTES,
   isCalendarDate,
+  PaginatedResponse,
   PassengerType,
   PLATFORM_CURRENCY,
+  Role,
+  toPaginated,
 } from '../common';
+import { bookingVisibilityFilter } from '../common/ownership';
 import { AirlinesService } from '../airlines';
 import { BookingLifecycle } from '../payments';
 import { RefundsService, RefundSummary } from '../refunds';
@@ -24,7 +30,17 @@ import { FlightInventoryService } from './flight-inventory.service';
 import {
   FlightBookingRefundDto,
   FlightBookingSummaryResponseDto,
+  FlightBookingSummarySegmentDto,
 } from './dto/flight-booking-summary-response.dto';
+import {
+  FlightBookingListRowDto,
+  FlightBookingListRowSource,
+  toFlightBookingListRow,
+} from './dto/flight-booking-list-row.dto';
+import {
+  FlightBookingGroup,
+  MyFlightBookingsQueryDto,
+} from './dto/my-flight-bookings-query.dto';
 import {
   FlightBookingResponseDto,
   toBookingPassengerResponse,
@@ -286,6 +302,180 @@ export class FlightBookingsService {
       );
     }
     return [{ flightId: dto.flightId, cabinClass: dto.cabinClass }];
+  }
+
+  /**
+   * FLT-25: the traveler's own bookings, grouped UPCOMING / PAST / CANCELLED and paginated.
+   *
+   * Ownership is part of the database query: the shared visibility helper is narrowed to role USER,
+   * so no caller can widen "my bookings" to an admin/moderator view by passing an id. The group is
+   * computed in MongoDB from the outbound segment's flight `departureAt` (one `$lookup`), so skip,
+   * limit and the total are correct without loading the whole collection into memory. Rows are
+   * newest first (`createdAt`, then `_id`) so pages are deterministic and stable.
+   * `now` is a parameter only so tests can fix the clock.
+   */
+  async listMine(
+    user: AuthenticatedUser,
+    query: MyFlightBookingsQueryDto,
+    now: Date = new Date(),
+  ): Promise<PaginatedResponse<FlightBookingListRowDto>> {
+    const page = query.page ?? DEFAULT_PAGE;
+    const limit = query.limit ?? DEFAULT_PAGE_SIZE;
+    const filter = this.myBookingsFilter(user);
+
+    const pageStages: PipelineStage[] = [
+      { $match: filter },
+      // Newest first; `_id` breaks ties so a row never shows on two pages.
+      { $sort: { createdAt: -1, _id: -1 } },
+    ];
+    if (query.group) {
+      // Filtering needs the computed group, so it must happen before skip/limit.
+      pageStages.push(
+        ...this.bookingGroupStages(now),
+        { $match: { group: query.group } },
+      );
+    }
+    pageStages.push({ $skip: (page - 1) * limit }, { $limit: limit });
+    if (!query.group) {
+      // Without a filter the group only labels the page rows, so it is computed after the limit.
+      pageStages.push(...this.bookingGroupStages(now));
+    }
+    pageStages.push({
+      $project: {
+        outboundFlight: 0,
+        outboundFlightId: 0,
+        outboundDepartureAt: 0,
+      },
+    });
+
+    const [rows, total] = await Promise.all([
+      this.model.aggregate<FlightBookingListRowSource>(pageStages),
+      this.countMyBookings(filter, query.group, now),
+    ]);
+
+    const flightIds = new Set<string>();
+    for (const row of rows) {
+      for (const segment of getFlightBookingSegments(row)) {
+        flightIds.add(segment.flightId.toString());
+      }
+    }
+    const flightDocs = flightIds.size
+      ? await this.flights
+          .find({
+            _id: { $in: [...flightIds].map((id) => new Types.ObjectId(id)) },
+          })
+          .lean<FlightLean[]>()
+          .exec()
+      : [];
+    const flightsById = new Map(
+      flightDocs.map((flight) => [flight._id.toString(), flight]),
+    );
+
+    const items = rows.map((row) => {
+      const segments: FlightBookingSummarySegmentDto[] =
+        getFlightBookingSegments(row).map((segment) => {
+          const flight = flightsById.get(segment.flightId.toString());
+          if (!flight) {
+            throw new NotFoundException('A booked flight segment was not found');
+          }
+          return {
+            ...toFlightBookingSegmentResponse(segment),
+            flight: toFlightResponse(flight, now),
+          };
+        });
+      const [outbound] = segments;
+      if (!outbound) {
+        throw new InternalServerErrorException(
+          'The flight booking has no outbound segment',
+        );
+      }
+      return toFlightBookingListRow(row, segments, outbound.flight);
+    });
+
+    return toPaginated(items, total, page, limit);
+  }
+
+  /**
+   * "My bookings" is owner-only. A USER's shared visibility filter is their own `userId`; any other
+   * role would match broader data, so it is matched to nothing here as well as by the route's
+   * `@Roles(Role.USER)`. Aggregation pipelines bypass Mongoose casting, so the id is cast explicitly.
+   */
+  private myBookingsFilter(user: AuthenticatedUser): Record<string, unknown> {
+    const scope = bookingVisibilityFilter(user);
+    if (user.role !== Role.USER || typeof scope.userId !== 'string') {
+      return { _id: { $in: [] } };
+    }
+    return { userId: new Types.ObjectId(scope.userId) };
+  }
+
+  /**
+   * The stages that derive each booking's group from the outbound segment's flight. `segments` is
+   * optional on legacy one-way records, so the top-level `flightId` is the fallback. The departure
+   * date is read from the flight document; the booking itself stores no departure date.
+   */
+  private bookingGroupStages(now: Date): PipelineStage[] {
+    return [
+      {
+        $addFields: {
+          outboundFlightId: {
+            $ifNull: [{ $arrayElemAt: ['$segments.flightId', 0] }, '$flightId'],
+          },
+        },
+      },
+      {
+        $lookup: {
+          from: this.flights.collection.name,
+          let: { outboundFlightId: '$outboundFlightId' },
+          pipeline: [
+            { $match: { $expr: { $eq: ['$_id', '$$outboundFlightId'] } } },
+            { $project: { departureAt: 1 } },
+          ],
+          as: 'outboundFlight',
+        },
+      },
+      {
+        $addFields: {
+          outboundDepartureAt: {
+            $arrayElemAt: ['$outboundFlight.departureAt', 0],
+          },
+        },
+      },
+      {
+        $addFields: {
+          group: {
+            $switch: {
+              branches: [
+                {
+                  case: { $eq: ['$status', BookingStatus.CANCELLED] },
+                  then: FlightBookingGroup.CANCELLED,
+                },
+                {
+                  case: { $gt: ['$outboundDepartureAt', now] },
+                  then: FlightBookingGroup.UPCOMING,
+                },
+              ],
+              default: FlightBookingGroup.PAST,
+            },
+          },
+        },
+      },
+    ];
+  }
+
+  /** The total after the optional group filter, without counting rows in the application. */
+  private async countMyBookings(
+    filter: Record<string, unknown>,
+    group: FlightBookingGroup | undefined,
+    now: Date,
+  ): Promise<number> {
+    if (!group) return this.model.countDocuments(filter).exec();
+    const rows = await this.model.aggregate<{ count: number }>([
+      { $match: filter },
+      ...this.bookingGroupStages(now),
+      { $match: { group } },
+      { $count: 'count' },
+    ]);
+    return rows[0]?.count ?? 0;
   }
 
   /**

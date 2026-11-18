@@ -110,7 +110,7 @@ Other query fields are a 400. The hotel is checked first, so an unknown hotel is
 - `rooms` is `null` without dates (no rooms are returned). With dates it is the **HTL-15 page** (`HotelFreeRoomsService.listFreeRooms`,
   same items, order and paging as `GET /api/hotels/:id/rooms/available`; no second availability rule). `{ "items": [] ... }`
   means no room is free; `null` means rooms were not asked for.
-- `averageRating` / `reviewCount` / `reviews`: the reviews module (HTL-23/HTL-24, Hotels B) is not on develop yet, so the
-  stable empty shape is returned (`null`, `0`, `[]`). The review item shape (`id`, `rating`, `comment`, `authorName`,
-  `createdAt`) is provisional. When that module merges, only `HotelDetailsService.loadReviews` changes (visible, non-hidden reviews only).
+- `averageRating` / `reviewCount` / `reviews`: average and count include only visible reviews; `reviews` is newest first
+  and uses `{ id, rating, comment, authorName, createdAt }`. With no visible reviews the values are `null`, `0`, and
+  `[]`. Deactivated authors display as `Deleted user`.
 - Route order: `HotelDetailsController` is registered after `HotelSearchController`, so `GET /hotels/search` is never read as an id.
