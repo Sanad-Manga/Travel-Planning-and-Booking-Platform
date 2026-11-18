@@ -133,6 +133,8 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
       auth: 'user',
       total: 25,
     },
+    // BON-02: the user's own favourites
+    { swagger: '/api/favourites', url: '/api/favourites', auth: 'user', total: 25 },
     {
       swagger: '/api/itineraries/public/search',
       url: '/api/itineraries/public/search',
@@ -311,6 +313,16 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
           startDate: '2099-01-01',
           days: [{ _id: new Types.ObjectId(), cityId: 'city-0', notes: '' }],
         }),
+      })),
+    );
+    // BON-02: 25 saved hotels (ids only; a missing hotel is simply listed as not available).
+    await db.collection('favourites').insertMany(
+      rows(25, (i) => ({
+        userId,
+        type: 'HOTEL',
+        itemId: new Types.ObjectId(),
+        createdAt: new Date(now.getTime() - i * 1000),
+        updatedAt: now,
       })),
     );
     await db.collection('notifications').insertMany(
