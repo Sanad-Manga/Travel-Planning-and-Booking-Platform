@@ -100,6 +100,9 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
     // is one flight-search page (or an outbound and a return page) per airport, not one list; the paging of those
     // pages is the flight search's own (the /api/flights/search row of the flight tests).
     '/api/itineraries/{id}/flights',
+    // BLG-12: one author object holding two paginated lists (posts, itineraries); page and limit apply to both.
+    // Their paging is checked in test/author-page.e2e-spec.ts.
+    '/api/authors/{id}',
   ];
 
   const ROUTES: ListRoute[] = [
