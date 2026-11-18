@@ -77,8 +77,8 @@ class FakePaymentModel {
     };
   }
 
-  updateOne(filter: { stripePaymentIntentId: string; status: { $ne: PaymentStatus } }, update: { $set: { status: PaymentStatus } }) {
-    const row = this.rows.find((r) => r.stripePaymentIntentId === filter.stripePaymentIntentId && r.status !== filter.status.$ne);
+  updateOne(filter: { stripePaymentIntentId: string; status: { $in: PaymentStatus[] } }, update: { $set: { status: PaymentStatus } }) {
+    const row = this.rows.find((r) => r.stripePaymentIntentId === filter.stripePaymentIntentId && filter.status.$in.includes(r.status));
     if (row) row.status = update.$set.status;
     return { exec: async () => undefined };
   }
@@ -293,6 +293,18 @@ describe('PaymentsService', () => {
       await service.handleWebhookEvent(paymentIntentEvent('payment_intent.payment_failed', row.stripePaymentIntentId));
 
       expect(flights.status(BOOKING_ID)).toBe(BookingStatus.PENDING_PAYMENT);
+      const updated = (await paymentModel.findById(created.id).lean().exec()) as PaymentLean;
+      expect(updated.status).toBe(PaymentStatus.FAILED);
+    });
+
+    it('ignores a late payment_intent.processing event that arrives after payment_failed', async () => {
+      acceptPolicies();
+      const created = await service.create(user(OWNER_ID), { bookingType: BookingType.FLIGHT, bookingId: BOOKING_ID });
+      const row = (await paymentModel.findById(created.id).lean().exec()) as PaymentLean;
+
+      await service.handleWebhookEvent(paymentIntentEvent('payment_intent.payment_failed', row.stripePaymentIntentId));
+      await service.handleWebhookEvent(paymentIntentEvent('payment_intent.processing', row.stripePaymentIntentId));
+
       const updated = (await paymentModel.findById(created.id).lean().exec()) as PaymentLean;
       expect(updated.status).toBe(PaymentStatus.FAILED);
     });
