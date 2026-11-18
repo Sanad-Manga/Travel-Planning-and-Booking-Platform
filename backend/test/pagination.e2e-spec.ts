@@ -92,10 +92,13 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
    * comments; the real comment list is /api/posts/{id}/comments, which is in the table above.
    * Likewise the hotel page (HTL-02) pages only its embedded free rooms; the real list is
    * /api/hotels/{id}/rooms/available, which is in the table above.
+   * HTL-24 returns a rating summary containing a nested paginated reviews list; its envelope is checked in
+   * test/hotel-reviews.e2e-spec.ts.
    */
   const NOT_LISTS = [
     '/api/posts/{id}',
     '/api/hotels/{id}',
+    '/api/hotels/{id}/reviews',
     // ITN-26: page and limit are handed to the flight search for each airport of the city of the first day. The answer
     // is one flight-search page (or an outbound and a return page) per airport, not one list; the paging of those
     // pages is the flight search's own (the /api/flights/search row of the flight tests).

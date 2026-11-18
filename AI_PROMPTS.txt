@@ -1989,6 +1989,26 @@ unreachable Stripe, in-flight row left untouched) and two in `payments.service.s
 return ServiceUnavailableException when Stripe is down). Scoped unit (`src/payments`, `src/refunds`): 146/146
 pass. Related e2e (`payments-webhook`, `payments-concurrency`, capped at 2 workers): 5/5 pass.
 
+================================================
+Date: 2026-11-18
+Student: Hessain Elrefaey
+Tool: Copilot (VS Code)
+Related Requirement: HTL-24 (view hotel rating and reviews)
+Prompt:
+Implement HTL-24 after HTL-23: add a guest-accessible GET /api/hotels/:id/reviews endpoint with the visible average
+rating, rating/review count, newest-first pagination (default page size 10), hidden-review exclusion, and
+"Deleted user" for deactivated authors. Reuse HTL-23 review behavior, update Swagger, tests, and directly related docs,
+and keep the changes separate from other tickets.
+How the output was used:
+Added the public reviews route to the existing HotelDetailsController and delegated to HotelReviewsService. The service
+validates active hotels, paginates visible reviews through the shared PaginationDto/paginate contract, sorts by
+createdAt then _id descending, populates only author display fields, and calculates the visible average separately.
+Added response DTO documentation, E2E coverage for guest access, paging, hidden reviews, rating aggregation,
+deactivated authors, validation, 404s and Swagger, registered the route in the whole-app pagination E2E table, and
+documented HTL-24 in the hotel API docs. Changes are limited to the Hotels module and directly related tests/docs and
+AI_PROMPTS.txt. Verification: backend build and focused ESLint passed; `hotel-reviews.e2e-spec.ts`,
+`hotel-details.e2e-spec.ts`, and `pagination.e2e-spec.ts` passed (265 tests total).
+
 Date: 2026-11-18
 Student: Abdulrahman Mohamad Hosny
 Tool: OpenCode (DeepSeek V4.1 Flash Free)

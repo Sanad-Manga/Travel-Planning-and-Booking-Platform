@@ -1,8 +1,20 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
-import { ApiBadRequestResponse, ApiNotFoundResponse, ApiOkResponse, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
-import { ErrorResponseDto, Public } from '../common';
+import {
+  ApiBadRequestResponse,
+  ApiNotFoundResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiParam,
+  ApiTags,
+} from '@nestjs/swagger';
+import {
+  ErrorResponseDto,
+  PaginationDto,
+  Public,
+} from '../common';
 import { HotelDetailsQueryDto } from './dto/hotel-details-query.dto';
 import { HotelDetailsResponseDto } from './dto/hotel-details-response.dto';
+import { HotelReviewsResponseDto } from './dto/hotel-reviews-page.dto';
 import { HotelDetailsService } from './hotel-details.service';
 
 /**
@@ -14,6 +26,31 @@ import { HotelDetailsService } from './hotel-details.service';
 @Controller('hotels')
 export class HotelDetailsController {
   constructor(private readonly details: HotelDetailsService) {}
+
+  @Get(':id/reviews')
+  @Public()
+  @ApiOperation({
+    summary: 'List public hotel reviews and rating (HTL-24)',
+    description:
+      'Guest-accessible. Returns the average and count of visible reviews with one newest-first page. Pagination defaults to page 1 and limit 10.',
+    security: [],
+  })
+  @ApiParam({ name: 'id', example: '6730a1f2c3d4e5f607182930', description: 'Hotel id' })
+  @ApiOkResponse({ type: HotelReviewsResponseDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: 'Invalid pagination or unsupported query parameter.',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'The hotel does not exist (or the id is malformed) or is not active.',
+  })
+  getReviews(
+    @Param('id') id: string,
+    @Query() pagination: PaginationDto,
+  ): Promise<HotelReviewsResponseDto> {
+    return this.details.getReviews(id, pagination);
+  }
 
   @Get(':id')
   @Public()
