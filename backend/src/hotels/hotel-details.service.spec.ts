@@ -22,8 +22,15 @@ function build(found: unknown = hotelDoc) {
   const findOne = jest.fn(() => ({ select: () => ({ lean: async () => found }) }));
   const getPolicies = jest.fn(async () => policies);
   const listFreeRooms = jest.fn(async () => roomsPage);
-  const service = new HotelDetailsService({ findOne } as never, { getPolicies } as never, { listFreeRooms } as never);
-  return { service, findOne, getPolicies, listFreeRooms };
+  const reviewSummary = { averageRating: null, reviewCount: 0, reviews: [] };
+  const getSummary = jest.fn(async () => reviewSummary);
+  const service = new HotelDetailsService(
+    { findOne } as never,
+    { getPolicies } as never,
+    { listFreeRooms } as never,
+    { getSummary } as never,
+  );
+  return { service, findOne, getPolicies, listFreeRooms, getSummary };
 }
 const query = (extra: Partial<HotelDetailsQueryDto> = {}): HotelDetailsQueryDto => ({ page: 1, limit: 10, ...extra });
 
@@ -73,8 +80,9 @@ describe('HotelDetailsService (HTL-02)', () => {
     expect(listFreeRooms).not.toHaveBeenCalled();
   });
 
-  it('returns the stable empty review shape until the reviews module exists', async () => {
-    const { service } = build();
+  it('loads the review summary from HotelReviewsService', async () => {
+    const { service, getSummary } = build();
     expect(await service.getDetails(ID, query())).toMatchObject({ averageRating: null, reviewCount: 0, reviews: [] });
+    expect(getSummary).toHaveBeenCalledWith(ID);
   });
 });
