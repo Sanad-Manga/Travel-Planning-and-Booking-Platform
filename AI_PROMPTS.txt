@@ -2371,3 +2371,12 @@ Prompt:
 Fix the GEN-10 bug found in review: PATCH /api/admin/reports/:id marks the report resolved first and then hides or deletes the content, so if the content step fails the report stays resolved with the content still live and a retry answers 409. Prove it with a failing test first. Also remove the stale "REVIEW answers 501" Swagger text, since hotel reviews are handled.
 How the output was used:
 Added unit tests for the failure cases, then changed ReportsAdminService.resolve so a failed hide or delete puts the report back to OPEN and rethrows, while content that is already gone (404) keeps the report resolved. Updated the two controllers' Swagger text. I reviewed the code and ran build, lint, the admin unit tests and the GEN-10 e2e spec.
+
+Date: 2026-11-19
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: FLT-05 (follow-up: round-trip return-leg bookings, issue #154)
+Prompt:
+Fix the FLT-05 gap the reviewer found: a round-trip booking stores only its outbound flight in flightId and its return leg only in segments[].flightId, so for a flight that is the return leg the airports could still be changed while it had paid bookings, and a time change did not notify those passengers. Prove it with failing e2e tests first, then fix both places with the same $or filter that the cancellation and roster services use.
+How the output was used:
+Added two round-trip e2e tests to flight-edit.e2e-spec.ts (airport lock 409 for a CONFIRMED return-leg booking; one notification per passenger for a CONFIRMED return-leg booking, none for a pending one) and ran them to see them fail. Then added an onFlight() filter ($or on flightId and segments.flightId) used by hasActiveBookings and notifyPassengers in flight-edit.service.ts. The spec passes (28/28); build and lint pass. Nothing else changed.
