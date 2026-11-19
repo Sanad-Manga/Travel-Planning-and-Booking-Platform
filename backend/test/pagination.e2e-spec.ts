@@ -203,6 +203,13 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
       query: 'from=2099-01-05&to=2099-01-07',
       total: 25,
     },
+    {
+      // HTL-22: the moderator's own hotel reservations (25 seeded below)
+      swagger: '/api/hotels/{id}/reservations',
+      url: `/api/hotels/${roomsHotelId.toHexString()}/reservations`,
+      auth: 'hotelModerator',
+      total: 25,
+    },
   ];
 
   const get = (route: ListRoute, params: string) => {
@@ -308,6 +315,34 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
         isActive: true,
         availability: [{ _id: new Types.ObjectId(), startDate: '2099-01-01', endDate: '2099-02-01' }],
         createdAt: now,
+        updatedAt: now,
+      })),
+    );
+    // HTL-22: 25 reservations for the hotel whose moderator pages them above.
+    await db.collection('hotelBookings').insertMany(
+      rows(25, (i) => ({
+        userId,
+        hotelId: roomsHotelId,
+        checkIn: '2099-01-05',
+        checkOut: '2099-01-07',
+        rooms: [
+          {
+            roomId: new Types.ObjectId(),
+            adults: 1,
+            children: 0,
+            name: 'Room',
+            type: 'Double',
+            maxOccupancy: 2,
+            pricePerNightCents: 10_000,
+            totalCents: 20_000,
+          },
+        ],
+        nights: 2,
+        totalCents: 20_000,
+        currency: 'USD',
+        status: 'CONFIRMED',
+        bookingReference: `HTL-${i.toString(16).padStart(16, '0')}`,
+        createdAt: new Date(now.getTime() - i * 1000),
         updatedAt: now,
       })),
     );
