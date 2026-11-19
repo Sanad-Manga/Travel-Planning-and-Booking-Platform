@@ -1606,6 +1606,42 @@ Verification: ran the full backend Jest suite (serially, to avoid mongodb-memory
 Date: 2026-11-16
 Student: Yassin Yahya
 Tool: Claude (Claude Code)
+Related Requirement: HTL-20 (SCRUM-87)
+Prompt:
+Show me my current tickets and implement any unblocked features. My teammate says HTL-20 (My hotel reservations:
+Upcoming / Past / Cancelled) is unblocked now: a traveler sees their own reservations grouped Upcoming, Past and Cancelled,
+each with reference, hotel, rooms, dates, guests, total and status, can open the full details including refund status, and
+it is owner-only. Endpoints GET /api/hotel-bookings and GET /api/hotel-bookings/:id. Branch cut from develop, no stacking.
+How the output was used:
+Checked first that the blockers are really merged: ACC-11 is Done and HTL-16 (PR #89) put markConfirmed on develop, even
+though HTL-17 still says To Do in Jira. I decided what the three groups mean and kept that in one pure file
+(hotels/hotel-booking-groups.ts: groupOf for a row, groupFilter for the Mongo query, groupSort for the page order) so a row
+and a list page can never disagree: UPCOMING is a CONFIRMED stay whose check-out day is after today (a stay in progress
+is still upcoming) or a PENDING_PAYMENT reservation with a live hold; PAST is COMPLETED or a CONFIRMED stay whose
+check-out day is today or earlier (BookingLifecycle may not have completed it yet, so the date decides); CANCELLED is
+CANCELLED, EXPIRED and a pending hold that ran out. The tests were written first and watched failing: 14 unit tests for the
+rules and 19 HTTP tests (my-hotel-bookings.e2e-spec.ts) for roles, ownership, grouping, ordering, paging, validation and
+Swagger. A mutation check (owner removed from the list filter) made the ownership test fail, as it should.
+HotelBookingsService.findMine reads the traveler's own reservations (the owner is part of the query). Hotel names are
+joined with one query (hidden hotels included, and a missing hotel record gives a placeholder name instead of a 500).
+paymentRef is never returned.
+A first prettier run reformatted another developer's hotel-bookings service; I reverted that file and applied only my
+own lines. The shared GEN-05 pagination test got one row for the new list route.
+Follow-up, after HTL-17, HTL-21 and PAY-03 were merged (Hessain Elrefaey's answer, "option B"): my first version also had
+its own GET /api/hotel-bookings/:id, which clashed with HTL-17's route of the same path. Hessain approved this: I keep
+HTL-17's GET :id (its fields, types, status codes, owner-only rule and the lazy expiry and completion on read stay as they
+are) and add hotel, guests, group, refund and createdAt to its answer, in my HTL-20 branch, with the lead's approval before
+it merges. The tests were rewritten first and watched failing (11 red), then: HotelBookingDetailsDto now extends
+HotelBookingResponseDto, and HotelBookingsService.getDetailsForUser shares one private lookup (loadOwnedFresh) with
+getForUser, whose behaviour is unchanged (HTL-17's own suite still passes). refund is { status, amountCents } read with
+RefundsService.getLatestForBooking(HOTEL, id) (PAY-03), never from the refunds collection: it is null when none is
+recorded, for a flight refund with the same id, and never shows the refund of someone else's reservation (a 404 comes
+first). A malformed id stays a 404 as in HTL-17 (my own route used to answer 400). I did not keep a test of the lazy
+expiry on read: it needs a transaction, and HTL-17's suite covers it on a replica set through the same route.
+Changed in Hessain's files (flagged in the PR): hotel-bookings.controller.ts (list route, :id answers the details, a 403
+doc line), hotel-bookings.service.ts (findMine, getDetailsForUser, loadOwnedFresh, RefundsService injected),
+docs/api/hotel-bookings.md and test/pagination.e2e-spec.ts (one row).
+================================================
 Related Requirement: none (clean-code request from the group leader, itineraries module)
 Prompt:
 The group leader wants clean code: when he opens three files they start with about 20 lines of imports. Clean up the

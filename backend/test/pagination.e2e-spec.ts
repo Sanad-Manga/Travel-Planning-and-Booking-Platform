@@ -203,6 +203,12 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
       total: 25,
     },
     {
+      // HTL-20: the traveler's own reservations; this test only proves the envelope and the limits (rows are proven in my-hotel-bookings.e2e-spec.ts)
+      swagger: '/api/hotel-bookings',
+      url: '/api/hotel-bookings',
+      auth: 'user',
+    },
+    {
       // HTL-08: the moderator's own hotel (the same hotel and 25 rooms as the row above), paged over the rooms
       swagger: '/api/hotels/{id}/availability',
       url: `/api/hotels/${roomsHotelId.toHexString()}/availability`,
