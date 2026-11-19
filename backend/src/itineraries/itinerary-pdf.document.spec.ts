@@ -225,12 +225,41 @@ describe('itinerary PDF document (ITN-28)', () => {
       expect(lines.some((line) => line.startsWith('By '))).toBe(false);
     });
 
-    it('keeps only characters the standard PDF font can draw', () => {
-      const lines = texts({ ...data(), title: 'رحلة مصر ✈ Café Zürich' });
-      expect(lines[0]).toBe('???? ??? ? Cafe? Zürich');
-      for (const line of lines) {
-        expect([...line].every((ch) => ch.charCodeAt(0) <= 0xff)).toBe(true);
-      }
+    it('keeps Arabic, accented Latin, Cyrillic, Greek and symbols, and turns control characters into spaces', () => {
+      const lines = texts({
+        ...data(),
+        title: 'رحلة\u0007مصر ✈ Café Москва Αθήνα',
+      });
+      expect(lines[0]).toBe('رحلة مصر ✈ Café Москва Αθήνα');
+    });
+
+    it('puts a left-to-right mark before the cost of an activity with an Arabic name, and lays the line out left to right', () => {
+      const arabic = toPdfData({
+        ...meta,
+        days: [
+          day(1, '2026-12-20', 'cairo', {
+            activities: [
+              activity('زيارة الأهرامات', '09:30', 6000),
+              activity('Walk', '10:00', 1000),
+            ],
+          }),
+        ],
+        summary: summary([]),
+        cityNames: new Map(),
+        now: NOW,
+      });
+      const rows = pdfLines(arabic).filter(
+        (line) =>
+          line.text.startsWith('09:30') || line.text.startsWith('10:00'),
+      );
+      expect(rows[0]).toMatchObject({
+        text: '09:30  زيارة الأهرامات\u200e - 60.00 USD',
+        ltr: true,
+      });
+      expect(rows[1]).toMatchObject({
+        text: '10:00  Walk - 10.00 USD',
+        ltr: true,
+      }); // nothing added when there is no Arabic
     });
   });
 
@@ -259,6 +288,47 @@ describe('itinerary PDF document (ITN-28)', () => {
       expect(text).toContain('Two weeks in Egypt');
       expect(text).toContain('Day 1 - Cairo - 2026-12-20');
       expect(text).toContain('09:30  Pyramids visit - 60.00 USD');
+    });
+
+    it('draws Arabic, mixed lines and characters the font lacks without failing, as a valid PDF', async () => {
+      const buffer = await renderPdf(
+        pdfLines(
+          toPdfData({
+            ...meta,
+            title: 'رحلة إلى مصر',
+            authorName: 'أحمد',
+            days: [
+              day(1, '2026-12-20', 'cairo', {
+                notes:
+                  'ملاحظات عن اليوم الأول: الوصول والراحة في الفندق ثم العشاء. '.repeat(
+                    6,
+                  ),
+                activities: [
+                  activity(
+                    'زيارة الأهرامات',
+                    '09:30',
+                    6000,
+                    'USD',
+                    'جولة صباحية مع مرشد',
+                  ),
+                  activity('Beach 🏖 day 東京 서울', '14:00', null),
+                ],
+              }),
+            ],
+            summary: summary([
+              block('USD', { ACTIVITIES: 6000 }, { 'day-1': 6000 }),
+            ]),
+            cityNames: new Map([['cairo', 'Cairo']]),
+            now: NOW,
+          }),
+        ),
+      );
+      expect(buffer.subarray(0, 5).toString()).toBe('%PDF-');
+      expect(buffer.toString('latin1').trimEnd().endsWith('%%EOF')).toBe(true);
+      const text = pdfText(buffer);
+      expect(text).toContain('Day 1 - Cairo - 2026-12-20'); // the Latin parts are still there
+      expect(text).toContain('14:00  Beach ? day ?? ??'); // no glyph for the emoji, the Chinese or the Korean in the font: one ? for each
+      expect(text).not.toContain('\u200e'); // direction marks are never drawn
     });
 
     it('goes on to more pages when the itinerary is long', async () => {

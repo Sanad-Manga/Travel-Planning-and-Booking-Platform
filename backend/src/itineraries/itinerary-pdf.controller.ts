@@ -38,7 +38,7 @@ export class ItineraryPdfController {
     description:
       'The owner can export their itinerary whatever its visibility (the budget is the one of the budget summary). ' +
       "A logged-in traveler can also export someone else's itinerary while it is public. Guests use GET /api/itineraries/public/:id/pdf. " +
-      'The PDF is made for each request and is not stored. Titles and notes use the standard PDF font: characters outside Latin-1 (Arabic, emoji) are shown as "?".',
+      'The PDF is made for each request and is not stored. Text is drawn with an embedded Unicode font: Latin (with accents), Cyrillic, Greek, Arabic (joined and right to left) and common symbols are supported; characters the font has no glyph for (Chinese, Japanese, Korean, emoji) are shown as "?".',
   })
   @ApiOkResponse(PDF_RESPONSE)
   @ApiBadRequest('id is not a valid id')
