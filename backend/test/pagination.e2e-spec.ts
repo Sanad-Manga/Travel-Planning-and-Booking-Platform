@@ -111,6 +111,13 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
   const ROUTES: ListRoute[] = [
     // user + admin + hotel moderator (the moderator pages the HTL-08 row below)
     { swagger: '/api/admin/accounts', url: '/api/admin/accounts', auth: 'admin', total: 3 },
+    // ACC-17 lists flight and hotel bookings together: the 25 flight bookings plus the 25 hotel reservations seeded below
+    {
+      swagger: '/api/admin/bookings',
+      url: '/api/admin/bookings',
+      auth: 'admin',
+      total: 50,
+    },
     // 25 plain posts + the one post that carries the comments below
     { swagger: '/api/posts', url: '/api/posts', auth: 'none', total: 26 },
     {

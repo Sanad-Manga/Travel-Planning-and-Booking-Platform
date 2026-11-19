@@ -3,6 +3,15 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { Airline, AirlineSchema } from '../airlines/schemas/airline.schema';
 import { AuditModule } from '../audit/audit.module';
 import { BlogModule } from '../blog/blog.module';
+import {
+  FlightBooking,
+  FlightBookingSchema,
+} from '../flights/schemas/flight-booking.schema';
+import { Flight, FlightSchema } from '../flights/schemas/flight.schema';
+import {
+  HotelBooking,
+  HotelBookingSchema,
+} from '../hotels/schemas/hotel-booking.schema';
 import { Hotel, HotelSchema } from '../hotels/schemas/hotel.schema';
 import { HotelReview, HotelReviewSchema } from '../hotels/schemas/hotel-review.schema';
 import { AirlinesModule } from '../airlines/airlines.module';
@@ -11,6 +20,8 @@ import { Itinerary, ItinerarySchema } from '../itineraries/schemas/itinerary.sch
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ReportsModule } from '../reports/reports.module';
 import { User, UserSchema } from '../users/schemas/user.schema';
+import { AdminBookingsController } from './admin-bookings.controller';
+import { AdminBookingsService } from './admin-bookings.service';
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
 import { AccountStatusController } from './account-status.controller';
@@ -39,6 +50,9 @@ import { TemporaryPasswordService } from './temporary-password.service';
       { name: Hotel.name, schema: HotelSchema },
       { name: HotelReview.name, schema: HotelReviewSchema },
       { name: Airline.name, schema: AirlineSchema },
+      { name: FlightBooking.name, schema: FlightBookingSchema },
+      { name: HotelBooking.name, schema: HotelBookingSchema },
+      { name: Flight.name, schema: FlightSchema },
       {
         name: AccountStatusOperation.name,
         schema: AccountStatusOperationSchema,
@@ -60,6 +74,7 @@ import { TemporaryPasswordService } from './temporary-password.service';
   ],
   controllers: [
     AdminController,
+    AdminBookingsController,
     AccountStatusController,
     AdminPasswordResetController,
     ProviderStatusController,
@@ -69,6 +84,7 @@ import { TemporaryPasswordService } from './temporary-password.service';
   ],
   providers: [
     AdminService,
+    AdminBookingsService,
     AccountStatusService,
     AdminPasswordResetService,
     ProviderStatusService,
