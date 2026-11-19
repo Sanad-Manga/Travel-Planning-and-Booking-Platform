@@ -88,5 +88,28 @@ State on develop when this was written:
 |---|---|---|---|
 | Comments | author shows as `Deleted user` | Done: `blog/comments.service.ts` (`'Deleted user'` for a `DEACTIVATED` author) | Yusuf |
 | Public itineraries | hidden from public search | Done: `itineraries.service.ts` `searchPublic` keeps only authors for whom `UsersService.isActive` is true | yassin |
-| Posts | hidden | **Not done**: a published post stays in `GET /api/posts` and opens at `GET /api/posts/:id` with the author's real name. Needs an author-status check in the list filter (`blog.service.ts`, the `filter` around line 91) and in `canView` (around line 339), e.g. through `UsersService.isActive` like itineraries | Yusuf |
+| Posts | hidden | Done: `blog.service.ts` leaves a `DEACTIVATED` author out of the public list, the search and the tag list (part of the database filter, so totals and pages stay correct) and answers `GET /api/posts/:id` with the same 404 as an unknown post. The ids come from `UsersService.findDeactivatedIds` / `isDeactivated` | Yusuf |
 | Reviews | author shows as `Deleted user` | **Not done**: no reviews module on develop yet. When it exists, show `Deleted user` for a `DEACTIVATED` author like comments do | Hessain |
+
+## What is hidden for a DEACTIVATED author, and what is not (ACC-12, #153)
+
+Nothing is deleted. Every rule below is evaluated from the user's current status on each request, so a user whose
+status becomes `ACTIVE` again sees all of it return (there is no API route for that today: `PATCH /api/admin/accounts/:id/reactivate` only handles `SUSPENDED`).
+
+Hidden from everyone except admins (same 404 as an unknown id, so existence is not revealed):
+
+- `GET /api/posts`, `GET /api/posts?q=...`, `GET /api/tags/:tag/posts`: the author's published posts are not listed.
+- `GET /api/posts/:id`, `GET /api/posts/:id/comments`, `POST /api/posts/:id/comments`, `POST /api/posts/:id/like`: 404.
+- `GET /api/authors/:id` (the author page) and `GET /api/itineraries/public/*` / the public itinerary search (already done before).
+- The itinerary attached to a post (`visibleItinerary`: already `null` for a non-ACTIVE author).
+- Post images `GET /uploads/<id>.jpg|png`: 404 for guests and other users (they are served like a hidden post).
+
+Still visible:
+
+- The author's comments and hotel reviews on other people's content, shown with the name `Deleted user`.
+- Bookings, which stay valid. The author's own drafts and `/api/posts/mine` are unreachable only because the author cannot log in.
+
+Known limit: `GET /api/posts/:id` and the images route cannot show the post to an admin through the normal public route,
+because that route is `@Public()` and never reads the caller's cookie (this is the same for the existing hidden-post rule).
+`GET /uploads/...` does read the cookie and lets an admin through; the comments route lets an admin through; the detail route
+keeps the admin exception in the service but needs an optional-authentication change in `common/` to use it (raised with the lead).

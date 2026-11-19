@@ -37,7 +37,7 @@ export class UploadVisibilityMiddleware implements NestMiddleware {
     @InjectModel(UploadedFile.name) private readonly files: Model<UploadedFile>,
     @InjectModel(Post.name) private readonly posts: Model<Post>,
     private readonly storage: UploadStorage,
-    users: UsersService,
+    private readonly users: UsersService,
     reflector: Reflector,
     config: ConfigService,
   ) {
@@ -143,10 +143,12 @@ export class UploadVisibilityMiddleware implements NestMiddleware {
       )
     )
       throw this.notFound();
-    if (post.status === PostStatus.PUBLISHED && post.isHidden === false) return;
+    // ACC-12: a deactivated author's published post is served like a hidden one (admins only).
+    const authorDeactivated = await this.isDeactivated(post.authorId, match[1]);
+    if (post.status === PostStatus.PUBLISHED && post.isHidden === false && !authorDeactivated) return;
     if (
       post.status !== PostStatus.DRAFT &&
-      !(post.status === PostStatus.PUBLISHED && post.isHidden === true)
+      !(post.status === PostStatus.PUBLISHED && (post.isHidden === true || authorDeactivated))
     )
       throw this.notFound();
 
@@ -178,11 +180,19 @@ export class UploadVisibilityMiddleware implements NestMiddleware {
       viewer &&
       (viewer.userId === post.authorId?.toString() ||
         (post.status === PostStatus.PUBLISHED &&
-          post.isHidden === true &&
+          (post.isHidden === true || authorDeactivated) &&
           viewer.role === Role.ADMIN))
     )
       return;
     throw this.notFound();
+  }
+
+  private async isDeactivated(authorId: unknown, imageId: string): Promise<boolean> {
+    try {
+      return await this.users.isDeactivated(String(authorId));
+    } catch {
+      throw this.unavailable('post', imageId);
+    }
   }
 
   private notFound(): NotFoundException {

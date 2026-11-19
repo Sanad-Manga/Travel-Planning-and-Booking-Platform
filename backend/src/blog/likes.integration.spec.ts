@@ -87,6 +87,8 @@ describe('BLG-06 post likes integration', () => {
       .overrideProvider(UsersService)
       .useValue({
         findById: async () => null,
+        findDeactivatedIds: async () => [],
+        isDeactivated: async () => false,
       })
       .compile();
 

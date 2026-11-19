@@ -149,6 +149,23 @@ export class UsersService {
   }
 
   /**
+   * ACC-12: ids of every DEACTIVATED user, so other modules can leave their content out of a database
+   * filter (`authorId: { $nin: ids }`) and keep pagination totals correct. Reversible: a reactivated user is no
+   * longer returned. The collection is small and `status` is not indexed, so this is a scan of users.
+   */
+  async findDeactivatedIds(): Promise<Types.ObjectId[]> {
+    const rows = await this.userModel.find({ status: AccountStatus.DEACTIVATED }).select('_id').lean().exec();
+    return rows.map((row) => row._id as Types.ObjectId);
+  }
+
+  /** ACC-12: true only for an existing user whose status is DEACTIVATED (unknown or malformed ids are false). */
+  async isDeactivated(id: string): Promise<boolean> {
+    if (!Types.ObjectId.isValid(id)) return false;
+    const user = await this.userModel.findById(id).select('status').lean().exec();
+    return user?.status === AccountStatus.DEACTIVATED;
+  }
+
+  /**
    * Applies the profile changes in ONE atomic update, only for an ACTIVE user (returns null otherwise).
    * Callers validate everything first; a single statement can never save a partial set.
    */
