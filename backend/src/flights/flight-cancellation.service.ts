@@ -115,27 +115,41 @@ export class FlightCancellationService {
       pending: [] as FlightCancellationFailureDto[],
     };
 
-    const affected = await this.bookings
-      .find({
-        $or: [{ flightId: flight._id }, { 'segments.flightId': flight._id }],
-        status: {
-          $in: [BookingStatus.PENDING_PAYMENT, BookingStatus.CONFIRMED],
-        },
-      })
-      .sort({ _id: 1 })
-      .lean<FlightBookingLean[]>()
-      .exec();
+    // Bookings can still appear while this runs (for example a FLT-27 change-flight request that
+    // picked this flight before it turned CANCELLED), so the flight is read a second time after the
+    // first pass and whatever is new is handled the same way. A booking that appears after that
+    // second read is the one case left to a repeat of the request.
+    const handled = new Set<string>();
+    for (let pass = 0; pass < 2; pass++) {
+      const affected = await this.bookings
+        .find({
+          $or: [{ flightId: flight._id }, { 'segments.flightId': flight._id }],
+          status: {
+            $in: [BookingStatus.PENDING_PAYMENT, BookingStatus.CONFIRMED],
+          },
+          _id: {
+            $nin: [...handled].map(
+              (handledId) => new Types.ObjectId(handledId),
+            ),
+          },
+        })
+        .sort({ _id: 1 })
+        .lean<FlightBookingLean[]>()
+        .exec();
+      if (affected.length === 0) break;
 
-    for (const booking of affected) {
-      const id = booking._id.toString();
-      try {
-        if (booking.status === BookingStatus.PENDING_PAYMENT) {
-          await this.releaseHold(booking, flight, now, result);
-        } else {
-          await this.cancelConfirmed(booking, flight, now, result);
+      for (const booking of affected) {
+        const id = booking._id.toString();
+        handled.add(id);
+        try {
+          if (booking.status === BookingStatus.PENDING_PAYMENT) {
+            await this.releaseHold(booking, flight, now, result);
+          } else {
+            await this.cancelConfirmed(booking, flight, now, result);
+          }
+        } catch (error) {
+          this.noteFailure(result.pending, id, error);
         }
-      } catch (error) {
-        this.noteFailure(result.pending, id, error);
       }
     }
 

@@ -608,6 +608,64 @@ describe('airline cancels a flight (FLT-06) over HTTP (e2e)', () => {
     });
   });
 
+  describe('bookings that appear while the cancellation runs', () => {
+    it('cancels and refunds a booking added after the first read of the bookings on the flight', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 10);
+      const first = await confirmedBooking(flightId);
+      const source = (await bookingOf(first))!;
+
+      // While the first booking is being cancelled, a second confirmed (paid) booking lands on the
+      // same flight, as a change-flight request that already picked it could do.
+      const lateId = new Types.ObjectId();
+      const realTransition = lifecycle.transition.bind(lifecycle);
+      let injected = false;
+      jest
+        .spyOn(lifecycle, 'transition')
+        .mockImplementation(async (type, id, to) => {
+          await realTransition(type, id, to);
+          if (injected) return;
+          injected = true;
+          const { _id, ...rest } = source;
+          void _id;
+          await db.collection('flightBookings').insertOne({
+            ...rest,
+            _id: lateId,
+            status: BookingStatus.CONFIRMED,
+            bookingReference: 'FLT-LATE00000000',
+            cancellationRefundCents: undefined,
+            cancellationRequestedAt: undefined,
+          });
+          await db
+            .collection('cabins')
+            .updateOne(
+              { flightId: new Types.ObjectId(flightId) },
+              { $inc: { bookedSeats: 1 } },
+            );
+          await seedPayment(lateId.toString());
+        });
+
+      const res = await http()
+        .post(CANCEL(flightId))
+        .set('Cookie', moderator)
+        .send({ confirm: true })
+        .expect(200);
+
+      expect(res.body).toMatchObject({
+        bookingsCancelled: 2,
+        refundsIssued: 2,
+        passengersNotified: 2,
+        complete: true,
+        pending: [],
+      });
+      expect((await bookingOf(lateId.toString()))?.status).toBe(
+        BookingStatus.CANCELLED,
+      );
+      expect(await cabinOf(flightId)).toMatchObject({ bookedSeats: 0 });
+      expect(await db.collection('refunds').countDocuments()).toBe(2);
+    });
+  });
+
   describe('retrying an unfinished cancellation', () => {
     it('reports a booking whose refund failed, finishes it on a repeat and never refunds anyone twice', async () => {
       const flightId = await createFlight();
