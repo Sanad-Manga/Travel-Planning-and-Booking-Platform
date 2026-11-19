@@ -2065,6 +2065,30 @@ Implement FLT-25 "My flight bookings" in the flights module only: GET /api/fligh
 How the output was used:
 Added FlightBookingsService.listMine() (plus GET /api/flight-bookings on the existing controller) and a flights-module MyFlightBookingsQueryDto/FlightBookingListRowDto. Ownership is part of the MongoDB query (the shared bookingVisibilityFilter narrowed to the caller's userId for role USER, so it can never widen), and the group is derived in the pipeline from the outbound segment's flight departureAt through one $lookup, so the group filter, skip/limit and total are computed in the database and pages stay stable (createdAt desc, _id desc). Legacy records without a segments array fall back to the top-level flightId, and a missing bookingReference stays absent instead of being generated. List rows reuse the existing segment/passenger mappers, so passport/identity numbers, paymentRef and Stripe ids never appear. GET /:id was left unchanged and still reads the latest refund through RefundsService.getLatestForBooking. Updated Swagger (route, query params, paginated schema, 400/401/403), docs/contracts.md and the flight E2E suite (grouping, cancellation precedence, round-trip grouping, legacy one-way, owner isolation, pagination/default/invalid pages, Swagger) plus a mapper unit test. No common/ or other module files were changed.
 Verification: npm run build passed; npm run lint passed; npx jest flight-booking-list-row --runInBand 3/3 passed; npx jest --config ./test/jest-e2e.json flight-bookings-hold --runInBand 68/68 passed.
+Student: Yassin Yahya
+Tool: Claude (Claude Code)
+Related Requirement: HTL-21 (SCRUM-88) Cancel whole reservation with tier-based refund
+Prompt:
+Implement HTL-21 (asked together with ITN-27, which is a separate branch and PR): POST /api/hotel-bookings/:id/cancel cancels the traveler's own CONFIRMED
+reservation as a whole before check-in; the refund comes from the hotel tiers (HTL-10) on the full total and is shown before cancelling;
+the reservation becomes CANCELLED, all rooms are released and a refund is created through PAY-03. No partial cancellation.
+How the output was used:
+Read the ticket, BookingLifecycle, RefundCalculator, RefundsService, HotelsService.getPolicies and the HTL-17/HTL-18 booking code. Tests first
+(4 unit tests for the time rules, 20 HTTP tests on an in-memory replica set with the fake Stripe gateway), watched them fail, then wrote
+HotelBookingCancellationService (own file, not added to the big HotelBookingsService) and its controller: GET :id/cancel-preview and
+POST :id/cancel. The owner filter is part of the query (404 for someone else's, unknown or malformed ids); only CONFIRMED before the check-in
+moment (check-in date at the hotel check-in time, UTC, 00:00 when unset) is cancellable, else 409. The refund is RefundCalculator.compute on the
+hotel's tiers, the fractional days to check-in and the full total, so preview and cancel agree. The status change is BookingLifecycle.transition
+(atomic, frees the rooms in the same write), then RefundsService.issue; a refund of 0 is not issued and refund is null. HotelsModule imports
+RefundsModule (one line, flagged in the PR); no other module was edited. Mutation checks: removing the owner filter failed the ownership test, and
+disabling the status guard failed five tests.
+Verification: lint and build pass; 1173 unit (81 suites) and 1480 e2e (60 suites, 3 workers) pass. Not done: a manual Swagger click-through against Atlas.
+Follow-up in the same PR (user: "fix them", about the known limit above): if RefundsService.issue fails after the status change, the reservation used to stay CANCELLED with no way to finish
+the refund. Now the cancel route records what the cancellation refunds (two optional fields on the hotel booking schema: cancellationRequestedAt and cancellationRefundCents, written only while the
+reservation is CONFIRMED, just before the status changes). A failure that is not a refusal by the refund rules answers 503 with a message saying the reservation is cancelled and to send the request again;
+cancelling a CANCELLED reservation that has a recorded refund and no refund yet issues the recorded amount (not the tier of the retry day), also after the check-in time, and two simultaneous retries
+give one refund. Tests first (7 new HTTP tests, Stripe failure simulated with a spy), watched failing; mutation check: issuing a different amount on retry failed three tests.
+Verification of the follow-up: lint and build pass; 1192 unit (83 suites) and 1510 e2e (62 suites, 3 workers) pass. Not done: a manual Swagger click-through against Atlas.
 
 Date: 2026-11-19
 Student: Mohamed Walid
