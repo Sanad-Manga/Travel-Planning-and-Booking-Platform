@@ -42,11 +42,11 @@ export class ReportsAdminService {
    * same report cannot both succeed — the loser gets 409, satisfying "resolving an already-resolved
    * report is rejected" without a read-then-write race), then applies the resolution to the content.
    *
-   * KNOWN GAP: the report-status flip and the content mutation are not transactional across the
+   * If the content step fails (other than the content already being gone) the report is put back to OPEN and the
+   * error is rethrown, so the admin can retry. The two writes are still not one transaction across the
    * `reports`/`posts`/`comments`/`itineraries` collections (no cross-module transaction is used for
    * this anywhere in this codebase either — `BlogService.deletePostAndDependents` documents the same
-   * limitation for its own single-module cascade). If the content mutation throws after the report
-   * is claimed, the report is left resolved with the content still live; flagged in the PR.
+   * limitation for its own single-module cascade). A crash between the two writes can still leave a report resolved with live content.
    */
   async resolve(actor: AuthenticatedUser, id: string, dto: ResolveReportDto): Promise<ReportRowDto> {
     this.assertAdmin(actor);
@@ -62,10 +62,19 @@ export class ReportsAdminService {
       throw new ConflictException('Report is already resolved');
     }
 
-    if (dto.resolution === ReportResolution.HIDE) {
-      await this.content.hide(actor, report.targetType, String(report.targetId));
-    } else if (dto.resolution === ReportResolution.DELETE) {
-      await this.content.delete(actor, report.targetType, String(report.targetId));
+    try {
+      if (dto.resolution === ReportResolution.HIDE) {
+        await this.content.hide(actor, report.targetType, String(report.targetId));
+      } else if (dto.resolution === ReportResolution.DELETE) {
+        await this.content.delete(actor, report.targetType, String(report.targetId));
+      }
+    } catch (error) {
+      // Content already gone (the author deleted it): there is nothing left to hide or delete, so the report stays resolved.
+      if (!(error instanceof NotFoundException)) {
+        // Any other failure: give the report back so the admin can retry; never leave it resolved with live content.
+        await this.reports.updateOne({ _id: id, status: newStatus }, { status: ReportStatus.OPEN }).exec();
+        throw error;
+      }
     }
 
     await this.audit.log({
