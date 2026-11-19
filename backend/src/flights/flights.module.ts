@@ -15,6 +15,7 @@ import { FlightCabinsController } from './flight-cabins.controller';
 import { FlightCabinsService } from './flight-cabins.service';
 import { FlightSearchController } from './flight-search.controller';
 import { FlightSearchService } from './flight-search.service';
+import { FlightCancellationService } from './flight-cancellation.service';
 import { FlightEditService } from './flight-edit.service';
 import { FlightRosterService } from './flight-roster.service';
 import { FlightStatusJob } from './flight-status.job';
@@ -59,6 +60,7 @@ import { Flight, FlightSchema } from './schemas/flight.schema';
     FlightStatusJob,
     FlightEditService,
     FlightRosterService,
+    FlightCancellationService,
   ],
   exports: [FlightsService],
 })

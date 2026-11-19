@@ -2356,6 +2356,11 @@ e2e-crash history). Not done: no full local e2e/unit suite run (CI covers that);
 Atlas.
 Student: Ahmed Sanad
 Tool: Claude (Claude Code)
+Related Requirement: FLT-06 (airline cancels a flight, bookings cancelled with a 100% refund)
+Prompt:
+Start my sprint 4 tickets, FLT-06 first: POST /api/flights/:id/cancel lets the moderator of the owning airline cancel a SCHEDULED flight after an explicit confirmation. The flight becomes CANCELLED and leaves search, unpaid holds are released, every CONFIRMED booking becomes CANCELLED through BookingLifecycle with a 100% refund through RefundsService.issue (PAY-03), and each passenger is notified. Reuse the FLT-26 pattern of recording the refund amount before the transition so a failed refund can be retried.
+How the output was used:
+Added FlightCancellationService (own file), CancelFlightDto and the controller route with Swagger. The flight is cancelled in one atomic write first; holds go through PaymentActivity then BookingLifecycle (EXPIRED, which releases held seats); confirmed bookings (a round trip is cancelled as a whole when this flight is either leg) record the full amount, transition to CANCELLED, notify the passenger and are refunded. Anything unfinished is returned in `pending` with complete=false and a repeat of the same request retries only that, without refunding twice. The e2e tests are in flight-cancel.e2e-spec.ts; I reviewed the code and ran build, lint and the tests before accepting it.
 Related Requirement: FLT-29 (moderator view of a flight's bookings and CSV export)
 Prompt:
 Work on FLT-29: GET /api/flights/:id/bookings for the moderator of the owning airline, showing booking reference, passenger names, cabin, seats and status (CONFIRMED/CANCELLED) plus seats remaining per cabin, and GET /api/flights/:id/passengers/export returning the passenger list as CSV. Another airline's moderator gets 403. The CSV needs a header row, must escape commas and quotes, and download as text/csv.
