@@ -68,4 +68,38 @@ reservation or an unexpired `PENDING_PAYMENT` hold. The same overlap rule is che
 
 The hotel booking service registers as the `BookingType.HOTEL` provider for `BookingLifecycle` and as the hotel
 `UpcomingBookingsChecker` for account deactivation. Upcoming means a `CONFIRMED` reservation whose check-in date is
-today or later in UTC. Reviews are not part of this module; the deleted-author display is handled when that module exists.
+today or later in UTC.
+
+## Checkout completion and reviews (HTL-23)
+
+A `CONFIRMED` stay becomes `COMPLETED` after its checkout date has passed in UTC. The hotel booking service runs a daily
+completion sweep, and an owner's `GET /api/hotel-bookings/:id` also completes an overdue stay before returning it.
+Status changes go through `BookingLifecycle.transition()`.
+
+The owner may submit one review per completed reservation, regardless of how many rooms it contains:
+
+`POST /api/hotel-bookings/:id/review` (authenticated `USER` only):
+
+```json
+{ "rating": 5, "comment": "Clean rooms and a great view." }
+```
+
+`rating` is an integer from 1 through 5. `comment` is optional and limited to 1000 characters. A duplicate review, a
+review before checkout, or a review for another traveler's reservation returns 409, 409, or 404 respectively. The
+author may edit either field with `PATCH /api/reviews/:id` and delete the review with `DELETE /api/reviews/:id`.
+Another traveler receives 404 for attempts to edit or delete it.
+
+Visible review averages and counts are recalculated after create, edit, and delete. The public
+`GET /api/hotels/:id` response includes `averageRating`, `reviewCount`, and visible reviews newest first. Hidden reviews
+are excluded. Reviews by deactivated authors show `Deleted user`.
+
+## Public hotel reviews (HTL-24)
+
+`GET /api/hotels/:id/reviews?page=1&limit=10` is available to guests. Only an existing active hotel is returned;
+malformed, missing, or inactive hotel ids answer 404. The response includes the average rating and count across
+visible reviews, plus a page of those reviews in newest-first order. Hidden reviews are excluded from both the page
+and its rating summary. Reviews by deactivated or missing authors show `Deleted user`.
+
+Pagination follows the shared contract: `page` defaults to 1, `limit` defaults to 10 and cannot exceed 50. The
+`reviews` property contains the standard `items`, `page`, `limit`, `total`, and `totalPages` envelope.
+`averageRating` is null when there are no visible reviews; `reviewCount` matches `reviews.total`.

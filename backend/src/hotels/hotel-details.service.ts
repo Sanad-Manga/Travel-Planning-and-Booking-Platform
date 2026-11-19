@@ -3,19 +3,15 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { FreeRoomsPageDto } from './dto/free-rooms-response.dto';
 import { HotelDetailsQueryDto } from './dto/hotel-details-query.dto';
-import { HotelDetailsResponseDto, HotelReviewItemDto } from './dto/hotel-details-response.dto';
+import { HotelDetailsResponseDto } from './dto/hotel-details-response.dto';
+import { HotelReviewsResponseDto } from './dto/hotel-reviews-page.dto';
 import { HotelFreeRoomsService } from './hotel-free-rooms.service';
+import { HotelReviewsService } from './hotel-reviews.service';
 import { HotelsService } from './hotels.service';
 import { Hotel } from './schemas/hotel.schema';
+import { PaginationDto } from '../common';
 
 const PROFILE_FIELDS = 'name address cityId countryCode description photos starRating amenities';
-
-/** What the reviews module (HTL-23/HTL-24, Hotels B) will give the page. Until then there are no reviews. */
-interface ReviewSummary {
-  averageRating: number | null;
-  reviewCount: number;
-  reviews: HotelReviewItemDto[];
-}
 
 /**
  * HTL-02: everything the public hotel page needs in one call.
@@ -33,6 +29,7 @@ export class HotelDetailsService {
     @InjectModel(Hotel.name) private readonly hotels: Model<Hotel>,
     private readonly hotelsService: HotelsService,
     private readonly freeRooms: HotelFreeRoomsService,
+    private readonly hotelReviews: HotelReviewsService,
   ) {}
 
   async getDetails(hotelId: string, query: HotelDetailsQueryDto): Promise<HotelDetailsResponseDto> {
@@ -68,6 +65,13 @@ export class HotelDetailsService {
     };
   }
 
+  getReviews(
+    hotelId: string,
+    pagination: PaginationDto,
+  ): Promise<HotelReviewsResponseDto> {
+    return this.hotelReviews.listPublicReviews(hotelId, pagination);
+  }
+
   /** Both dates or neither: a single date cannot describe a stay. Returns null when no stay was asked for. */
   private stayOf(checkIn?: string, checkOut?: string): { checkIn: string; checkOut: string } | null {
     if (checkIn !== undefined && checkOut !== undefined) return { checkIn, checkOut };
@@ -79,13 +83,7 @@ export class HotelDetailsService {
     });
   }
 
-  /**
-   * Average rating and visible reviews of the hotel. The reviews module (HTL-23/HTL-24) is owned by Hessain and is not
-   * on develop yet, so this returns the stable empty shape (averageRating null, reviewCount 0, reviews []).
-   * When it merges, only this method changes: call his service here (visible, non-hidden reviews only).
-   */
-  private loadReviews(hotelId: string): Promise<ReviewSummary> {
-    void hotelId;
-    return Promise.resolve({ averageRating: null, reviewCount: 0, reviews: [] });
+  private loadReviews(hotelId: string) {
+    return this.hotelReviews.getSummary(hotelId);
   }
 }

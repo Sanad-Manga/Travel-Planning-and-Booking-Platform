@@ -1443,6 +1443,334 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
     });
   });
 
+  describe('GET /api/flight-bookings (FLT-25)', () => {
+    /** A legacy confirmed booking inserted straight into the collection (no FLT-19 passengers). */
+    function legacyBooking(overrides: Record<string, unknown> = {}) {
+      return {
+        userId: new Types.ObjectId(travelerId),
+        airlineId: new Types.ObjectId(airline.id),
+        cabinClass: 'ECONOMY',
+        passengerCounts: { adults: 1, children: 0, infants: 0 },
+        seats: 1,
+        farePerPassengerCents: 45000,
+        infantFareCents: 4500,
+        totalCents: 45000,
+        baggageFeeCents: 0,
+        currency: 'USD',
+        status: 'CONFIRMED',
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        ...overrides,
+      };
+    }
+
+    /** Moves a flight into the past without going through the (rejecting) create endpoint. */
+    async function moveFlightToPast(flightId: string) {
+      await connection.collection('flights').updateOne(
+        { _id: new Types.ObjectId(flightId) },
+        {
+          $set: {
+            departureAt: new Date('2020-01-01T00:00:00.000Z'),
+            arrivalAt: new Date('2020-01-01T05:00:00.000Z'),
+          },
+        },
+      );
+    }
+
+    it('groups a traveler\'s bookings into Upcoming, Past and Cancelled, cancellation winning over the date', async () => {
+      const upcomingFlight = await createFlight({ flightNumber: 'MS801' });
+      await addCabin(upcomingFlight, 'ECONOMY', 10);
+      const upcomingBooking = await hold(upcomingFlight);
+
+      const pastFlight = await createFlight({ flightNumber: 'MS802' });
+      await addCabin(pastFlight, 'ECONOMY', 10);
+      const pastBooking = await hold(pastFlight);
+      await moveFlightToPast(pastFlight);
+
+      const cancelledFlight = await createFlight({ flightNumber: 'MS803' });
+      await addCabin(cancelledFlight, 'ECONOMY', 10);
+      const cancelledBooking = await hold(cancelledFlight);
+      await lifecycle.confirmPaid(
+        BookingType.FLIGHT,
+        cancelledBooking,
+        'pi_list_cancelled',
+      );
+      await lifecycle.transition(
+        BookingType.FLIGHT,
+        cancelledBooking,
+        BookingStatus.CANCELLED,
+      );
+
+      const res = await http()
+        .get(BOOKING)
+        .set('Cookie', traveler)
+        .expect(200);
+
+      expect(res.body).toMatchObject({
+        page: 1,
+        limit: 10,
+        total: 3,
+        totalPages: 1,
+      });
+      const items = res.body.items as Array<{
+        id: string;
+        group: string;
+        status: string;
+        cabinClass: string;
+        bookingReference?: string;
+      }>;
+      const byId = new Map(items.map((item) => [item.id, item]));
+      expect(byId.get(upcomingBooking)?.group).toBe('UPCOMING');
+      expect(byId.get(pastBooking)?.group).toBe('PAST');
+      expect(byId.get(cancelledBooking)?.group).toBe('CANCELLED');
+      expect(byId.get(cancelledBooking)?.status).toBe('CANCELLED');
+      expect(byId.get(cancelledBooking)?.cabinClass).toBe('ECONOMY');
+      expect(byId.get(cancelledBooking)?.bookingReference).toMatch(
+        /^FLT-[0-9A-F]{16}$/,
+      );
+
+      const past = await http()
+        .get(`${BOOKING}?group=PAST`)
+        .set('Cookie', traveler)
+        .expect(200);
+      expect(past.body.total).toBe(1);
+      expect(past.body.items.map((item: { id: string }) => item.id)).toEqual([
+        pastBooking,
+      ]);
+    });
+
+    it('groups a round trip by its outbound segment and returns both segments', async () => {
+      const outboundId = await createFlight({ flightNumber: 'MS811' });
+      const returnId = await createFlight(
+        {
+          flightNumber: 'BB812',
+          departureAirport: 'JFK',
+          arrivalAirport: 'CAI',
+          departureLocalTime: '2090-12-02T10:00',
+          arrivalLocalTime: '2090-12-02T18:30',
+        },
+        returnModerator,
+      );
+      await addCabin(outboundId, 'ECONOMY', 10);
+      await addCabin(returnId, 'ECONOMY', 10);
+      const created = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          segments: [
+            { flightId: outboundId, cabinClass: 'ECONOMY' },
+            { flightId: returnId, cabinClass: 'ECONOMY' },
+          ],
+          passengers: [
+            {
+              fullName: 'Amina Example',
+              dateOfBirth: '2078-12-01',
+              passportOrIdNumber: 'P1234567',
+            },
+          ],
+        })
+        .expect(201);
+
+      // Only the return leg is in the past: the trip must still be UPCOMING (outbound decides).
+      await moveFlightToPast(returnId);
+
+      const res = await http()
+        .get(BOOKING)
+        .set('Cookie', traveler)
+        .expect(200);
+      const [item] = res.body.items as Array<{
+        id: string;
+        group: string;
+        bookingReference?: string;
+        flight: { id: string; flightNumber: string };
+        segments: Array<{
+          flightId: string;
+          flight: { flightNumber: string };
+        }>;
+        passengers: Array<Record<string, unknown>>;
+      }>;
+      expect(item.id).toBe(created.body.id);
+      expect(item.group).toBe('UPCOMING');
+      expect(item.flight.id).toBe(outboundId);
+      expect(item.segments.map((segment) => segment.flightId)).toEqual([
+        outboundId,
+        returnId,
+      ]);
+      expect(
+        item.segments.map((segment) => segment.flight.flightNumber),
+      ).toEqual(['MS811', 'BB812']);
+      expect(item.passengers).toHaveLength(1);
+      expect(item.passengers[0]).not.toHaveProperty('passportOrIdNumber');
+    });
+
+    it('lists a legacy one-way booking without segments and without a reference', async () => {
+      const flightId = await createFlight({ flightNumber: 'MS821' });
+      const legacyId = new Types.ObjectId();
+      await connection.collection('flightBookings').insertOne({
+        _id: legacyId,
+        flightId: new Types.ObjectId(flightId),
+        ...legacyBooking(),
+      });
+
+      const res = await http()
+        .get(BOOKING)
+        .set('Cookie', traveler)
+        .expect(200);
+      const [item] = res.body.items as Array<{
+        id: string;
+        group: string;
+        bookingReference?: string;
+        segments: Array<{ flightId: string }>;
+        passengers: unknown[];
+      }>;
+      expect(item.id).toBe(legacyId.toString());
+      expect(item.group).toBe('UPCOMING');
+      expect(item).not.toHaveProperty('bookingReference');
+      expect(item.segments).toHaveLength(1);
+      expect(item.segments[0].flightId).toBe(flightId);
+      expect(item.passengers).toEqual([]);
+    });
+
+    it('returns only the caller\'s bookings and keeps details owner-only', async () => {
+      const flightId = await createFlight({ flightNumber: 'MS831' });
+      await addCabin(flightId, 'ECONOMY', 10);
+      const mine = await hold(flightId);
+      const theirs = (
+        await http()
+          .post(HOLD)
+          .set('Cookie', otherTraveler)
+          .send(body(flightId))
+          .expect(201)
+      ).body.id as string;
+
+      const mineList = await http()
+        .get(BOOKING)
+        .set('Cookie', traveler)
+        .expect(200);
+      expect(mineList.body.total).toBe(1);
+      expect(mineList.body.items.map((item: { id: string }) => item.id)).toEqual([
+        mine,
+      ]);
+
+      const theirList = await http()
+        .get(BOOKING)
+        .set('Cookie', otherTraveler)
+        .expect(200);
+      expect(theirList.body.total).toBe(1);
+      expect(
+        theirList.body.items.map((item: { id: string }) => item.id),
+      ).toEqual([theirs]);
+
+      await http()
+        .get(`${BOOKING}/${theirs}`)
+        .set('Cookie', traveler)
+        .expect(404);
+    });
+
+    it('paginates with page size 10 by default, explicit pages, stable totals and an empty out-of-range page', async () => {
+      const flightId = await createFlight({ flightNumber: 'MS841' });
+      const docs = Array.from({ length: 12 }, (_, index) => ({
+        _id: new Types.ObjectId(),
+        flightId: new Types.ObjectId(flightId),
+        ...legacyBooking({
+          createdAt: new Date(Date.UTC(2026, 10, 1, 10, index)),
+          updatedAt: new Date(Date.UTC(2026, 10, 1, 10, index)),
+        }),
+      }));
+      await connection.collection('flightBookings').insertMany(docs);
+
+      const first = await http()
+        .get(BOOKING)
+        .set('Cookie', traveler)
+        .expect(200);
+      expect(first.body).toMatchObject({
+        page: 1,
+        limit: 10,
+        total: 12,
+        totalPages: 2,
+      });
+      expect(first.body.items).toHaveLength(10);
+      // Newest first: the 12th inserted document (10:11) is the first row.
+      expect(first.body.items[0].id).toBe(docs[11]._id.toString());
+
+      const repeated = await http()
+        .get(BOOKING)
+        .set('Cookie', traveler)
+        .expect(200);
+      expect(repeated.body.items.map((item: { id: string }) => item.id)).toEqual(
+        first.body.items.map((item: { id: string }) => item.id),
+      );
+
+      const second = await http()
+        .get(`${BOOKING}?page=2&limit=10`)
+        .set('Cookie', traveler)
+        .expect(200);
+      expect(second.body.items.map((item: { id: string }) => item.id)).toEqual([
+        docs[1]._id.toString(),
+        docs[0]._id.toString(),
+      ]);
+
+      const empty = await http()
+        .get(`${BOOKING}?page=3&limit=10`)
+        .set('Cookie', traveler)
+        .expect(200);
+      expect(empty.body).toMatchObject({
+        items: [],
+        page: 3,
+        limit: 10,
+        total: 12,
+        totalPages: 2,
+      });
+
+      const single = await http()
+        .get(`${BOOKING}?page=1&limit=1`)
+        .set('Cookie', traveler)
+        .expect(200);
+      expect(single.body).toMatchObject({ limit: 1, total: 12, totalPages: 12 });
+      expect(single.body.items).toHaveLength(1);
+
+      await http().get(`${BOOKING}?page=0`).set('Cookie', traveler).expect(400);
+      await http()
+        .get(`${BOOKING}?limit=51`)
+        .set('Cookie', traveler)
+        .expect(400);
+      await http()
+        .get(`${BOOKING}?group=LATER`)
+        .set('Cookie', traveler)
+        .expect(400);
+    });
+
+    it('requires the traveler role and publishes the list contract in Swagger', async () => {
+      await http().get(BOOKING).set('Cookie', admin).expect(403);
+      await http().get(BOOKING).expect(401);
+
+      const docs = await http().get('/api/docs-json').expect(200);
+      const operation = docs.body.paths['/api/flight-bookings'].get;
+      expect(operation.operationId).toBe('FlightBookingsController_listMine');
+      expect(
+        operation.parameters.map((parameter: { name: string }) => parameter.name),
+      ).toEqual(expect.arrayContaining(['page', 'limit', 'group']));
+      const ok = operation.responses['200'].content['application/json'].schema;
+      expect(ok.required).toEqual(
+        expect.arrayContaining([
+          'items',
+          'page',
+          'limit',
+          'total',
+          'totalPages',
+        ]),
+      );
+      expect(ok.properties.items.type).toBe('array');
+      expect(ok.properties.page).toMatchObject({ type: 'integer', example: 1 });
+      expect(ok.properties.limit).toMatchObject({
+        type: 'integer',
+        example: 10,
+      });
+      expect(operation.responses['400']).toBeDefined();
+      expect(operation.responses['403']).toBeDefined();
+    });
+  });
+
   describe('GET /api/flight-bookings/:id/e-ticket (FLT-23)', () => {
     const ticketPassenger = (fullName: string, passportOrIdNumber: string) => ({
       fullName,
