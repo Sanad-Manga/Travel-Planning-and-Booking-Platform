@@ -15,9 +15,11 @@ import {
   buildBudgetSummary,
   BudgetSummaryDto,
   ConvertedBudgetTotalDto,
+  LinkedBookingCost,
 } from './dto/budget-summary.dto';
 import { CreateBudgetDto } from './dto/create-budget.dto';
 import { toItineraryDay } from './dto/itinerary-day.dto';
+import { ItineraryBookingsService } from './itinerary-bookings.service';
 import { UpdateBudgetDto } from './dto/update-budget.dto';
 import { Budget, BudgetLean } from './schemas/budget.schema';
 import { Itinerary, ItineraryLean } from './schemas/itinerary.schema';
@@ -38,6 +40,7 @@ export class BudgetsService {
     private readonly transportCosts: TransportCostsService,
     private readonly fx: FxService,
     private readonly users: UsersService,
+    private readonly bookingLinks: ItineraryBookingsService,
   ) {}
 
   /**
@@ -157,11 +160,13 @@ export class BudgetsService {
 
   /** The summary of an itinerary the caller may already read (own, or public for the read-only view). */
   async summaryOf(itinerary: ItineraryLean): Promise<BudgetSummaryDto> {
-    const [activities, transportCosts, budgets] = await Promise.all([
-      this.activities.listByItinerary(itinerary._id),
-      this.transportCosts.listByItinerary(itinerary._id),
-      this.listByItinerary(itinerary._id),
-    ]);
+    const [activities, transportCosts, budgets, linkedBookings] =
+      await Promise.all([
+        this.activities.listByItinerary(itinerary._id),
+        this.transportCosts.listByItinerary(itinerary._id),
+        this.listByItinerary(itinerary._id),
+        this.linkedBookingCosts(itinerary._id),
+      ]);
     const days = (itinerary.days ?? []).map((day, index) =>
       toItineraryDay(day, index, itinerary.startDate),
     );
@@ -171,7 +176,18 @@ export class BudgetsService {
       activities,
       transportCosts,
       budgets,
+      linkedBookings,
     );
+  }
+
+  /**
+   * ITN-27: what the bookings linked to the itinerary's days add to its budget. Only the owner's own views use it (the
+   * summary and the city-group subtotals): a booking is private to its owner, so the public view and a clone leave it out.
+   */
+  linkedBookingCosts(
+    itineraryId: Types.ObjectId,
+  ): Promise<LinkedBookingCost[]> {
+    return this.bookingLinks.costsOf(itineraryId);
   }
 
   /** All entries of an itinerary, oldest first, for showing them on the itinerary. Does not check ownership. */
@@ -219,6 +235,8 @@ export class BudgetsService {
   /** Called when an itinerary is deleted: its entries go with it. */
   async removeForItinerary(itineraryId: Types.ObjectId): Promise<void> {
     await this.model.deleteMany({ itineraryId }).exec();
+    // ITN-27: the bookings linked to its days go with it.
+    await this.bookingLinks.removeForItinerary(itineraryId);
   }
 
   /** Called when one day is deleted (ITN-07): the entries of that day go with it, the other days keep theirs. */
@@ -227,6 +245,8 @@ export class BudgetsService {
     dayId: Types.ObjectId,
   ): Promise<void> {
     await this.model.deleteMany({ itineraryId, dayId }).exec();
+    // ITN-27: the bookings linked to that day go with it.
+    await this.bookingLinks.removeForDay(itineraryId, dayId);
   }
 
   /**

@@ -1988,6 +1988,16 @@ Verification: tsc --noEmit and eslint clean. New tests: `stripe-payment-activity
 unreachable Stripe, in-flight row left untouched) and two in `payments.service.spec.ts` (create/retry each
 return ServiceUnavailableException when Stripe is down). Scoped unit (`src/payments`, `src/refunds`): 146/146
 pass. Related e2e (`payments-webhook`, `payments-concurrency`, capped at 2 workers): 5/5 pass.
+
+Date: 2026-11-19
+Student: Abdulrahman Mohamad Hosny
+Tool: OpenCode (DeepSeek V4.1 Flash Free)
+Related Requirement: FLT-26
+Prompt:
+Implement FLT-26 "Cancel own flight booking with tier-based refund" in the flights module only: POST /api/flight-bookings/:id/cancel as a two-step flow on the same endpoint (confirm:false previews the airline-tier refund; confirm:true plus expectedRefundAmountCents cancels), owner-only USER access with 404 for another traveler or an unknown booking, only CONFIRMED bookings before the outbound departure, tiers through AirlinesService.getCancellationTiers and RefundCalculator.compute with the full booking total and fractional days, BookingLifecycle.transition(...CANCELLED) so seats return in the same transaction, then RefundsService.issue only for a positive amount (zero refund cancels/releases without issue), a changed amount as 409 with the current amount, round trips cancelled as a whole by the outbound segment, no double release or duplicate refund, Swagger/docs/tests updated, and no edits to common/, Payments, Refunds, Airlines or hotels production code.
+How the output was used:
+Added CancelFlightBookingDto (required boolean confirm, conditional integer expectedRefundAmountCents) and FlightBookingCancelResponseDto, plus pure helpers in flights/utils/cancellation-refund.ts (fractional days and highest-applicable-tier selection for display; the amount itself always comes from Payments' RefundCalculator). FlightBookingsService.cancel() loads the booking, applies the shared assertOwner helper (unknown/other traveler = 404), rejects any status other than CONFIRMED and any time at/after the outbound departure (getFlightBookingSegments supplies the legacy one-way fallback), reads the outbound segment's stored airline tiers, computes the refund, returns the preview without writes, and on confirm compares the expected amount, rechecks status/departure/amount immediately before BookingLifecycle.transition(FLIGHT, id, CANCELLED), then calls RefundsService.issue only when the amount is positive with a stable cancellation reason. A changed amount is a 409 whose message and details carry the current cents; zero refund returns refund:null and never calls issue. The controller route is role USER, answers 200 (@HttpCode), and documents preview/confirm, 400/401/403/404/409 and the zero-refund behavior in Swagger. The flight E2E module now overrides STRIPE_GATEWAY with the existing FakeStripeGateway, clears payments between tests, and adds 11 FLT-26 tests (preview no-op, matching confirmation with one refund, changed-amount 409 then fresh preview, missing confirm/invalid amount, owner/role isolation, pending/expired/completed/already-cancelled, after departure, zero refund, round trip using outbound airline and releasing both segments, two concurrent confirmations, Swagger contract). Updated docs/contracts.md and adjusted the old FLT-19 Swagger assertion that no cancellation route existed. No other module or common/ production file was changed.
+Verification: npm run build passed; npm run lint passed; npx jest --runInBand "src/flights" "src/common/pagination" 51/51 passed (includes cancellation-refund.spec.ts 3/3); npx jest --config ./test/jest-e2e.json flight-bookings-hold --runInBand 73/73 passed; airline-cancellation-policy 23/23 passed; refunds-concurrency 1/1 passed; refund-calculator + refunds unit 22/22 passed; pagination 223/223 passed.
 Date: 2026-11-18
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
@@ -2055,6 +2065,30 @@ Implement FLT-25 "My flight bookings" in the flights module only: GET /api/fligh
 How the output was used:
 Added FlightBookingsService.listMine() (plus GET /api/flight-bookings on the existing controller) and a flights-module MyFlightBookingsQueryDto/FlightBookingListRowDto. Ownership is part of the MongoDB query (the shared bookingVisibilityFilter narrowed to the caller's userId for role USER, so it can never widen), and the group is derived in the pipeline from the outbound segment's flight departureAt through one $lookup, so the group filter, skip/limit and total are computed in the database and pages stay stable (createdAt desc, _id desc). Legacy records without a segments array fall back to the top-level flightId, and a missing bookingReference stays absent instead of being generated. List rows reuse the existing segment/passenger mappers, so passport/identity numbers, paymentRef and Stripe ids never appear. GET /:id was left unchanged and still reads the latest refund through RefundsService.getLatestForBooking. Updated Swagger (route, query params, paginated schema, 400/401/403), docs/contracts.md and the flight E2E suite (grouping, cancellation precedence, round-trip grouping, legacy one-way, owner isolation, pagination/default/invalid pages, Swagger) plus a mapper unit test. No common/ or other module files were changed.
 Verification: npm run build passed; npm run lint passed; npx jest flight-booking-list-row --runInBand 3/3 passed; npx jest --config ./test/jest-e2e.json flight-bookings-hold --runInBand 68/68 passed.
+Student: Yassin Yahya
+Tool: Claude (Claude Code)
+Related Requirement: HTL-21 (SCRUM-88) Cancel whole reservation with tier-based refund
+Prompt:
+Implement HTL-21 (asked together with ITN-27, which is a separate branch and PR): POST /api/hotel-bookings/:id/cancel cancels the traveler's own CONFIRMED
+reservation as a whole before check-in; the refund comes from the hotel tiers (HTL-10) on the full total and is shown before cancelling;
+the reservation becomes CANCELLED, all rooms are released and a refund is created through PAY-03. No partial cancellation.
+How the output was used:
+Read the ticket, BookingLifecycle, RefundCalculator, RefundsService, HotelsService.getPolicies and the HTL-17/HTL-18 booking code. Tests first
+(4 unit tests for the time rules, 20 HTTP tests on an in-memory replica set with the fake Stripe gateway), watched them fail, then wrote
+HotelBookingCancellationService (own file, not added to the big HotelBookingsService) and its controller: GET :id/cancel-preview and
+POST :id/cancel. The owner filter is part of the query (404 for someone else's, unknown or malformed ids); only CONFIRMED before the check-in
+moment (check-in date at the hotel check-in time, UTC, 00:00 when unset) is cancellable, else 409. The refund is RefundCalculator.compute on the
+hotel's tiers, the fractional days to check-in and the full total, so preview and cancel agree. The status change is BookingLifecycle.transition
+(atomic, frees the rooms in the same write), then RefundsService.issue; a refund of 0 is not issued and refund is null. HotelsModule imports
+RefundsModule (one line, flagged in the PR); no other module was edited. Mutation checks: removing the owner filter failed the ownership test, and
+disabling the status guard failed five tests.
+Verification: lint and build pass; 1173 unit (81 suites) and 1480 e2e (60 suites, 3 workers) pass. Not done: a manual Swagger click-through against Atlas.
+Follow-up in the same PR (user: "fix them", about the known limit above): if RefundsService.issue fails after the status change, the reservation used to stay CANCELLED with no way to finish
+the refund. Now the cancel route records what the cancellation refunds (two optional fields on the hotel booking schema: cancellationRequestedAt and cancellationRefundCents, written only while the
+reservation is CONFIRMED, just before the status changes). A failure that is not a refusal by the refund rules answers 503 with a message saying the reservation is cancelled and to send the request again;
+cancelling a CANCELLED reservation that has a recorded refund and no refund yet issues the recorded amount (not the tier of the retry day), also after the check-in time, and two simultaneous retries
+give one refund. Tests first (7 new HTTP tests, Stripe failure simulated with a spy), watched failing; mutation check: issuing a different amount on retry failed three tests.
+Verification of the follow-up: lint and build pass; 1192 unit (83 suites) and 1510 e2e (62 suites, 3 workers) pass. Not done: a manual Swagger click-through against Atlas.
 
 Date: 2026-11-19
 Student: Mohamed Walid
@@ -2143,3 +2177,37 @@ Prompt:
 Implement HTL-22 in the Hotels module: add the read-only GET /api/hotels/:id/reservations for a HOTEL_MODERATOR, restricted to their own hotel (another hotel gets 403), returning paginated rows with guest, dates and status (shared PaginationDto, default page size 10); update Swagger, tests and directly related docs. Keep ownership checks in the service, do not add write endpoints, and do not modify Yusuf's hotel profile/rooms controllers (register the route in a new Hotels B controller instead).
 How the output was used:
 Added HotelReservationsController (@Controller('hotels')) so hotels.controller.ts is untouched, and HotelBookingsService.listForHotel, which re-checks the role and own-hotel id in the service (another, unknown or malformed id is 403, matching HTL-01/HTL-08) and queries the hotelBookings collection newest-first with the shared envelope via toPaginated. Guest display names are resolved through the exported UsersService.findById, never by reading the users collection; bookingReference is null for a pending hold and payment references are never selected. Added HotelReservationRowDto/HotelReservationsPageDto with Swagger, registered the controller in hotels.module.ts, added hotel-moderator-reservations.e2e-spec.ts (success, ownership/role 403s, 401, pagination validation, Swagger), and registered the new list in pagination.e2e-spec.ts with 25 seeded rows. Documented the endpoint in docs/api/hotel-moderator-reservations.md. Verification: npm.cmd run build, npm.cmd run lint, the new e2e suite (15/15), pagination.e2e-spec.ts (251/251) and the existing hotel-bookings/hotel-reviews e2e suites passed. E2E runs used MONGOMS_SYSTEM_BINARY because the cached mongod zip was corrupt on this machine.
+Student: Yassin Yahya
+Tool: Claude (Claude Code)
+Related Requirement: ITN-27 (SCRUM-119) Link confirmed bookings to itinerary days (bonus)
+Prompt:
+Implement ITN-27 (asked together with HTL-21, which is a separate branch and PR): POST /api/itineraries/:id/bookings links one of the
+user's own CONFIRMED flight or hotel bookings to a day of their own itinerary, and the linked amounts feed the budget without double counting.
+How the output was used:
+Read the ticket, the budget code (BudgetsService, buildBudgetSummary, city-group subtotals) and the booking provider contract (BookingProviderRegistry,
+getPayable, getStatus). Tests first (19 HTTP tests on an in-memory replica set with real Flights and Hotels booking providers), watched them fail, then
+wrote a new itineraryBookings collection (unique on itinerary + booking type + booking id, so a booking is linked once and cannot be counted twice, atomically),
+ItineraryBookingsService and its controller. The booking is read through the owner-scoped getPayable of its provider, never from the Flights or Hotels
+collections: unknown and someone else's bookings are 404, a booking that is not CONFIRMED is 409. The amount is a snapshot taken when linking; whether it still
+counts is read from getStatus each time the budget is added up (confirmed or completed counts, cancelled does not). A hotel booking counts under ACCOMMODATION,
+a flight booking under INTERCITY_TRANSPORT, in the budget summary, the day totals and the city-group subtotals (buildBudgetSummary got one optional parameter).
+Links are removed with their day or itinerary (through BudgetsService.removeForDay and removeForItinerary). The public view and clones leave the links out because
+a booking is private to its owner. ItinerariesModule imports PaymentsModule for the registry.
+Mutation checks: removing the owner filter failed the ownership test, and disabling the CONFIRMED guard failed four tests.
+Verification: lint and build pass; 1188 unit (82 suites) and 1502 e2e (62 suites, 3 workers) pass. Not done: a manual Swagger click-through against Atlas.
+Follow-up in the same PR (user: "fix them", about the missing list and unlink): GET /api/itineraries/:id/bookings lists the links of an itinerary, oldest first and paginated (the shared GEN-05 test
+failed my first, unpaginated version: no GET route may answer with a bare array), each with the status of its booking and "counted" (only a confirmed or completed booking counts in the budget);
+DELETE /api/itineraries/:id/bookings/:linkId removes a link in ONE delete whose filter holds the link id, the itinerary and the owner, so the booking can be linked again and its amount leaves the budget.
+Tests first (8 new HTTP tests), watched failing; mutation checks: dropping the owner filter and dropping the itinerary filter of the unlink each failed a test. One entry (25 seeded links) was added to
+ROUTES in test/pagination.e2e-spec.ts (the GEN-05 test), a teammate's file, flagged in the PR.
+Verification of the follow-up: lint and build pass; 1188 unit (82 suites) and 1524 e2e (62 suites, 3 workers) pass. Not done: a manual Swagger click-through against Atlas.
+
+Date: 2026-11-19
+Student: Abdulrahman Mohamad Hosny
+Tool: OpenCode (DeepSeek V4.1 Flash Free)
+Related Requirement: FLT-26 (follow-up: retry a failed cancellation refund)
+Prompt:
+Fix the blocking refund-retry issue on the FLT-26 branch: if RefundsService.issue fails after the booking is CANCELLED and its seats are released, the traveler cannot complete the refund because a retry is rejected. Adapt the HTL-21 pattern from PR #134: record the confirmed refund amount before the transition and let a retry of an already-CANCELLED booking issue that recorded amount only, without rerunning the tier calculation or rechecking departure.
+How the output was used:
+Added cancellationRefundCents/cancellationRequestedAt to the flight booking schema. FlightBookingsService.cancel() now records the confirmed amount with a conditional update that only matches while the booking is still CONFIRMED, then transitions to CANCELLED through BookingLifecycle and issues the positive recorded refund; a zero amount is recorded and never sent to PAY-03. A transient issue failure is logged and answered 503. A confirmation for an already-CANCELLED booking takes a recovery path: owner-only, preview still 409, the recorded amount must match expectedRefundAmountCents, and the stored amount is issued without reading tiers or checking departure. A further retry, a zero recorded amount, and a legacy cancellation with no recorded amount answer 409; the refund-exists and concurrent-duplicate cases return/report the existing refund per PAY-03 idempotency. Response DTO/Swagger and docs/contracts.md document the persisted amount and recovery. Seven new E2E tests cover the reviewer regression: first Stripe createRefund rejection leaves CANCELLED with the recorded amount and seats released once, the retry refunds exactly that amount without a second transition, a changed policy or passed departure does not change it, a further retry creates no duplicate, zero refunds never call Stripe, owner/role/amount/legacy guards, and two concurrent retries produce one refund. No Payments, Refunds, Airlines, Hotels or common/ production code changed.
+Verification: npm run build passed; npm run lint passed; focused unit npx jest --runInBand "src/flights" "src/refunds" "src/payments/refund-calculator" 64/64 passed; npx jest --config ./test/jest-e2e.json flight-bookings-hold --runInBand 86/86 passed (19 FLT-26); refunds-concurrency 1/1 passed.

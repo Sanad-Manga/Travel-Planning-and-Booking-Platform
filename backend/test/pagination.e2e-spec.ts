@@ -167,6 +167,13 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
       // the city group of day 1 is city-0 from 2099-01-01 (the user's own itinerary, seeded below); paging with hotel data is proven in itineraries-hotels.service.spec.ts and itineraries.e2e-spec.ts
       query: 'fromDayNumber=1&guests=1',
     },
+    // ITN-27: the bookings linked to the user's first itinerary (25 links seeded below; their bookings do not exist, so each is listed with a null status)
+    {
+      swagger: '/api/itineraries/{id}/bookings',
+      url: `/api/itineraries/${groupHotelsItineraryId.toHexString()}/bookings`,
+      auth: 'user',
+      total: 25,
+    },
     {
       swagger: '/api/admin/audit-logs',
       url: '/api/admin/audit-logs',
@@ -361,6 +368,20 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
           startDate: '2099-01-01',
           days: [{ _id: new Types.ObjectId(), cityId: 'city-0', notes: '' }],
         }),
+      })),
+    );
+    // ITN-27: 25 bookings linked to the user's first itinerary (the bookings themselves are not seeded: the list shows a null status for each).
+    await db.collection('itineraryBookings').insertMany(
+      rows(25, (i) => ({
+        itineraryId: groupHotelsItineraryId,
+        dayId: new Types.ObjectId(),
+        ownerId: userId,
+        bookingType: 'HOTEL',
+        bookingId: new Types.ObjectId(),
+        amountCents: 10_000 + i,
+        currency: 'USD',
+        createdAt: now,
+        updatedAt: now,
       })),
     );
     // BON-02: 25 saved hotels (ids only; a missing hotel is simply listed as not available).

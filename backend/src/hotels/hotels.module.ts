@@ -2,8 +2,11 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { NotificationsModule } from '../notifications';
 import { PaymentsModule } from '../payments';
+import { RefundsModule } from '../refunds';
 import { ReferenceDataModule } from '../reference-data/reference-data.module';
 import { UsersModule } from '../users/users.module';
+import { HotelBookingCancellationController } from './hotel-booking-cancellation.controller';
+import { HotelBookingCancellationService } from './hotel-booking-cancellation.service';
 import { HotelBookingsController } from './hotel-bookings.controller';
 import { HotelBookingsService } from './hotel-bookings.service';
 import { HotelAvailabilityService } from './hotel-availability.service';
@@ -38,6 +41,7 @@ import { Room, RoomSchema } from './schemas/room.schema';
     ]),
     ReferenceDataModule,
     PaymentsModule,
+    RefundsModule, // HTL-21: RefundsService.issue (PAY-03) for the refund of a cancelled reservation
     NotificationsModule,
     UsersModule,
   ],
@@ -49,6 +53,7 @@ import { Room, RoomSchema } from './schemas/room.schema';
     HotelRoomStatusController,
     HotelBookingsController,
     HotelReservationsController,
+    HotelBookingCancellationController,
     HotelReviewsController,
     HotelsController,
     RoomsController,
@@ -62,6 +67,7 @@ import { Room, RoomSchema } from './schemas/room.schema';
     HotelFreeRoomsService,
     HotelRoomStatusService,
     HotelBookingsService,
+    HotelBookingCancellationService,
     HotelReviewsService,
     { provide: RoomReservations, useExisting: HotelBookingsService },
   ],
