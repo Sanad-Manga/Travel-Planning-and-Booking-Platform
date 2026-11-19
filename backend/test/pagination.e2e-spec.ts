@@ -197,6 +197,12 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
       total: 25,
     },
     {
+      // GEN-10: open reports only; this test only proves the envelope and the limits (rows are proven in admin-content-moderation.e2e-spec.ts)
+      swagger: '/api/admin/reports',
+      url: '/api/admin/reports',
+      auth: 'admin',
+    },
+    {
       swagger: '/api/flights/search',
       url: '/api/flights/search',
       auth: 'none',
