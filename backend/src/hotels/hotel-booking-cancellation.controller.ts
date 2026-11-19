@@ -6,6 +6,7 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiServiceUnavailableResponse,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
@@ -46,12 +47,17 @@ export class HotelBookingCancellationController {
     description:
       'Cancels the traveler’s own CONFIRMED reservation as a whole, before check-in (no partial cancellation). The reservation becomes CANCELLED and ' +
       'all its rooms are free again for those dates. The refund is the hotel tier percentage of the full total (the same amount as the preview) and is ' +
-      'created through the payments refund service; when no tier applies nothing is refunded and `refund` is null.',
+      'created through the payments refund service; when no tier applies nothing is refunded and `refund` is null. ' +
+      'If the refund cannot be issued (for example Stripe is down) the reservation stays CANCELLED, its rooms stay released and the answer is 503: send the same request again to complete the refund with the amount worked out at the first cancel.',
   })
   @ApiOkResponse({ type: HotelCancellationResultDto })
   @ApiForbiddenResponse({ type: ErrorResponseDto, description: 'Only a registered traveler can cancel a hotel reservation' })
   @ApiNotFoundResponse({ type: ErrorResponseDto, description: "No such reservation of yours (someone else's reservation answers 404 too)" })
   @ApiConflictResponse({ type: ErrorResponseDto, description: 'The reservation is not CONFIRMED, its check-in time has passed, or it was cancelled by another request' })
+  @ApiServiceUnavailableResponse({
+    type: ErrorResponseDto,
+    description: 'The reservation is cancelled but its refund could not be issued yet (the payment provider is unavailable). Send the cancel request again to complete the refund.',
+  })
   cancel(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string): Promise<HotelCancellationResultDto> {
     return this.cancellation.cancel(user, id);
   }

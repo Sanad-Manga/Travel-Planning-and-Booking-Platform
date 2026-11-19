@@ -97,9 +97,15 @@ Rules:
 - The status change goes through `BookingLifecycle` (`CONFIRMED` to `CANCELLED`). It is one atomic write, so two
   simultaneous cancellations give one 200 and one 409, and only the winner creates a refund. A `CANCELLED` reservation
   no longer holds its rooms: they are available again for those dates in the same write.
-- The refund is created with `RefundsService.issue` (PAY-03), after the status change. If that call fails (for example
-  Stripe is down) the reservation stays `CANCELLED`, the error is logged and returned, and the refund has to be handled
-  by hand: a second cancel is a 409.
+- What the cancellation refunds (`cancellationRefundCents`, 0 when no tier applies) and when it was asked
+  (`cancellationRequestedAt`) are recorded on the reservation, only while it is `CONFIRMED`, just before its status
+  changes. The refund is then created with `RefundsService.issue` (PAY-03).
+- If that call fails for a reason other than a refusal by the refund rules (for example Stripe is down), the
+  reservation stays `CANCELLED` with its rooms released and the answer is 503 saying so. Send
+  `POST /api/hotel-bookings/:id/cancel` again: for a `CANCELLED` reservation that has a recorded refund and no refund
+  yet, it issues that recorded amount (not the tier of the day of the retry) and answers 200 like the first call, even
+  after the check-in time has passed. Two simultaneous retries give one refund. A reservation whose refund was issued,
+  that had nothing to refund, or that was not cancelled by this route answers 409.
 
 ## Reservation lookups
 

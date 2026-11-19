@@ -185,6 +185,10 @@ describe('cancel a whole hotel reservation with a tier-based refund (HTL-21) ove
     stripe.refunds.clear();
   });
 
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   afterAll(async () => {
     await app?.close();
     await mongo?.stop();
@@ -258,6 +262,9 @@ describe('cancel a whole hotel reservation with a tier-based refund (HTL-21) ove
       expect(response.body.booking).toMatchObject({ id: id.toHexString(), status: BookingStatus.CANCELLED, totalCents: TOTAL_CENTS });
       expect(response.body.refund).toMatchObject({ status: RefundStatus.REFUNDED, amountCents: TOTAL_CENTS, currency: 'USD', bookingId: id.toHexString() });
       expect(await statusOf(id)).toBe(BookingStatus.CANCELLED);
+      const stored = await db.collection('hotelBookings').findOne({ _id: id });
+      expect(stored?.cancellationRefundCents).toBe(TOTAL_CENTS); // kept so that a failed refund can be completed later
+      expect(stored?.cancellationRequestedAt).toBeInstanceOf(Date);
 
       const rows = await refundRows();
       expect(rows).toHaveLength(1);
@@ -320,7 +327,6 @@ describe('cancel a whole hotel reservation with a tier-based refund (HTL-21) ove
     it.each([
       ['PENDING_PAYMENT', { status: BookingStatus.PENDING_PAYMENT, holdExpiresAt: new Date(Date.now() + 60_000) }, 20],
       ['COMPLETED', { status: BookingStatus.COMPLETED }, -5],
-      ['CANCELLED', { status: BookingStatus.CANCELLED }, 20],
       ['EXPIRED', { status: BookingStatus.EXPIRED }, 20],
     ])('refuses a %s reservation with 409', async (_label, overrides, inDays) => {
       const id = await paidReservation(inDays, overrides, false);
@@ -338,6 +344,82 @@ describe('cancel a whole hotel reservation with a tier-based refund (HTL-21) ove
     });
   });
 
+  describe('a refund that failed is completed by cancelling again', () => {
+    const cancel = (cookie = travelerCookie, id: Types.ObjectId) => http().post(`/api/hotel-bookings/${id}/cancel`).set('Cookie', cookie);
+    /** A reservation that was cancelled (status CANCELLED) with the refund amount its cancellation worked out, but no refund yet. */
+    const cancelledWithoutRefund = (inDays: number, storedCents: number | null, cancelledDaysAgo = 1) =>
+      paidReservation(inDays, {
+        status: BookingStatus.CANCELLED,
+        ...(storedCents === null
+          ? {}
+          : { cancellationRefundCents: storedCents, cancellationRequestedAt: new Date(Date.now() - cancelledDaysAgo * DAY_MS) }),
+      });
+
+    it('answers 503 when the refund cannot be issued, keeps the reservation CANCELLED and says to send the request again', async () => {
+      const id = await paidReservation(20);
+      jest.spyOn(stripe, 'createRefund').mockRejectedValueOnce(new Error('Stripe is down'));
+
+      const response = await cancel(travelerCookie, id).expect(503);
+
+      expect(response.body.message).toEqual(expect.stringContaining('cancelled'));
+      expect(response.body.message).toEqual(expect.stringContaining('again'));
+      expect(await statusOf(id)).toBe(BookingStatus.CANCELLED);
+      expect(await refundRows()).toHaveLength(0);
+    });
+
+    it('completes the refund when the traveler cancels again, then refuses a third cancel', async () => {
+      const id = await paidReservation(10); // the 50 % tier
+      jest.spyOn(stripe, 'createRefund').mockRejectedValueOnce(new Error('Stripe is down'));
+      await cancel(travelerCookie, id).expect(503);
+
+      const retry = await cancel(travelerCookie, id).expect(200);
+
+      expect(retry.body.booking).toMatchObject({ id: id.toHexString(), status: BookingStatus.CANCELLED });
+      expect(retry.body.refund).toMatchObject({ status: RefundStatus.REFUNDED, amountCents: TOTAL_CENTS / 2 });
+      expect(await refundRows()).toHaveLength(1);
+      expect(stripe.refunds.size).toBe(1);
+      await cancel(travelerCookie, id).expect(409);
+      expect(await refundRows()).toHaveLength(1);
+    });
+
+    it('refunds the amount worked out when the reservation was cancelled, not the tier of the moment of the retry', async () => {
+      // Cancelled long before check-in (100 %), retried when only 3 days remain (a 0 % tier now).
+      const id = await cancelledWithoutRefund(3, TOTAL_CENTS, 20);
+      const retry = await cancel(travelerCookie, id).expect(200);
+      expect(retry.body.refund.amountCents).toBe(TOTAL_CENTS);
+    });
+
+    it('still completes after the check-in time has passed', async () => {
+      const id = await cancelledWithoutRefund(-1, TOTAL_CENTS / 2, 20);
+      const retry = await cancel(travelerCookie, id).expect(200);
+      expect(retry.body.refund.amountCents).toBe(TOTAL_CENTS / 2);
+    });
+
+    it.each([
+      ['no amount was recorded (it was not cancelled by this route)', null],
+      ['the cancellation had nothing to refund', 0],
+    ])('refuses with 409 when %s, and creates no refund', async (_label, stored) => {
+      const id = await cancelledWithoutRefund(20, stored);
+      const response = await cancel(travelerCookie, id).expect(409);
+      expect(response.body.message).toEqual(expect.stringContaining('CONFIRMED'));
+      expect(await refundRows()).toHaveLength(0);
+    });
+
+    it('lets exactly one of two simultaneous retries issue the refund', async () => {
+      const id = await cancelledWithoutRefund(20, TOTAL_CENTS);
+      const results = await Promise.all([cancel(travelerCookie, id), cancel(travelerCookie, id)]);
+      expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
+      expect(await refundRows()).toHaveLength(1);
+      expect(stripe.refunds.size).toBe(1);
+    });
+
+    it("answers 404 when someone else tries to complete the refund of a cancelled reservation", async () => {
+      const id = await cancelledWithoutRefund(20, TOTAL_CENTS);
+      await cancel(otherCookie, id).expect(404);
+      expect(await refundRows()).toHaveLength(0);
+    });
+  });
+
   it('documents both routes in Swagger', async () => {
     const response = await http().get('/api/docs-json').expect(200);
     const preview = response.body.paths['/api/hotel-bookings/{id}/cancel-preview'].get;
@@ -345,6 +427,6 @@ describe('cancel a whole hotel reservation with a tier-based refund (HTL-21) ove
     expect(preview.summary).toContain('HTL-21');
     expect(cancel.summary).toContain('HTL-21');
     expect(Object.keys(preview.responses)).toEqual(expect.arrayContaining(['200', '401', '403', '404', '409']));
-    expect(Object.keys(cancel.responses)).toEqual(expect.arrayContaining(['200', '401', '403', '404', '409']));
+    expect(Object.keys(cancel.responses)).toEqual(expect.arrayContaining(['200', '401', '403', '404', '409', '503']));
   });
 });

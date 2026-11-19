@@ -2070,10 +2070,15 @@ POST :id/cancel. The owner filter is part of the query (404 for someone else's, 
 moment (check-in date at the hotel check-in time, UTC, 00:00 when unset) is cancellable, else 409. The refund is RefundCalculator.compute on the
 hotel's tiers, the fractional days to check-in and the full total, so preview and cancel agree. The status change is BookingLifecycle.transition
 (atomic, frees the rooms in the same write), then RefundsService.issue; a refund of 0 is not issued and refund is null. HotelsModule imports
-RefundsModule (one line, flagged in the PR); no other module was edited. Known limit, flagged: if issue fails after the status change the
-reservation stays CANCELLED and the refund needs manual handling. Mutation checks: removing the owner filter failed the ownership test, and
+RefundsModule (one line, flagged in the PR); no other module was edited. Mutation checks: removing the owner filter failed the ownership test, and
 disabling the status guard failed five tests.
 Verification: lint and build pass; 1173 unit (81 suites) and 1480 e2e (60 suites, 3 workers) pass. Not done: a manual Swagger click-through against Atlas.
+Follow-up in the same PR (user: "fix them", about the known limit above): if RefundsService.issue fails after the status change, the reservation used to stay CANCELLED with no way to finish
+the refund. Now the cancel route records what the cancellation refunds (two optional fields on the hotel booking schema: cancellationRequestedAt and cancellationRefundCents, written only while the
+reservation is CONFIRMED, just before the status changes). A failure that is not a refusal by the refund rules answers 503 with a message saying the reservation is cancelled and to send the request again;
+cancelling a CANCELLED reservation that has a recorded refund and no refund yet issues the recorded amount (not the tier of the retry day), also after the check-in time, and two simultaneous retries
+give one refund. Tests first (7 new HTTP tests, Stripe failure simulated with a spy), watched failing; mutation check: issuing a different amount on retry failed three tests.
+Verification of the follow-up: lint and build pass; 1192 unit (83 suites) and 1510 e2e (62 suites, 3 workers) pass. Not done: a manual Swagger click-through against Atlas.
 
 Date: 2026-11-19
 Student: Ahmed Sanad
