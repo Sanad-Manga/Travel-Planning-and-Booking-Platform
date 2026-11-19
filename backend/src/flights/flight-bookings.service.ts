@@ -17,14 +17,28 @@ import {
   PassengerType,
   PLATFORM_CURRENCY,
 } from '../common';
+import { assertOwner } from '../common/ownership';
 import { AirlinesService } from '../airlines';
-import { BookingLifecycle } from '../payments';
+import {
+  BookingLifecycle,
+  CancellationTier,
+  RefundCalculator,
+} from '../payments';
 import { RefundsService, RefundSummary } from '../refunds';
 import { FlightInventoryService } from './flight-inventory.service';
 import {
   FlightBookingRefundDto,
   FlightBookingSummaryResponseDto,
 } from './dto/flight-booking-summary-response.dto';
+import {
+  FlightBookingCancelResponseDto,
+  FlightCancellationTierDto,
+} from './dto/flight-booking-cancel-response.dto';
+import { CancelFlightBookingDto } from './dto/cancel-flight-booking.dto';
+import {
+  daysBeforeDeparture,
+  selectCancellationTier,
+} from './utils/cancellation-refund';
 import {
   FlightBookingResponseDto,
   toBookingPassengerResponse,
@@ -106,6 +120,19 @@ interface PreparedSegment {
   cabinClass: CabinClass;
   baggageFeeCents: number;
 }
+
+/** Everything FLT-26 needs to preview or confirm a cancellation at one point in time. */
+interface CancellationContext {
+  booking: FlightBookingLean;
+  outbound: FlightBookingSegment;
+  flight: FlightLean;
+  daysBefore: number;
+  refundAmountCents: number;
+  appliedTier: CancellationTier | null;
+}
+
+/** Stored on the PAY-03 refund row so the traveler and support can see why it was issued. */
+const CANCELLATION_REFUND_REASON = 'Flight booking cancelled by traveler';
 
 @Injectable()
 export class FlightBookingsService {
@@ -393,6 +420,174 @@ export class FlightBookingsService {
       currency: refund.currency,
       ...(refund.reason !== undefined ? { reason: refund.reason } : {}),
       createdAt: refund.createdAt,
+    };
+  }
+
+  /**
+   * FLT-26: preview (`confirm: false`) or cancel (`confirm: true`) the owner's CONFIRMED booking
+   * before its outbound departure.
+   *
+   * The refund comes from the outbound segment's stored airline tiers (`AirlinesService
+   * .getCancellationTiers`) and Payments' `RefundCalculator.compute`, with the full booking total
+   * and fractional days remaining — a round trip is cancelled as a whole by its outbound leg.
+   * The amount is computed twice: once for the preview/response and once immediately before the
+   * transition, so a policy or clock change cannot cancel for an amount the traveler did not see.
+   * A changed amount is a 409 that carries the current amount and changes nothing.
+   *
+   * Cancellation itself goes through `BookingLifecycle.transition`, whose conditional status update
+   * releases every segment's seats once, in the same transaction. Only after it commits is a
+   * positive refund issued through PAY-03. A zero refund cancels and releases without calling
+   * `issue` (PAY-03 only accepts a positive integer amount). A repeated or concurrent cancellation
+   * finds the booking no longer CONFIRMED and answers 409, so seats are never returned twice and
+   * no second refund is issued. MongoDB cannot make the Stripe refund and the booking transaction
+   * atomic; a refund failure after the commit is surfaced, never swallowed.
+   */
+  async cancel(
+    user: AuthenticatedUser,
+    id: string,
+    dto: CancelFlightBookingDto,
+    now: Date = new Date(),
+  ): Promise<FlightBookingCancelResponseDto> {
+    const preview = await this.cancellationContext(user, id, now);
+    if (!dto.confirm) {
+      return this.toCancellationResponse(preview, false, null);
+    }
+    if (dto.expectedRefundAmountCents !== preview.refundAmountCents) {
+      throw this.refundAmountChanged(preview.refundAmountCents);
+    }
+
+    // Recheck status, departure and the amount immediately before the only status write. The
+    // transition's own conditional update is the final guard against another request winning.
+    const fresh = await this.cancellationContext(user, id, now);
+    if (fresh.refundAmountCents !== dto.expectedRefundAmountCents) {
+      throw this.refundAmountChanged(fresh.refundAmountCents);
+    }
+
+    await this.bookingLifecycle.transition(
+      BookingType.FLIGHT,
+      id,
+      BookingStatus.CANCELLED,
+    );
+
+    let refund: FlightBookingRefundDto | null = null;
+    if (fresh.refundAmountCents > 0) {
+      const issued = await this.refunds.issue({
+        bookingType: BookingType.FLIGHT,
+        bookingId: id,
+        amountCents: fresh.refundAmountCents,
+        reason: CANCELLATION_REFUND_REASON,
+      });
+      refund = this.toRefundResponse(issued);
+    }
+
+    return this.toCancellationResponse(fresh, true, refund);
+  }
+
+  /**
+   * Loads the booking, enforces owner-only access (another traveler and an unknown id are both
+   * 404), checks the cancellation window and calculates the current tier refund. Pure of writes:
+   * used by the preview, by the confirmation and by the pre-transition recheck.
+   */
+  private async cancellationContext(
+    user: AuthenticatedUser,
+    id: string,
+    now: Date,
+  ): Promise<CancellationContext> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new NotFoundException('Flight booking not found');
+    }
+    const booking = await this.model
+      .findById(id)
+      .lean<FlightBookingLean>()
+      .exec();
+    if (!booking) throw new NotFoundException('Flight booking not found');
+    assertOwner(user, { ownerId: booking.userId }, 'Flight booking not found');
+
+    if (booking.status !== BookingStatus.CONFIRMED) {
+      throw new ConflictException(
+        'Only a confirmed flight booking can be cancelled',
+      );
+    }
+
+    // The outbound segment decides the window, the airline tiers and therefore the refund; the
+    // helper also supplies the legacy one-way fallback when `segments` is absent.
+    const [outbound] = getFlightBookingSegments(booking);
+    if (!outbound) {
+      throw new InternalServerErrorException(
+        'The flight booking has no outbound segment',
+      );
+    }
+    const flight = await this.flights
+      .findById(outbound.flightId)
+      .lean<FlightLean>()
+      .exec();
+    if (!flight) {
+      throw new NotFoundException('A booked flight segment was not found');
+    }
+    if (now.getTime() >= flight.departureAt.getTime()) {
+      throw new ConflictException(
+        'A flight booking cannot be cancelled at or after its outbound departure',
+      );
+    }
+
+    const daysBefore = daysBeforeDeparture(flight.departureAt, now);
+    const tiers = await this.airlines.getCancellationTiers(
+      outbound.airlineId.toString(),
+    );
+    return {
+      booking,
+      outbound,
+      flight,
+      daysBefore,
+      refundAmountCents: RefundCalculator.compute({
+        tiers,
+        daysBefore,
+        totalCents: booking.totalCents,
+      }),
+      appliedTier: selectCancellationTier(tiers, daysBefore),
+    };
+  }
+
+  private refundAmountChanged(currentAmountCents: number): ConflictException {
+    return new ConflictException({
+      message: `The refund amount is now ${currentAmountCents} cents; preview again and confirm the new amount`,
+      details: [
+        {
+          field: 'expectedRefundAmountCents',
+          message: `expectedRefundAmountCents does not match the current refund of ${currentAmountCents} cents`,
+        },
+      ],
+    });
+  }
+
+  private toCancellationResponse(
+    context: CancellationContext,
+    cancelled: boolean,
+    refund: FlightBookingRefundDto | null,
+  ): FlightBookingCancelResponseDto {
+    const appliedTier: FlightCancellationTierDto | null = context.appliedTier
+      ? {
+          daysBeforeThreshold: context.appliedTier.daysBeforeThreshold,
+          refundPercent: context.appliedTier.refundPercent,
+        }
+      : null;
+    return {
+      id: context.booking._id.toString(),
+      status: cancelled ? BookingStatus.CANCELLED : context.booking.status,
+      cancelled,
+      ...(context.booking.bookingReference
+        ? { bookingReference: context.booking.bookingReference }
+        : {}),
+      currency: context.booking.currency,
+      totalCents: context.booking.totalCents,
+      outboundFlightId: context.outbound.flightId.toString(),
+      outboundAirlineId: context.outbound.airlineId.toString(),
+      outboundDepartureAt: context.flight.departureAt.toISOString(),
+      daysBefore: context.daysBefore,
+      refundAmountCents: context.refundAmountCents,
+      refundPercent: appliedTier?.refundPercent ?? 0,
+      appliedTier,
+      refund,
     };
   }
 
