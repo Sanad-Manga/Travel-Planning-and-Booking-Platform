@@ -107,6 +107,46 @@ Rules:
   after the check-in time has passed. Two simultaneous retries give one refund. A reservation whose refund was issued,
   that had nothing to refund, or that was not cancelled by this route answers 409.
 
+## My reservations (HTL-20)
+
+Both routes are for the authenticated `USER` only (admins and moderators get 403). A reservation is private to its
+owner: someone else's reservation, like an unknown id, answers 404.
+
+`GET /api/hotel-bookings?group=UPCOMING|PAST|CANCELLED&page=1&limit=10` lists the traveler's own reservations. Every row
+carries its `group`. Without `group` everything is listed, newest first. The answer is the usual page envelope
+(`items`, `page`, `limit`, `total`, `totalPages`). Each row shows `id`, `bookingReference` (after payment), the
+`hotel` (`id`, `name`, `cityId`), `checkIn`, `checkOut`, `nights`, `rooms` (name, type, adults, children), `guests`
+(adults and children in all rooms), `totalCents`, `currency`, `status`, `group` and, while payment is pending,
+`holdExpiresAt`. Payment data (`paymentRef`) is never returned.
+
+A reservation is in exactly one group (dates are UTC, `today` is the UTC date):
+
+| Group | Which reservations | Order |
+|---|---|---|
+| `UPCOMING` | `CONFIRMED` with `checkOut` after today (a stay in progress is still upcoming), and `PENDING_PAYMENT` with a live hold | Soonest check-in first |
+| `PAST` | `COMPLETED`, and `CONFIRMED` with `checkOut` today or earlier (BookingLifecycle may not have completed it yet, so the date decides) | Latest check-out first |
+| `CANCELLED` | `CANCELLED`, `EXPIRED`, and `PENDING_PAYMENT` whose hold has run out (a hold that ends exactly now has run out) | Most recently changed first |
+
+`GET /api/hotel-bookings/:id` is the HTL-17 route (see "Payment confirmation (HTL-17)"). HTL-20 adds fields to its
+answer and changes nothing that was there: every HTL-17 field keeps its name, type and value, and the status codes and the
+owner-only rule are the same (404 for someone else's, an unknown or a malformed id; the lazy expiry of a lapsed hold and the
+completion of a finished stay still happen on read). The added fields are:
+
+| Field | Meaning |
+|---|---|
+| `hotel` | `id`, `name`, `address`, `cityId`, `checkInTime`, `checkOutTime` of the hotel (the last two are null if the hotel set none) |
+| `guests` | `adults` and `children` over all rooms |
+| `group` | `UPCOMING`, `PAST` or `CANCELLED`, the same value as in the list |
+| `refund` | `{ status, amountCents }` (`RefundStatus`) of a cancelled reservation, `null` while no refund is recorded |
+| `createdAt` | When the reservation was created |
+
+`refund` is read with `RefundsService.getLatestForBooking(HOTEL, id)` (PAY-03): the latest refund recorded for that
+hotel reservation, or `null`. Only the status and the amount are returned, never a Stripe id or the reason. A cancelled
+reservation that was not refunded (no tier applied) keeps `refund: null`.
+
+The hotel of a reservation is looked up in one query, hidden (inactive) hotels included. If the hotel record is gone
+the row keeps its `hotel.id` and shows the name `Hotel no longer listed`.
+
 ## Reservation lookups
 
 `RoomReservations.findReservedRoomIds(roomIds, startDate, endDate)` returns rooms with an overlapping `CONFIRMED`
