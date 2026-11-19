@@ -3,7 +3,11 @@ import { Visibility } from '../../common';
 import { ItineraryLean } from '../schemas/itinerary.schema';
 import { ActivityDto } from './activity.dto';
 import { BudgetDto } from './budget.dto';
-import { buildBudgetSummary, platformTotalsByDay } from './budget-summary.dto';
+import {
+  buildBudgetSummary,
+  LinkedBookingCost,
+  platformTotalsByDay,
+} from './budget-summary.dto';
 import { CityGroupDto, groupDaysByCity } from './city-group.dto';
 import { ClonedFromDto, toClonedFrom } from './cloned-from.dto';
 import { ItineraryDayDto, toItineraryDay } from './itinerary-day.dto';
@@ -85,6 +89,7 @@ export function toItineraryResponse(
   activities: ActivityDto[] = [],
   transportCosts: TransportCostDto[] = [],
   budgets: BudgetDto[] = [],
+  linkedBookings: LinkedBookingCost[] = [],
 ): ItineraryResponseDto {
   const days = (doc.days ?? []).map((day, index) =>
     toItineraryDay(day, index, doc.startDate, activities),
@@ -107,6 +112,7 @@ export function toItineraryResponse(
           activities,
           transportCosts,
           budgets,
+          linkedBookings,
         ),
       ),
     ),

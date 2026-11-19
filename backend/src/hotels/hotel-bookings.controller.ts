@@ -1,4 +1,4 @@
-import { Body, Controller, Get, NotFoundException, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, NotFoundException, Param, Post, Query } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
@@ -11,10 +11,13 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import { AuthenticatedUser, CurrentUser, ErrorResponseDto, Role, Roles } from '../common';
+import { ApiPaginatedResponse, AuthenticatedUser, CurrentUser, ErrorResponseDto, PaginatedResponse, Role, Roles } from '../common';
 import { CreateHotelBookingDto } from './dto/create-hotel-booking.dto';
 import { CreateHotelReviewDto } from './dto/create-hotel-review.dto';
+import { HotelBookingDetailsDto } from './dto/hotel-booking-details.dto';
 import { HotelBookingResponseDto } from './dto/hotel-booking-response.dto';
+import { HotelBookingSummaryDto } from './dto/hotel-booking-summary.dto';
+import { MyHotelBookingsQueryDto } from './dto/my-hotel-bookings-query.dto';
 import { HotelBookingsService } from './hotel-bookings.service';
 import { HotelReviewsService } from './hotel-reviews.service';
 import { HotelReviewItemDto } from './dto/hotel-details-response.dto';
@@ -29,19 +32,43 @@ export class HotelBookingsController {
     private readonly reviews: HotelReviewsService,
   ) {}
 
+  @Get()
+  @Roles(Role.USER)
+  @ApiOperation({
+    summary: 'My hotel reservations: Upcoming / Past / Cancelled (HTL-20)',
+    description:
+      "The logged-in traveler's own reservations, one page at a time. Every row says which group it is in. " +
+      'Send `group` to see one group: UPCOMING (confirmed stays that are not over, and reservations still waiting for payment, ' +
+      'soonest check-in first), PAST (completed stays and confirmed stays whose check-out day is today or earlier, latest first) ' +
+      'or CANCELLED (cancelled and expired reservations and holds that ran out, most recent first). Without `group` everything is listed, newest first. ' +
+      'A reservation is in exactly one group. Dates are UTC.',
+  })
+  @ApiPaginatedResponse(HotelBookingSummaryDto)
+  @ApiBadRequestResponse({ type: ErrorResponseDto, description: 'Unknown group, or page or limit out of range' })
+  @ApiForbiddenResponse({ type: ErrorResponseDto, description: 'Only a registered traveler has hotel reservations' })
+  findMine(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: MyHotelBookingsQueryDto,
+  ): Promise<PaginatedResponse<HotelBookingSummaryDto>> {
+    return this.bookings.findMine(user, query);
+  }
+
   @Get(':id')
   @Roles(Role.USER)
   @ApiOperation({
-    summary: 'Get an owned hotel reservation and its payment confirmation (HTL-17)',
-    description: 'Returns the authenticated traveler’s hotel reservation, including CONFIRMED status and bookingReference after successful payment.',
+    summary: 'Get an owned hotel reservation in full: payment confirmation (HTL-17), hotel, group and refund (HTL-20)',
+    description:
+      'Returns the authenticated traveler’s hotel reservation, including CONFIRMED status and bookingReference after successful payment (HTL-17). ' +
+      'HTL-20 adds, without changing any existing field: `hotel`, `guests`, `group` (UPCOMING / PAST / CANCELLED), `refund` ({ status, amountCents } of a cancelled reservation, null while none is recorded) and `createdAt`.',
   })
-  @ApiOkResponse({ type: HotelBookingResponseDto })
+  @ApiOkResponse({ type: HotelBookingDetailsDto })
+  @ApiForbiddenResponse({ type: ErrorResponseDto, description: 'Only a registered traveler has hotel reservations' })
   @ApiNotFoundResponse({ type: ErrorResponseDto, description: 'Hotel booking not found' })
   async getById(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
-  ): Promise<HotelBookingResponseDto> {
-    const booking = await this.bookings.getForUser(id, user.userId);
+  ): Promise<HotelBookingDetailsDto> {
+    const booking = await this.bookings.getDetailsForUser(id, user.userId);
     if (!booking) throw new NotFoundException('Hotel booking not found');
     return booking;
   }

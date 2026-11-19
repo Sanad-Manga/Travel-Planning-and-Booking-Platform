@@ -8,6 +8,7 @@ import { Flight, FlightSchema } from '../flights/schemas/flight.schema';
 import { FxModule } from '../fx';
 import { HotelSearchService } from '../hotels/hotel-search.service';
 import { HotelsModule } from '../hotels/hotels.module';
+import { PaymentsModule } from '../payments';
 import { ReferenceDataModule } from '../reference-data/reference-data.module';
 import { UploadsModule } from '../uploads';
 import { UsersModule } from '../users/users.module';
@@ -20,14 +21,23 @@ import { ItinerariesPublicService } from './itineraries-public.service';
 import { ItinerariesController } from './itineraries.controller';
 import { ItinerariesService } from './itineraries.service';
 import { ItineraryCloneController } from './itinerary-clone.controller';
+import { ItineraryBookingsController } from './itinerary-bookings.controller';
+import { ItineraryBookingsService } from './itinerary-bookings.service';
 import { ItineraryCloneService } from './itinerary-clone.service';
 import { ItineraryFlightsController } from './itinerary-flights.controller';
 import { ItineraryFlightsService } from './itinerary-flights.service';
 import { ItineraryHotelsController } from './itinerary-hotels.controller';
 import { ItineraryHotelsService } from './itinerary-hotels.service';
 import { ItineraryItemsController } from './itinerary-items.controller';
+import { ItineraryPdfController } from './itinerary-pdf.controller';
+import { ItineraryPdfService } from './itinerary-pdf.service';
+import { ItineraryPublicPdfController } from './itinerary-public-pdf.controller';
 import { Activity, ActivitySchema } from './schemas/activity.schema';
 import { Budget, BudgetSchema } from './schemas/budget.schema';
+import {
+  ItineraryBooking,
+  ItineraryBookingSchema,
+} from './schemas/itinerary-booking.schema';
 import { Itinerary, ItinerarySchema } from './schemas/itinerary.schema';
 import {
   TransportCost,
@@ -43,6 +53,7 @@ import { TransportCostsService } from './transport-costs.service';
       { name: Activity.name, schema: ActivitySchema },
       { name: TransportCost.name, schema: TransportCostSchema },
       { name: Budget.name, schema: BudgetSchema },
+      { name: ItineraryBooking.name, schema: ItineraryBookingSchema },
       // ITN-26: the flight search (FLT-11) reads these two collections; see the providers below.
       { name: Flight.name, schema: FlightSchema },
       { name: Cabin.name, schema: CabinSchema },
@@ -59,14 +70,19 @@ import { TransportCostsService } from './transport-costs.service';
     FxModule,
     // ITN-26: the flight search looks airlines up through AirlinesService.
     AirlinesModule,
+    // ITN-27: linked bookings are read through the BookingProviderRegistry (the shared booking contract).
+    PaymentsModule,
   ],
   // The public controller comes first so its static paths win over ItinerariesController's /:id.
   controllers: [
     ItinerariesPublicController,
+    ItineraryPublicPdfController,
     ItinerariesController,
+    ItineraryPdfController,
     ItineraryItemsController,
     ItineraryHotelsController,
     ItineraryFlightsController,
+    ItineraryBookingsController,
     ItineraryCloneController,
     ActivitiesController,
     TransportCostsController,
@@ -78,6 +94,8 @@ import { TransportCostsService } from './transport-costs.service';
     ItineraryCloneService,
     ItineraryHotelsService,
     ItineraryFlightsService,
+    ItineraryPdfService,
+    ItineraryBookingsService,
     ActivitiesService,
     TransportCostsService,
     BudgetsService,

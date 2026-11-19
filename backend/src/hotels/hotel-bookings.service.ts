@@ -14,19 +14,31 @@ import {
   AuthenticatedUser,
   BookingStatus,
   BookingType,
+  DEFAULT_PAGE,
+  DEFAULT_PAGE_SIZE,
   HOLD_MINUTES,
   isCalendarDate,
   NotificationType,
+  PaginatedResponse,
+  PaginationDto,
   PLATFORM_CURRENCY,
   Role,
+  toPaginated,
 } from '../common';
 import { NotificationsService } from '../notifications';
 import { BookingLifecycle, BookingProviderRegistry } from '../payments';
 import { BookingPolicies, BookingProvider, BookingStatusSnapshot } from '../payments/booking-provider.interface';
+import { RefundsService } from '../refunds';
+import { UsersService } from '../users/users.service';
 import { UpcomingBookingsChecker, UpcomingBookingsRegistry } from '../users/upcoming-bookings';
 import { CreateHotelBookingDto } from './dto/create-hotel-booking.dto';
+import { HotelBookingDetailsDto } from './dto/hotel-booking-details.dto';
 import { HotelBookingResponseDto } from './dto/hotel-booking-response.dto';
+import { HotelBookingSummaryDto, HotelOfBooking } from './dto/hotel-booking-summary.dto';
+import { MyHotelBookingsQueryDto } from './dto/my-hotel-bookings-query.dto';
+import { HotelReservationsPageDto } from './dto/hotel-reservation-list.dto';
 import { coversStay, nightsBetween, rangeOverlaps, stayTotalCents, todayUtc } from './hotel-availability.rules';
+import { groupFilter, groupSort } from './hotel-booking-groups';
 import { HotelsService } from './hotels.service';
 import { RoomReservations } from './room-reservations';
 import { Hotel } from './schemas/hotel.schema';
@@ -54,6 +66,8 @@ export class HotelBookingsService implements RoomReservations, BookingProvider, 
     private readonly notifications: NotificationsService,
     private readonly hotelsService: HotelsService,
     private readonly bookingLifecycle: BookingLifecycle,
+    private readonly refunds: RefundsService,
+    private readonly users: UsersService,
   ) {}
 
   onModuleInit(): void {
@@ -154,6 +168,43 @@ export class HotelBookingsService implements RoomReservations, BookingProvider, 
     });
 
     return HotelBookingResponseDto.from(booking);
+  }
+
+  /**
+   * HTL-20: the traveler's own reservations, one page, optionally one group (see hotel-booking-groups.ts).
+   * The owner is part of the query, so another traveler's reservation can never be in the page or in the total.
+   */
+  async findMine(
+    user: AuthenticatedUser,
+    query: MyHotelBookingsQueryDto,
+    now: Date = new Date(),
+  ): Promise<PaginatedResponse<HotelBookingSummaryDto>> {
+    const filter = { userId: new Types.ObjectId(user.userId), ...(query.group ? groupFilter(query.group, now) : {}) };
+    const [rows, total] = await Promise.all([
+      this.bookings
+        .find(filter)
+        .sort(groupSort(query.group))
+        .skip((query.page - 1) * query.limit)
+        .limit(query.limit)
+        .lean<HotelBookingLean[]>()
+        .exec(),
+      this.bookings.countDocuments(filter).exec(),
+    ]);
+
+    const hotelsById = await this.hotelsOf(rows.map((row) => row.hotelId));
+    const items = rows.map((row) => HotelBookingSummaryDto.from(row, hotelsById.get(row.hotelId.toString()), now));
+    return toPaginated(items, total, query.page, query.limit);
+  }
+
+  /** The hotels of some reservations in one query, hidden (inactive) hotels included: a stay outlives its listing. */
+  private async hotelsOf(hotelIds: Types.ObjectId[]): Promise<Map<string, NonNullable<HotelOfBooking>>> {
+    if (hotelIds.length === 0) return new Map();
+    const hotels = await this.hotels
+      .find({ _id: { $in: hotelIds } })
+      .select('name address cityId checkInTime checkOutTime')
+      .lean<(NonNullable<HotelOfBooking> & { _id: Types.ObjectId })[]>()
+      .exec();
+    return new Map(hotels.map((hotel) => [hotel._id.toString(), hotel]));
   }
 
   /** RoomReservations: one query for all rooms that overlap a confirmed stay or a live hold. */
@@ -283,6 +334,32 @@ export class HotelBookingsService implements RoomReservations, BookingProvider, 
     userId: string,
     now: Date = new Date(),
   ): Promise<HotelBookingResponseDto | null> {
+    const booking = await this.loadOwnedFresh(id, userId, now);
+    return booking ? HotelBookingResponseDto.from(booking) : null;
+  }
+
+  /**
+   * HTL-17 + HTL-20: the same read as getForUser (owner only, null for someone else's or an unknown id, a lapsed hold is expired and
+   * a finished stay completed first), with the hotel, the guests, the group and the refund of the reservation added.
+   */
+  async getDetailsForUser(
+    id: string,
+    userId: string,
+    now: Date = new Date(),
+  ): Promise<HotelBookingDetailsDto | null> {
+    const booking = await this.loadOwnedFresh(id, userId, now);
+    if (!booking) return null;
+
+    const [hotels, refund] = await Promise.all([
+      this.hotelsOf([booking.hotelId]),
+      // PAY-03: the refund recorded for this reservation, null if none. Read through its service, never its collection.
+      this.refunds.getLatestForBooking(BookingType.HOTEL, id),
+    ]);
+    return HotelBookingDetailsDto.of(booking, hotels.get(booking.hotelId.toString()), refund, now);
+  }
+
+  /** The reservation of this owner, after a lapsed hold is expired and a finished stay is completed; null if it is not theirs. */
+  private async loadOwnedFresh(id: string, userId: string, now: Date): Promise<HotelBookingLean | null> {
     if (!Types.ObjectId.isValid(id) || !Types.ObjectId.isValid(userId)) return null;
     const ownerFilter = { _id: new Types.ObjectId(id), userId: new Types.ObjectId(userId) };
     const owned = await this.bookings
@@ -294,11 +371,74 @@ export class HotelBookingsService implements RoomReservations, BookingProvider, 
     await this.bookingLifecycle.expireIfDue(BookingType.HOTEL, id, now);
     await this.completeStayIfDue(id, now);
 
-    const booking = await this.bookings
+    return this.bookings
       .findOne(ownerFilter)
       .lean<HotelBookingLean>()
       .exec();
-    return booking ? HotelBookingResponseDto.from(booking) : null;
+  }
+
+  /**
+   * HTL-22: a hotel moderator lists the reservations of THEIR hotel. Read-only, newest first (`createdAt`, then
+   * `_id`, so pages never repeat or skip a row). Role and ownership are re-checked in the service, and any other,
+   * unknown or malformed hotel id answers 403, like HTL-01/HTL-08 (hotel profiles are public, so there is nothing
+   * to hide). Guest display names come from the owning Users module; an account that no longer exists is shown as
+   * "Deleted user". Payment references and Stripe data are never selected.
+   */
+  async listForHotel(
+    hotelId: string,
+    actor: AuthenticatedUser,
+    pagination: PaginationDto,
+  ): Promise<HotelReservationsPageDto> {
+    if (actor.role !== Role.HOTEL_MODERATOR) {
+      throw new ForbiddenException('Only a hotel moderator can view hotel reservations');
+    }
+    if (!actor.hotelId || !Types.ObjectId.isValid(hotelId) || actor.hotelId !== hotelId) {
+      throw new ForbiddenException('You can only view reservations for your own hotel');
+    }
+
+    const page = pagination.page ?? DEFAULT_PAGE;
+    const limit = pagination.limit ?? DEFAULT_PAGE_SIZE;
+    const filter = { hotelId: new Types.ObjectId(hotelId) };
+
+    const [rows, total] = await Promise.all([
+      this.bookings
+        .find(filter)
+        .sort({ createdAt: -1, _id: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .select('userId checkIn checkOut status bookingReference')
+        .lean<
+          Pick<
+            HotelBookingLean,
+            '_id' | 'userId' | 'checkIn' | 'checkOut' | 'status' | 'bookingReference'
+          >[]
+        >()
+        .exec(),
+      this.bookings.countDocuments(filter).exec(),
+    ]);
+
+    const userIds = [...new Set(rows.map((row) => row.userId.toString()))];
+    const guestNames = new Map<string, string>();
+    for (const guest of await Promise.all(userIds.map((id) => this.users.findById(id)))) {
+      if (guest) guestNames.set(guest._id.toString(), guest.name);
+    }
+
+    return toPaginated(
+      rows.map((row) => ({
+        id: row._id.toString(),
+        bookingReference: row.bookingReference ?? null,
+        guest: {
+          userId: row.userId.toString(),
+          name: guestNames.get(row.userId.toString()) ?? 'Deleted user',
+        },
+        checkIn: row.checkIn,
+        checkOut: row.checkOut,
+        status: row.status,
+      })),
+      total,
+      page,
+      limit,
+    );
   }
 
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT, { timeZone: 'UTC' })

@@ -116,6 +116,14 @@ export class BudgetSummaryDto {
   convertedTotal?: ConvertedBudgetTotalDto;
 }
 
+/** A linked booking's cost on one day (ITN-27): counted under ACCOMMODATION (hotel) or INTERCITY_TRANSPORT (flight). */
+export interface LinkedBookingCost {
+  dayId: string;
+  category: SummaryCategory;
+  amountCents: number;
+  currency: string;
+}
+
 /** The part of a day the summary needs. `ItineraryDayDto` fits. */
 export interface SummaryDay {
   id: string;
@@ -126,7 +134,7 @@ export interface SummaryDay {
 /**
  * Adds up everything that costs money on an itinerary, per currency: the daily budget entries (ITN-14), the
  * activity costs (ITN-10, platform currency, counted as ACTIVITIES) and the intercity transport entries
- * (ITN-16). Calculated on every read, never stored, so it cannot go out of date.
+ * (ITN-16) and the bookings linked to days (ITN-27). Calculated on every read, never stored, so it cannot go out of date.
  *
  * A cost whose day is no longer one of the itinerary's days is ignored everywhere, so the totals by category and
  * the totals by day are always the same grand total.
@@ -137,6 +145,7 @@ export function buildBudgetSummary(
   activities: ActivityDto[],
   transportCosts: TransportCostDto[],
   budgets: BudgetDto[],
+  linkedBookings: LinkedBookingCost[] = [],
 ): BudgetSummaryDto {
   const costs: {
     dayId: string;
@@ -167,6 +176,15 @@ export function buildBudgetSummary(
       category: INTERCITY_TRANSPORT,
       cents: entry.amountCents,
       currency: entry.currency,
+    });
+  }
+
+  for (const booking of linkedBookings) {
+    costs.push({
+      dayId: booking.dayId,
+      category: booking.category,
+      cents: booking.amountCents,
+      currency: booking.currency,
     });
   }
 
