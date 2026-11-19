@@ -5,7 +5,6 @@ import {
   ApiCookieAuth,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
-  ApiNotImplementedResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
@@ -38,14 +37,13 @@ export class ReportsAdminController {
     summary: 'Resolve a report: dismiss it, hide the content, or delete it (ADMIN only)',
     description:
       'GEN-10: atomic on the report itself (resolving an already-resolved report is rejected with 409). ' +
-      'HIDE/DELETE also apply to the reported content; REVIEW is not yet supported (no reviews module exists) ' +
-      'and answers 501. Every resolution is audit-logged.',
+      'HIDE/DELETE also apply to the reported content; a hotel review is hidden or deleted and the hotel rating recalculated. ' +
+      'If hiding or deleting the content fails, the report stays OPEN so the admin can retry. Every resolution is audit-logged.',
   })
   @ApiOkResponse({ type: ReportRowDto })
   @ApiBadRequestResponse({ type: ErrorResponseDto, description: 'Invalid resolution value.' })
   @ApiNotFoundResponse({ type: ErrorResponseDto, description: 'Report not found.' })
   @ApiConflictResponse({ type: ErrorResponseDto, description: 'Report is already resolved.' })
-  @ApiNotImplementedResponse({ type: ErrorResponseDto, description: 'REVIEW moderation is not implemented yet.' })
   resolve(
     @CurrentUser() actor: AuthenticatedUser,
     @Param() params: ReportIdParamsDto,

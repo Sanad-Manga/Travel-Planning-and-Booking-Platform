@@ -33,7 +33,7 @@ function openReport(overrides: Partial<Record<string, unknown>> = {}) {
 }
 
 describe('ReportsAdminService', () => {
-  let reports: { findOneAndUpdate: jest.Mock; exists: jest.Mock; find: jest.Mock; countDocuments: jest.Mock };
+  let reports: { findOneAndUpdate: jest.Mock; updateOne: jest.Mock; exists: jest.Mock; find: jest.Mock; countDocuments: jest.Mock };
   let content: { hide: jest.Mock; delete: jest.Mock };
   let audit: { log: jest.Mock };
   let service: ReportsAdminService;
@@ -41,6 +41,7 @@ describe('ReportsAdminService', () => {
   beforeEach(() => {
     reports = {
       findOneAndUpdate: jest.fn(),
+      updateOne: jest.fn().mockReturnValue({ exec: async () => ({ matchedCount: 1 }) }),
       exists: jest.fn(),
       find: jest.fn(),
       countDocuments: jest.fn(),
@@ -124,6 +125,46 @@ describe('ReportsAdminService', () => {
 
       expect(result.status).toBe(ReportStatus.DELETED);
       expect(content.delete).toHaveBeenCalledWith(expect.anything(), ContentType.POST, TARGET_ID.toString());
+      expect(audit.log).toHaveBeenCalledWith(expect.objectContaining({ action: 'REPORT_RESOLVED_DELETED' }));
+    });
+
+    it('reopens the report and rethrows when hiding the content fails, so the admin can retry', async () => {
+      reports.findOneAndUpdate.mockReturnValue({ lean: async () => openReport() });
+      content.hide.mockRejectedValue(new Error('database unavailable'));
+
+      await expect(
+        service.resolve(admin(), REPORT_ID, { resolution: ReportResolution.HIDE }),
+      ).rejects.toThrow('database unavailable');
+
+      expect(reports.updateOne).toHaveBeenCalledWith(
+        { _id: REPORT_ID, status: ReportStatus.HIDDEN },
+        { status: ReportStatus.OPEN },
+      );
+      expect(audit.log).not.toHaveBeenCalled();
+    });
+
+    it('reopens the report when deleting the content fails', async () => {
+      reports.findOneAndUpdate.mockReturnValue({ lean: async () => openReport() });
+      content.delete.mockRejectedValue(new Error('database unavailable'));
+
+      await expect(
+        service.resolve(admin(), REPORT_ID, { resolution: ReportResolution.DELETE }),
+      ).rejects.toThrow('database unavailable');
+
+      expect(reports.updateOne).toHaveBeenCalledWith(
+        { _id: REPORT_ID, status: ReportStatus.DELETED },
+        { status: ReportStatus.OPEN },
+      );
+    });
+
+    it('keeps the report resolved when the content is already gone (nothing left to hide or delete)', async () => {
+      reports.findOneAndUpdate.mockReturnValue({ lean: async () => openReport() });
+      content.delete.mockRejectedValue(new NotFoundException('Post not found'));
+
+      const result = await service.resolve(admin(), REPORT_ID, { resolution: ReportResolution.DELETE });
+
+      expect(result.status).toBe(ReportStatus.DELETED);
+      expect(reports.updateOne).not.toHaveBeenCalled();
       expect(audit.log).toHaveBeenCalledWith(expect.objectContaining({ action: 'REPORT_RESOLVED_DELETED' }));
     });
 

@@ -4,7 +4,6 @@ import {
   ApiForbiddenResponse,
   ApiNoContentResponse,
   ApiNotFoundResponse,
-  ApiNotImplementedResponse,
   ApiOperation,
   ApiTags,
   ApiUnauthorizedResponse,
@@ -28,12 +27,10 @@ export class AdminContentController {
     summary: 'Delete any post, comment or itinerary directly (ADMIN only)',
     description:
       'GEN-10: deletes the target outright, independent of any report. A post delete cascades its comments, ' +
-      'likes and images (same as the author deleting their own post). REVIEW is not yet supported (no reviews ' +
-      'module exists) and answers 501, never a fabricated 404. Every call is audit-logged.',
+      'likes and images (same as the author deleting their own post). A hotel review is deleted and the hotel rating recalculated. Every call is audit-logged.',
   })
   @ApiNoContentResponse({ description: 'Deleted.' })
   @ApiNotFoundResponse({ type: ErrorResponseDto, description: 'The target does not exist.' })
-  @ApiNotImplementedResponse({ type: ErrorResponseDto, description: 'REVIEW moderation is not implemented yet.' })
   remove(@CurrentUser() actor: AuthenticatedUser, @Param() params: ContentTargetParamsDto): Promise<void> {
     return this.content.delete(actor, params.type, params.id);
   }
