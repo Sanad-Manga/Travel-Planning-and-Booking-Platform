@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Patch,
+  Post,
+} from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
@@ -23,7 +31,12 @@ import { CreateFlightDto } from './dto/create-flight.dto';
 import { FlightDetailsResponseDto } from './dto/flight-details-response.dto';
 import { FlightResponseDto } from './dto/flight-response.dto';
 import { FlightIdParamDto } from './dto/cabin-params.dto';
+import {
+  CancelFlightDto,
+  FlightCancellationResponseDto,
+} from './dto/cancel-flight.dto';
 import { UpdateFlightDto } from './dto/update-flight.dto';
+import { FlightCancellationService } from './flight-cancellation.service';
 import { FlightEditService } from './flight-edit.service';
 import { FlightsService } from './flights.service';
 
@@ -33,6 +46,7 @@ export class FlightsController {
   constructor(
     private readonly flights: FlightsService,
     private readonly edit: FlightEditService,
+    private readonly cancellation: FlightCancellationService,
   ) {}
 
   @Get(':id')
@@ -122,5 +136,47 @@ export class FlightsController {
     @Body() dto: UpdateFlightDto,
   ) {
     return this.edit.update(user, params.id, dto);
+  }
+
+  @Post(':id/cancel')
+  @HttpCode(200)
+  @Roles(Role.AIRLINE_MODERATOR)
+  @ApiCookieAuth()
+  @ApiUnauthorizedResponse({
+    type: ErrorResponseDto,
+    description: 'Not logged in',
+  })
+  @ApiOperation({
+    summary:
+      'Cancel your own SCHEDULED flight: bookings cancelled and refunded in full - FLT-06',
+    description:
+      'Send { "confirm": true }. The flight becomes CANCELLED (it leaves search and cannot be booked), every unpaid hold is released, every CONFIRMED booking on it (a round trip is cancelled as a whole) becomes CANCELLED with a 100% refund through PAY-03, and each passenger is notified (BOOKING_CANCELLED). If something could not finish (for example a refund the payment provider refused), the flight stays CANCELLED, `complete` is false and `pending` lists those bookings; send the same request again to retry just them. Nobody is refunded twice.',
+  })
+  @ApiOkResponse({ type: FlightCancellationResponseDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: 'confirm is missing, not a boolean, or not true',
+  })
+  @ApiForbiddenResponse({
+    type: ErrorResponseDto,
+    description:
+      'Caller is not an airline moderator, or the flight belongs to another airline',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'Flight not found',
+  })
+  @ApiConflictResponse({
+    type: ErrorResponseDto,
+    description: 'The flight has already departed and cannot be cancelled',
+  })
+  cancel(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: FlightIdParamDto,
+    // The body is validated only: it is a required confirmation.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    @Body() _dto: CancelFlightDto,
+  ) {
+    return this.cancellation.cancel(user, params.id);
   }
 }
