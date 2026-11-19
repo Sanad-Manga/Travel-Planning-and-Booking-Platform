@@ -614,12 +614,248 @@ describe('link confirmed bookings to itinerary days (ITN-27) over HTTP', () => {
     });
   });
 
+  describe('listing and unlinking', () => {
+    const list = (cookie: string | null, itineraryId: string, query = '') => {
+      const req = http().get(
+        `/api/itineraries/${itineraryId}/bookings${query}`,
+      );
+      return cookie ? req.set('Cookie', cookie) : req;
+    };
+    const unlink = (
+      cookie: string | null,
+      itineraryId: string,
+      linkId: string,
+    ) => {
+      const req = http().delete(
+        `/api/itineraries/${itineraryId}/bookings/${linkId}`,
+      );
+      return cookie ? req.set('Cookie', cookie) : req;
+    };
+
+    it('lists the linked bookings of an itinerary, paginated, with the status of each booking and whether it counts in the budget', async () => {
+      const { id, day1, day2 } = await itineraryWithDays();
+      const hotelId = await hotelBooking(aliceId);
+      const flightId = await flightBooking(aliceId);
+      const hotel = await link(alice, id, {
+        bookingType: BookingType.HOTEL,
+        bookingId: hotelId,
+        dayId: day1,
+      }).expect(201);
+      const flight = await link(alice, id, {
+        bookingType: BookingType.FLIGHT,
+        bookingId: flightId,
+        dayId: day2,
+      }).expect(201);
+
+      const response = await list(alice, id).expect(200);
+
+      expect(response.body).toEqual({
+        items: [
+          {
+            ...hotel.body,
+            bookingStatus: BookingStatus.CONFIRMED,
+            counted: true,
+          },
+          {
+            ...flight.body,
+            bookingStatus: BookingStatus.CONFIRMED,
+            counted: true,
+          },
+        ],
+        page: 1,
+        limit: 10,
+        total: 2,
+        totalPages: 1,
+      });
+    });
+
+    it('pages through the links with page and limit, and refuses a limit above 50', async () => {
+      const { id, day1 } = await itineraryWithDays();
+      for (let i = 0; i < 3; i += 1) {
+        await link(alice, id, {
+          bookingType: BookingType.HOTEL,
+          bookingId: await hotelBooking(aliceId),
+          dayId: day1,
+        }).expect(201);
+      }
+
+      const first = (await list(alice, id, '?page=1&limit=2').expect(200)).body;
+      const second = (await list(alice, id, '?page=2&limit=2').expect(200))
+        .body;
+      const past = (await list(alice, id, '?page=5&limit=2').expect(200)).body;
+
+      expect(first).toMatchObject({
+        page: 1,
+        limit: 2,
+        total: 3,
+        totalPages: 2,
+      });
+      expect(first.items).toHaveLength(2);
+      expect(second.items).toHaveLength(1);
+      // the two pages together are the three links, each once
+      const ids = [...first.items, ...second.items].map(
+        (row: { id: string }) => row.id,
+      );
+      expect(new Set(ids).size).toBe(3);
+      expect(past.items).toEqual([]); // a page past the end is empty, not an error
+      const tooMany = await list(alice, id, '?limit=51').expect(400);
+      expect(
+        tooMany.body.details.map((d: { field: string }) => d.field),
+      ).toContain('limit');
+    });
+
+    it('shows a booking that was cancelled later as not counted, and one that was completed as counted', async () => {
+      const { id, day1, day2 } = await itineraryWithDays();
+      const hotelId = await hotelBooking(aliceId);
+      const flightId = await flightBooking(aliceId);
+      await link(alice, id, {
+        bookingType: BookingType.HOTEL,
+        bookingId: hotelId,
+        dayId: day1,
+      }).expect(201);
+      await link(alice, id, {
+        bookingType: BookingType.FLIGHT,
+        bookingId: flightId,
+        dayId: day2,
+      }).expect(201);
+      await db
+        .collection('hotelBookings')
+        .updateOne(
+          { _id: new Types.ObjectId(hotelId) },
+          { $set: { status: BookingStatus.CANCELLED } },
+        );
+      await db
+        .collection('flightBookings')
+        .updateOne(
+          { _id: new Types.ObjectId(flightId) },
+          { $set: { status: BookingStatus.COMPLETED } },
+        );
+
+      const rows = (await list(alice, id).expect(200)).body.items as Array<{
+        bookingType: string;
+        bookingStatus: string;
+        counted: boolean;
+      }>;
+
+      expect(
+        rows.map((r) => [r.bookingType, r.bookingStatus, r.counted]),
+      ).toEqual([
+        [BookingType.HOTEL, BookingStatus.CANCELLED, false],
+        [BookingType.FLIGHT, BookingStatus.COMPLETED, true],
+      ]);
+    });
+
+    it('is an empty page for an itinerary without links, and only shows the links of that itinerary', async () => {
+      const first = await itineraryWithDays();
+      const second = await itineraryWithDays();
+      await link(alice, first.id, {
+        bookingType: BookingType.HOTEL,
+        bookingId: await hotelBooking(aliceId),
+        dayId: first.day1,
+      }).expect(201);
+
+      expect((await list(alice, second.id).expect(200)).body).toMatchObject({
+        items: [],
+        total: 0,
+        totalPages: 0,
+      });
+      expect((await list(alice, first.id).expect(200)).body.items).toHaveLength(
+        1,
+      );
+    });
+
+    it('unlinks a booking: 204, it leaves the list and the budget, and can be linked again', async () => {
+      const { id, day1 } = await itineraryWithDays();
+      const bookingId = await hotelBooking(aliceId);
+      const linked = await link(alice, id, {
+        bookingType: BookingType.HOTEL,
+        bookingId,
+        dayId: day1,
+      }).expect(201);
+      expect(usd(await summaryOf(id)).totalCents).toBe(HOTEL_CENTS);
+
+      await unlink(alice, id, linked.body.id).expect(204);
+
+      expect((await list(alice, id).expect(200)).body.items).toEqual([]);
+      expect((await summaryOf(id)).totals).toEqual([]);
+      expect(await linkRows()).toHaveLength(0);
+      await link(alice, id, {
+        bookingType: BookingType.HOTEL,
+        bookingId,
+        dayId: day1,
+      }).expect(201);
+      expect(usd(await summaryOf(id)).totalCents).toBe(HOTEL_CENTS);
+    });
+
+    it('answers 404 for a link that is already gone, unknown, or of another itinerary of mine', async () => {
+      const first = await itineraryWithDays();
+      const second = await itineraryWithDays();
+      const linked = await link(alice, first.id, {
+        bookingType: BookingType.HOTEL,
+        bookingId: await hotelBooking(aliceId),
+        dayId: first.day1,
+      }).expect(201);
+
+      await unlink(alice, second.id, linked.body.id).expect(404); // the link belongs to the first itinerary
+      await unlink(alice, first.id, new Types.ObjectId().toHexString()).expect(
+        404,
+      );
+      await unlink(alice, first.id, linked.body.id).expect(204);
+      await unlink(alice, first.id, linked.body.id).expect(404);
+    });
+
+    it("keeps someone else's links private: 404 on both routes, and the link is untouched", async () => {
+      const { id, day1 } = await itineraryWithDays();
+      const linked = await link(alice, id, {
+        bookingType: BookingType.HOTEL,
+        bookingId: await hotelBooking(aliceId),
+        dayId: day1,
+      }).expect(201);
+      const bobs = await itineraryWithDays(bob);
+
+      await list(bob, id).expect(404);
+      await unlink(bob, id, linked.body.id).expect(404);
+      await unlink(bob, bobs.id, linked.body.id).expect(404);
+      await list(alice, new Types.ObjectId().toHexString()).expect(404);
+      expect(await linkRows()).toHaveLength(1);
+    });
+
+    it('refuses a guest (401) and an admin (403), and a malformed id (400)', async () => {
+      const { id, day1 } = await itineraryWithDays();
+      const linked = await link(alice, id, {
+        bookingType: BookingType.HOTEL,
+        bookingId: await hotelBooking(aliceId),
+        dayId: day1,
+      }).expect(201);
+
+      await list(null, id).expect(401);
+      await unlink(null, id, linked.body.id).expect(401);
+      await list(admin, id).expect(403);
+      await unlink(admin, id, linked.body.id).expect(403);
+      await list(alice, 'not-an-id').expect(400);
+      await unlink(alice, id, 'not-an-id').expect(400);
+      await unlink(alice, 'not-an-id', linked.body.id).expect(400);
+      expect(await linkRows()).toHaveLength(1);
+    });
+  });
+
   it('documents the route in Swagger', async () => {
     const response = await http().get('/api/docs-json').expect(200);
     const route = response.body.paths['/api/itineraries/{id}/bookings'].post;
     expect(route.summary).toContain('ITN-27');
     expect(Object.keys(route.responses)).toEqual(
       expect.arrayContaining(['201', '400', '401', '403', '404', '409']),
+    );
+    const listRoute = response.body.paths['/api/itineraries/{id}/bookings'].get;
+    const unlinkRoute =
+      response.body.paths['/api/itineraries/{id}/bookings/{linkId}'].delete;
+    expect(listRoute.summary).toContain('ITN-27');
+    expect(unlinkRoute.summary).toContain('ITN-27');
+    expect(Object.keys(listRoute.responses)).toEqual(
+      expect.arrayContaining(['200', '400', '401', '403', '404']),
+    );
+    expect(Object.keys(unlinkRoute.responses)).toEqual(
+      expect.arrayContaining(['204', '400', '401', '403', '404']),
     );
   });
 });

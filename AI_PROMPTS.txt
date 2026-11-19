@@ -2097,6 +2097,12 @@ collections: unknown and someone else's bookings are 404, a booking that is not 
 counts is read from getStatus each time the budget is added up (confirmed or completed counts, cancelled does not). A hotel booking counts under ACCOMMODATION,
 a flight booking under INTERCITY_TRANSPORT, in the budget summary, the day totals and the city-group subtotals (buildBudgetSummary got one optional parameter).
 Links are removed with their day or itinerary (through BudgetsService.removeForDay and removeForItinerary). The public view and clones leave the links out because
-a booking is private to its owner. ItinerariesModule imports PaymentsModule for the registry. Not built (not in the ticket): listing or unlinking a link.
+a booking is private to its owner. ItinerariesModule imports PaymentsModule for the registry.
 Mutation checks: removing the owner filter failed the ownership test, and disabling the CONFIRMED guard failed four tests.
 Verification: lint and build pass; 1188 unit (82 suites) and 1502 e2e (62 suites, 3 workers) pass. Not done: a manual Swagger click-through against Atlas.
+Follow-up in the same PR (user: "fix them", about the missing list and unlink): GET /api/itineraries/:id/bookings lists the links of an itinerary, oldest first and paginated (the shared GEN-05 test
+failed my first, unpaginated version: no GET route may answer with a bare array), each with the status of its booking and "counted" (only a confirmed or completed booking counts in the budget);
+DELETE /api/itineraries/:id/bookings/:linkId removes a link in ONE delete whose filter holds the link id, the itinerary and the owner, so the booking can be linked again and its amount leaves the budget.
+Tests first (8 new HTTP tests), watched failing; mutation checks: dropping the owner filter and dropping the itinerary filter of the unlink each failed a test. One entry (25 seeded links) was added to
+ROUTES in test/pagination.e2e-spec.ts (the GEN-05 test), a teammate's file, flagged in the PR.
+Verification of the follow-up: lint and build pass; 1188 unit (82 suites) and 1524 e2e (62 suites, 3 workers) pass. Not done: a manual Swagger click-through against Atlas.

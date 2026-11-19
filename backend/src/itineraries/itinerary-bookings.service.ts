@@ -5,11 +5,18 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { AuthenticatedUser, BookingStatus } from '../common';
+import {
+  AuthenticatedUser,
+  BookingStatus,
+  paginate,
+  PaginatedResponse,
+  PaginationDto,
+} from '../common';
 import { BookingProviderRegistry } from '../payments';
 import { LinkedBookingCost } from './dto/budget-summary.dto';
 import {
   ItineraryBookingDto,
+  ItineraryBookingListItemDto,
   LinkBookingDto,
   summaryCategoryOf,
   toItineraryBookingDto,
@@ -94,6 +101,75 @@ export class ItineraryBookingsService {
     }
   }
 
+  /** The status of a linked booking now, read from its owner's provider; null if the booking cannot be read. */
+  private async statusOf(
+    row: ItineraryBookingLean,
+  ): Promise<BookingStatus | null> {
+    const snapshot = await this.providers
+      .tryGet(row.bookingType)
+      ?.getStatus(row.bookingId.toString());
+    return snapshot?.status ?? null;
+  }
+
+  /**
+   * The links of the owner's itinerary, oldest first, one page at a time (GEN-05), each with the status of its booking and
+   * whether it counts in the budget. Someone else's or an unknown itinerary is a 404.
+   */
+  async list(
+    user: AuthenticatedUser,
+    itineraryId: string,
+    query: PaginationDto,
+  ): Promise<PaginatedResponse<ItineraryBookingListItemDto>> {
+    const ownerId = new Types.ObjectId(user.userId);
+    if (
+      !(await this.itineraries.exists({ _id: itineraryId, authorId: ownerId }))
+    ) {
+      throw new NotFoundException('Itinerary not found');
+    }
+    const page = await paginate(
+      this.model,
+      { itineraryId: new Types.ObjectId(itineraryId), ownerId },
+      query,
+      {
+        sort: { _id: 1 },
+        map: (doc: ItineraryBookingLean) => doc,
+      },
+    );
+    const items = await Promise.all(
+      page.items.map(async (row) => {
+        const bookingStatus = await this.statusOf(row);
+        return {
+          ...toItineraryBookingDto(row),
+          bookingStatus,
+          counted:
+            bookingStatus !== null && COUNTED_STATUSES.includes(bookingStatus),
+        };
+      }),
+    );
+    return { ...page, items };
+  }
+
+  /**
+   * The owner removes a link (the booking itself is not touched): ONE delete whose filter holds the link id, the
+   * itinerary and the owner. Someone else's, an unknown, an already removed link, and a link of another itinerary all
+   * answer 404.
+   */
+  async unlink(
+    user: AuthenticatedUser,
+    itineraryId: string,
+    linkId: string,
+  ): Promise<void> {
+    const result = await this.model
+      .deleteOne({
+        _id: linkId,
+        itineraryId: new Types.ObjectId(itineraryId),
+        ownerId: new Types.ObjectId(user.userId),
+      })
+      .exec();
+    if (result.deletedCount === 0)
+      throw new NotFoundException('Linked booking not found');
+  }
+
   /**
    * What the linked bookings of an itinerary add to its budget: one cost per link, under ACCOMMODATION (hotel) or
    * INTERCITY_TRANSPORT (flight). A booking that is no longer confirmed or completed (cancelled, say) is left out, so
@@ -107,10 +183,8 @@ export class ItineraryBookingsService {
       .exec();
     const counted = await Promise.all(
       links.map(async (row) => {
-        const snapshot = await this.providers
-          .tryGet(row.bookingType)
-          ?.getStatus(row.bookingId.toString());
-        return snapshot && COUNTED_STATUSES.includes(snapshot.status)
+        const status = await this.statusOf(row);
+        return status !== null && COUNTED_STATUSES.includes(status)
           ? row
           : null;
       }),

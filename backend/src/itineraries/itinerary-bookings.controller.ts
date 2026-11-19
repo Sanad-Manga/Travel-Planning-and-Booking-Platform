@@ -1,12 +1,34 @@
-import { Body, Controller, Param, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+  Query,
+} from '@nestjs/common';
 import {
   ApiConflictResponse,
   ApiCreatedResponse,
+  ApiNoContentResponse,
   ApiOperation,
 } from '@nestjs/swagger';
-import { AuthenticatedUser, CurrentUser, ErrorResponseDto } from '../common';
+import {
+  ApiPaginatedResponse,
+  AuthenticatedUser,
+  CurrentUser,
+  ErrorResponseDto,
+  PaginationDto,
+} from '../common';
+import { ItineraryBookingLinkParamDto } from './dto/itinerary-booking-link-param.dto';
 import { ItineraryIdParamDto } from './dto/itinerary-id-param.dto';
-import { ItineraryBookingDto, LinkBookingDto } from './dto/link-booking.dto';
+import {
+  ItineraryBookingDto,
+  ItineraryBookingListItemDto,
+  LinkBookingDto,
+} from './dto/link-booking.dto';
 import { ItineraryBookingsService } from './itinerary-bookings.service';
 import { ApiBadRequest, ApiNotFound, UserRoutes } from './itineraries.swagger';
 
@@ -45,5 +67,46 @@ export class ItineraryBookingsController {
     @Body() dto: LinkBookingDto,
   ) {
     return this.bookings.link(user, params.id, dto);
+  }
+
+  @Get(':id/bookings')
+  @ApiOperation({
+    summary:
+      'List the bookings linked to my itinerary, with their status and whether they count in the budget - ITN-27',
+    description:
+      'The links of one of my itineraries, oldest first, one page at a time (page 1 and 10 per page by default, at most 50). ' +
+      'Each has the status of its booking now and `counted`: only a CONFIRMED or COMPLETED booking counts in the budget, so a booking cancelled later is listed but not counted.',
+  })
+  @ApiPaginatedResponse(ItineraryBookingListItemDto)
+  @ApiBadRequest('id is not a valid id, or page or limit is out of range')
+  @ApiNotFound(
+    'No such itinerary of mine (someone else’s itinerary answers 404 too)',
+  )
+  list(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: ItineraryIdParamDto,
+    @Query() query: PaginationDto,
+  ) {
+    return this.bookings.list(user, params.id, query);
+  }
+
+  @Delete(':id/bookings/:linkId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary:
+      'Unlink a booking from my itinerary: its amount leaves the budget - ITN-27',
+    description:
+      'Removes the link made by POST /api/itineraries/:id/bookings (the booking itself is not touched). The booking can be linked again afterwards.',
+  })
+  @ApiNoContentResponse({ description: 'Unlinked' })
+  @ApiBadRequest('id or linkId is not a valid id')
+  @ApiNotFound(
+    'No such link on this itinerary of mine (someone else’s, an unknown, an already removed link, or one of another itinerary)',
+  )
+  unlink(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: ItineraryBookingLinkParamDto,
+  ) {
+    return this.bookings.unlink(user, params.id, params.linkId);
   }
 }

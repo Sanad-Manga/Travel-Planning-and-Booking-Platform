@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsEnum, IsMongoId } from 'class-validator';
-import { BookingType } from '../../common';
+import { BookingStatus, BookingType } from '../../common';
 import { BudgetCategory } from '../schemas/budget.schema';
 import { ItineraryBookingLean } from '../schemas/itinerary-booking.schema';
 import {
@@ -91,4 +91,23 @@ export function toItineraryBookingDto(
     amountCents: doc.amountCents,
     currency: doc.currency,
   };
+}
+
+/** One link in the list of an itinerary: the link, the booking's status now, and whether it counts in the budget. */
+export class ItineraryBookingListItemDto extends ItineraryBookingDto {
+  @ApiProperty({
+    enum: BookingStatus,
+    nullable: true,
+    example: BookingStatus.CONFIRMED,
+    description:
+      'The status of the booking now, read from its owner. null if the booking cannot be read any more.',
+  })
+  bookingStatus: BookingStatus | null;
+
+  @ApiProperty({
+    example: true,
+    description:
+      'Whether the amount counts in the budget: only a CONFIRMED or COMPLETED booking does, so a cancelled one does not.',
+  })
+  counted: boolean;
 }
