@@ -431,3 +431,54 @@ tokens revoked, restricted routes, refresh refused, change-password flow, every 
 ## Deactivate and reactivate providers — ACC-15 / SCRUM-76
 
 See [docs/api/admin-account-and-provider-status.md](../../../docs/api/admin-account-and-provider-status.md): `PATCH /api/admin/providers/:type/:id/deactivate|reactivate` (`:type` = `hotel` or `airline`), ADMIN only. It flips `isActive` on the provider in one conditional update, never touches a booking, and is separate from suspending the provider's moderator.
+
+## Admin booking list (ACC-17 / SCRUM-99)
+
+`GET /api/admin/bookings` returns one read-only list of flight and hotel
+bookings. Use the normal access-token cookie for an active admin. Missing or
+invalid authentication returns 401. Other authenticated roles receive 403.
+Swagger documents the route, query parameters, response and errors.
+
+| Query parameter | Behavior |
+|---|---|
+| `page` | Positive integer. Defaults to 1. |
+| `limit` | 1–50. Defaults to 10. |
+| `type` | `FLIGHT` or `HOTEL`. Omit to include both. |
+| `status` | A shared `BookingStatus` value. Omit to include all statuses. |
+| `dateFrom`, `dateTo` | Inclusive `YYYY-MM-DD` bounds on booking creation in UTC. Either bound may be omitted. |
+
+Filters combine with AND. The date filter uses `createdAt` for both types
+because Jira leaves the date field unspecified. It uses an exclusive next-day
+UTC boundary for `dateTo`, including the final millisecond of the selected day.
+Invalid, reversed or unknown query fields return the shared field-level 400.
+
+The envelope is `{ items, page, limit, total, totalPages }`. Totals apply to
+both collections after filtering. The order is `createdAt` descending, type
+ascending, then document ID descending. An out-of-range page has empty
+`items` and retains the filtered total. A query with no matches has zero pages.
+
+Each item has `id`, `type`, `bookingReference`, `user`, `provider`,
+`startDate`, `endDate`, `totalCents`, `currency`, `status` and
+`createdAt`. A user or provider includes only the stored ID and display name.
+The provider is the airline for a flight booking and the hotel for a reservation.
+Flight dates are the outbound departure and final segment arrival in UTC. Legacy
+single-leg bookings use their top-level flight ID. Hotel dates stay as
+`YYYY-MM-DD` check-in and check-out strings. Missing references, display names
+or associated flight dates are null. Stored booking amounts and currencies are
+returned as recorded.
+
+MongoDB applies filters and pagination to the combined list before fetching
+related names and flight details for the current page. Exact totals and newest
+first sorting still require processing matching rows. The route has no booking,
+inventory or payment mutations, and its response excludes passenger and payment
+details.
+
+### Verification
+
+On 2026-11-19, focused ACC-17 tests passed 6/6 unit and 36/36 E2E. The
+shared pagination suite passed 251/251, including the check that the 25
+existing synthetic flight bookings span pages of 10, 10 and 5 without
+duplicates or omissions. The shared suite uses disposable MongoDB.
+
+Full Jest passed 1,194/1,194 across 83 suites. Full E2E passed 1,600/1,600
+across 63 suites. Build, ESLint and whitespace checks passed.
