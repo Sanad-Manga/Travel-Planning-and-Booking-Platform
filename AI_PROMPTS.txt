@@ -2274,3 +2274,38 @@ Fix the blocking refund-retry issue on the FLT-26 branch: if RefundsService.issu
 How the output was used:
 Added cancellationRefundCents/cancellationRequestedAt to the flight booking schema. FlightBookingsService.cancel() now records the confirmed amount with a conditional update that only matches while the booking is still CONFIRMED, then transitions to CANCELLED through BookingLifecycle and issues the positive recorded refund; a zero amount is recorded and never sent to PAY-03. A transient issue failure is logged and answered 503. A confirmation for an already-CANCELLED booking takes a recovery path: owner-only, preview still 409, the recorded amount must match expectedRefundAmountCents, and the stored amount is issued without reading tiers or checking departure. A further retry, a zero recorded amount, and a legacy cancellation with no recorded amount answer 409; the refund-exists and concurrent-duplicate cases return/report the existing refund per PAY-03 idempotency. Response DTO/Swagger and docs/contracts.md document the persisted amount and recovery. Seven new E2E tests cover the reviewer regression: first Stripe createRefund rejection leaves CANCELLED with the recorded amount and seats released once, the retry refunds exactly that amount without a second transition, a changed policy or passed departure does not change it, a further retry creates no duplicate, zero refunds never call Stripe, owner/role/amount/legacy guards, and two concurrent retries produce one refund. No Payments, Refunds, Airlines, Hotels or common/ production code changed.
 Verification: npm run build passed; npm run lint passed; focused unit npx jest --runInBand "src/flights" "src/refunds" "src/payments/refund-calculator" 64/64 passed; npx jest --config ./test/jest-e2e.json flight-bookings-hold --runInBand 86/86 passed (19 FLT-26); refunds-concurrency 1/1 passed.
+
+Date: 2026-11-19
+Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code)
+Related Requirement: GEN-10 (SCRUM-100) Admin resolves reports: dismiss, hide or delete content
+Prompt:
+Implement GEN-10 in the Admin module: GET /api/admin/reports (paginated, open reports only), PATCH /api/admin/reports/:id
+(dismiss/hide/delete, atomic against a second resolution of the same report), and DELETE /api/admin/content/:type/:id for
+direct moderation independent of any report. Every content type the ticket lists (post, comment, review, itinerary) must
+actually hide/delete, audit-logged, without editing Yusuf's/Hessain's/Yassin's own module files.
+How the output was used:
+Added ReportsAdminController/Service (reuses the Report schema class directly, same pattern ReportsModule itself already
+uses for its own read-only Post/Itinerary lookups) and AdminContentController/Service, the shared hide/delete worker used
+by both direct moderation and report resolution so the two paths can't drift. Post deletion reuses
+BlogService.deletePostAndDependents (its own doc comment invites this reuse for GEN-10). Comment hide/delete mirrors
+CommentsService.remove's real Mongo transaction (delete + commentCount decrement). Itinerary is hidden/deleted via direct
+schema access (ItinerariesModule exports only its own ownership-scoped service, not an admin-safe path); its
+activities/transportCosts/budgets cascade is a known gap, flagged for Yassin. Resolving a report claims it atomically
+(findOneAndUpdate filtered on status: OPEN) so a second resolution is rejected with 409 without a read-then-write race.
+First pass wrongly 501'd REVIEW on the assumption no reviews module exists; re-reading the ticket's own "touches
+Hessain's work" line against the actual codebase found HotelReview (backend/src/hotels/schemas/hotel-review.schema.ts)
+already has isHidden and a read-side filter plus a cached Hotel.averageRating/reviewCount that HotelReviewsService keeps
+in sync via a private recalculateHotelRating. Implemented REVIEW hide/delete against the HotelReview/Hotel schemas
+directly (HotelsModule exports MongooseModule, so no file of Hessain's needed editing) and duplicated that exact
+recalculation query, flagged in the PR as a candidate for Hessain to expose publicly instead. A capped e2e run then
+surfaced a second latent bug: my e2e spec used a plain MongoMemoryServer (standalone), which cannot run the
+multi-document transactions this ticket's comment/review paths use ("Transaction numbers are only allowed on a replica
+set member or mongos") — switched to MongoMemoryReplSet.create({ replSet: { count: 1 } }), this repo's own convention
+for any e2e spec touching transactional code (see comments.e2e-spec.ts), which also means the comment-delete path is now
+actually exercised end-to-end for the first time rather than only through a mocked unit test.
+Verification: npx tsc --noEmit -p . and npx eslint src/admin test/admin-content-moderation.e2e-spec.ts clean; npm run
+build passed; npx jest src/admin --silent 151/151 passed; npx jest --config ./test/jest-e2e.json
+test/admin-content-moderation.e2e-spec.ts --maxWorkers=1 --silent 13/13 passed (capped workers per this machine's
+e2e-crash history). Not done: no full local e2e/unit suite run (CI covers that); no manual Swagger click-through against
+Atlas.
