@@ -2354,3 +2354,10 @@ build passed; npx jest src/admin --silent 151/151 passed; npx jest --config ./te
 test/admin-content-moderation.e2e-spec.ts --maxWorkers=1 --silent 13/13 passed (capped workers per this machine's
 e2e-crash history). Not done: no full local e2e/unit suite run (CI covers that); no manual Swagger click-through against
 Atlas.
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: FLT-29 (moderator view of a flight's bookings and CSV export)
+Prompt:
+Work on FLT-29: GET /api/flights/:id/bookings for the moderator of the owning airline, showing booking reference, passenger names, cabin, seats and status (CONFIRMED/CANCELLED) plus seats remaining per cabin, and GET /api/flights/:id/passengers/export returning the passenger list as CSV. Another airline's moderator gets 403. The CSV needs a header row, must escape commas and quotes, and download as text/csv.
+How the output was used:
+Added FlightRosterService (own file, read-only over the bookings), its DTOs and the two controller routes with Swagger. The list uses the shared pagination envelope exactly (the repo-wide pagination test rejects extra keys), so seats remaining per cabin is a field on each row. A round-trip booking shows the leg on the viewed flight. The CSV is built with csv-stringify (quoting, CRLF, formula-escaping), lists only CONFIRMED and COMPLETED bookings, and never includes passport numbers or dates of birth. I reviewed the code, added the route to the GEN-05 pagination test table, and ran build, lint and the tests.
