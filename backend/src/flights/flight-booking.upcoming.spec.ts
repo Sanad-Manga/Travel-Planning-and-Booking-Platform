@@ -21,9 +21,20 @@ describe('FlightBookingProvider.hasUpcomingConfirmedBookings (ACC-12)', () => {
   const user = new Types.ObjectId();
   const otherUser = new Types.ObjectId();
 
+  // The flights collection has a unique index on { airlineId, flightNumber, departureLocalDate }, so every raw
+  // test flight needs its own values for those three fields (documents that omit them all collide on null).
+  let flightSeq = 0;
   const flight = async (departureAt: Date): Promise<Types.ObjectId> => {
     const _id = new Types.ObjectId();
-    await flights.collection.insertOne({ _id, departureAt, status: 'SCHEDULED' });
+    flightSeq += 1;
+    await flights.collection.insertOne({
+      _id,
+      airlineId: new Types.ObjectId(),
+      flightNumber: `TS${flightSeq}`,
+      departureLocalDate: departureAt.toISOString().slice(0, 10),
+      departureAt,
+      status: 'SCHEDULED',
+    });
     return _id;
   };
   const booking = async (
