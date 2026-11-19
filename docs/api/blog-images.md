@@ -32,6 +32,30 @@ Owner: Mohamed Walid. Uses the shared `UploadService` (GEN-08) and the existing 
 - `images` is no longer accepted in `POST /api/posts` or `PATCH /api/posts/:id`. The global whitelist answers 400 with `details: [{ field: 'images', ... }]`. Images can only come from the upload endpoint.
 - Deleting a post (`DELETE /api/posts/:id`, and the admin delete that reuses `deletePostAndDependents`) also deletes its image files, best effort after the post is gone. A file that could not be deleted is retried by the upload service.
 
-## Known limitation
+## Image visibility — GH-116
 
-Image URLs under `/uploads/` are public, including images of drafts and hidden posts. The URL contains a random id, so it can't be guessed.
+Local implementation follows the proposed policy; Ahmed/Yusuf's final approval
+is still pending. POST/DELETE behavior above is unchanged.
+
+`/uploads/<id>.jpg` and `.png` are checked before static GET/HEAD serving:
+
+- Published and not hidden: public, including requests without authentication.
+- Draft: author only; a non-author admin is denied.
+- Published and hidden: author or admin.
+- Deleted/missing parent or image not actually attached: denied for everyone.
+
+Private requests reuse the complete existing JwtAuthGuard, including ACTIVE
+account, credential-version and forced-password-change checks. Invalid/missing
+access credentials return a nondisclosing 404. Refresh cookies are not access
+credentials; existing logout/access-expiry semantics are unchanged.
+
+Missing upload metadata returns 404. Failed upload/Post/account reads return a
+sanitized 503 without image bytes or metadata deletion. Non-Blog ready uploads
+remain public, but metadata availability is required for every upload kind.
+
+Blog images use `Cache-Control: no-store` and `Vary: Cookie`. Authorization also
+precedes HEAD, conditional and byte-range handling. Already downloaded images or
+transfers authorized before a concurrent visibility change cannot be recalled.
+Deployments must proxy `/uploads` through Nest and purge old CDN/proxy caches;
+this fix cannot invalidate externally cached copies. See the upload README for
+integration tests, performance implications and deployment details.

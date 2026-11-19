@@ -48,7 +48,8 @@ class FixtureOwner {
   async attach(actor: AuthenticatedUser, entityId: string, file: UploadFile) {
     if (actor.userId !== this.actorId || entityId !== 'owned-post')
       throw new NotFoundException('Post not found');
-    return this.uploads.save(file, { kind: 'post', ownerId: entityId });
+    // Public GEN-08 fixture; real Blog visibility is covered in upload-visibility.e2e-spec.ts.
+    return this.uploads.save(file, { kind: 'hotel', ownerId: entityId });
   }
 }
 @Controller('upload-fixture')
