@@ -2371,3 +2371,11 @@ Prompt:
 Fix the GEN-10 bug found in review: PATCH /api/admin/reports/:id marks the report resolved first and then hides or deletes the content, so if the content step fails the report stays resolved with the content still live and a retry answers 409. Prove it with a failing test first. Also remove the stale "REVIEW answers 501" Swagger text, since hotel reviews are handled.
 How the output was used:
 Added unit tests for the failure cases, then changed ReportsAdminService.resolve so a failed hide or delete puts the report back to OPEN and rethrows, while content that is already gone (404) keeps the report resolved. Updated the two controllers' Swagger text. I reviewed the code and ran build, lint, the admin unit tests and the GEN-10 e2e spec.
+Date: 2026-11-20
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-11 (issue #152: access to bookings and private itineraries)
+Prompt:
+Work on GitHub issue #152 (ACC-11) following contracts.md: audit every route that returns a booking, a booking list, a payment, a refund or a private itinerary (flights, hotels, payments, refunds, itineraries, favourites, notifications) against the owner / admin (ACC-17) / moderator (FLT-29, HTL-22) rule for each role, build a table of route, who may read it, the code that enforces it and the test that proves it, and change code only where a route is wrong or unproven. No PR, no issue comments.
+How the output was used:
+Read every route and service involved and confirmed that ownership is part of each database query or checked with assertOwner in the service, so no production code was wrong. Found no HTTP-level test for GET /api/payments/:id, GET /api/refunds/:id, the booking policies routes and the traveler-role refusals on hotel booking detail and cancel-preview, so added test/booking-access.e2e-spec.ts (46 tests: owner 200, guest 401, other user 404 identical to an unknown id, admin and every moderator 403, lists never show another traveler bookings, moderator routes keep their own rules). The single-booking GET routes stay traveler-only because admins and moderators have their own routes (ACC-17, FLT-29, HTL-22).
