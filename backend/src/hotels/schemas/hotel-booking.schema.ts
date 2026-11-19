@@ -75,6 +75,17 @@ export class HotelBooking {
   /** Assigned when payment confirms the reservation. */
   @Prop({ type: String })
   bookingReference?: string;
+
+  /** HTL-21: when the traveler asked to cancel. Written just before the status becomes CANCELLED. */
+  @Prop({ type: Date })
+  cancellationRequestedAt?: Date;
+
+  /**
+   * HTL-21: the refund that cancellation works out from the hotel's tiers (0 when none applies), recorded with
+   * the request above. If the refund call fails after the status change, cancelling again issues exactly this amount.
+   */
+  @Prop({ type: Number, min: 0 })
+  cancellationRefundCents?: number;
 }
 
 export type HotelBookingDocument = HydratedDocument<HotelBooking>;
@@ -89,4 +100,5 @@ export const HotelBookingSchema = SchemaFactory.createForClass(HotelBooking);
 HotelBookingSchema.index({ userId: 1, status: 1, checkIn: 1 });
 HotelBookingSchema.index({ 'rooms.roomId': 1, status: 1, checkIn: 1, checkOut: 1 });
 HotelBookingSchema.index({ status: 1, holdExpiresAt: 1, _id: 1 });
+HotelBookingSchema.index({ status: 1, checkOut: 1, _id: 1 });
 HotelBookingSchema.index({ bookingReference: 1 }, { unique: true, sparse: true });

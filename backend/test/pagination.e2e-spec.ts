@@ -22,7 +22,14 @@ import {
  * answers with a bare array. So a new list endpoint cannot ship without being added here.
  */
 
-type Auth = 'none' | 'user' | 'admin';
+type Auth = 'none' | 'user' | 'admin' | 'hotelModerator';
+interface OpenApiSchema {
+  $ref?: string;
+  properties?: Record<string, OpenApiSchema>;
+  allOf?: OpenApiSchema[];
+  oneOf?: OpenApiSchema[];
+}
+
 interface ListRoute {
   /** Swagger-style path, e.g. /api/tags/{tag}/posts */
   swagger: string;
@@ -40,11 +47,12 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
   let mongo: MongoMemoryServer;
   let db: Connection;
   const jwt = new JwtService({ secret: TEST_ACCESS_SECRET });
-  const cookies: Record<'user' | 'admin', string> = { user: '', admin: '' };
+  const cookies: Record<'user' | 'admin' | 'hotelModerator', string> = { user: '', admin: '', hotelModerator: '' };
   let userId: Types.ObjectId;
 
   async function account(
     role: Role,
+    claims: Record<string, string> = {},
   ): Promise<{ id: Types.ObjectId; cookie: string }> {
     const _id = new Types.ObjectId();
     await db.collection('users').insertOne({
@@ -60,7 +68,7 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
       updatedAt: new Date(),
     });
     const token = await jwt.signAsync(
-      { sub: _id.toHexString(), role },
+      { sub: _id.toHexString(), role, ...claims },
       { expiresIn: '30m' },
     );
     return { id: _id, cookie: `access_token=${token}` };
@@ -82,11 +90,27 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
   /**
    * GETs that take page and limit but are NOT lists. The post page pages only its embedded first batch of
    * comments; the real comment list is /api/posts/{id}/comments, which is in the table above.
+   * Likewise the hotel page (HTL-02) pages only its embedded free rooms; the real list is
+   * /api/hotels/{id}/rooms/available, which is in the table above.
+   * HTL-24 returns a rating summary containing a nested paginated reviews list; its envelope is checked in
+   * test/hotel-reviews.e2e-spec.ts.
    */
-  const NOT_LISTS = ['/api/posts/{id}'];
+  const NOT_LISTS = [
+    '/api/posts/{id}',
+    '/api/hotels/{id}',
+    '/api/hotels/{id}/reviews',
+    // ITN-26: page and limit are handed to the flight search for each airport of the city of the first day. The answer
+    // is one flight-search page (or an outbound and a return page) per airport, not one list; the paging of those
+    // pages is the flight search's own (the /api/flights/search row of the flight tests).
+    '/api/itineraries/{id}/flights',
+    // BLG-12: one author object holding two paginated lists (posts, itineraries); page and limit apply to both.
+    // Their paging is checked in test/author-page.e2e-spec.ts.
+    '/api/authors/{id}',
+  ];
 
   const ROUTES: ListRoute[] = [
-    { swagger: '/api/admin/accounts', url: '/api/admin/accounts', auth: 'admin', total: 2 },
+    // user + admin + hotel moderator (the moderator pages the HTL-08 row below)
+    { swagger: '/api/admin/accounts', url: '/api/admin/accounts', auth: 'admin', total: 3 },
     // 25 plain posts + the one post that carries the comments below
     { swagger: '/api/posts', url: '/api/posts', auth: 'none', total: 26 },
     {
@@ -112,6 +136,15 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
     {
       swagger: '/api/notifications',
       url: '/api/notifications',
+      auth: 'user',
+      total: 25,
+    },
+    // BON-02: the user's own favourites
+    { swagger: '/api/favourites', url: '/api/favourites', auth: 'user', total: 25 },
+    // FLT-25: the user's own flight bookings (25 seeded below; the flight is joined for grouping)
+    {
+      swagger: '/api/flight-bookings',
+      url: '/api/flight-bookings',
       auth: 'user',
       total: 25,
     },
@@ -168,6 +201,14 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
       url: '/api/hotel-bookings',
       auth: 'user',
     },
+    {
+      // HTL-08: the moderator's own hotel (the same hotel and 25 rooms as the row above), paged over the rooms
+      swagger: '/api/hotels/{id}/availability',
+      url: `/api/hotels/${roomsHotelId.toHexString()}/availability`,
+      auth: 'hotelModerator',
+      query: 'from=2099-01-05&to=2099-01-07',
+      total: 25,
+    },
   ];
 
   const get = (route: ListRoute, params: string) => {
@@ -201,6 +242,7 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
     const admin = await account(Role.ADMIN);
     cookies.user = user.cookie;
     cookies.admin = admin.cookie;
+    cookies.hotelModerator = (await account(Role.HOTEL_MODERATOR, { hotelId: roomsHotelId.toHexString() })).cookie;
     userId = user.id;
 
     await db.collection('posts').insertMany(
@@ -292,6 +334,16 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
         }),
       })),
     );
+    // BON-02: 25 saved hotels (ids only; a missing hotel is simply listed as not available).
+    await db.collection('favourites').insertMany(
+      rows(25, (i) => ({
+        userId,
+        type: 'HOTEL',
+        itemId: new Types.ObjectId(),
+        createdAt: new Date(now.getTime() - i * 1000),
+        updatedAt: now,
+      })),
+    );
     await db.collection('notifications').insertMany(
       rows(25, (i) => ({
         userId,
@@ -299,6 +351,42 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
         title: `Title ${i}`,
         message: `Message ${i}`,
         isRead: false,
+        createdAt: new Date(now.getTime() - i * 1000),
+        updatedAt: now,
+      })),
+    );
+    // FLT-25: 25 of the user's own flight bookings. The list joins the outbound flight to group them,
+    // so the flight must exist; the bookings are legacy confirmed rows (no segments, no reference).
+    const pagingFlightId = new Types.ObjectId();
+    await db.collection('flights').insertOne({
+      _id: pagingFlightId,
+      airlineId: new Types.ObjectId(),
+      flightNumber: 'PG100',
+      departureAirport: 'CAI',
+      arrivalAirport: 'JFK',
+      departureAt: new Date('2099-01-01T10:00:00.000Z'),
+      arrivalAt: new Date('2099-01-01T16:00:00.000Z'),
+      departureTimeZone: 'Africa/Cairo',
+      arrivalTimeZone: 'America/New_York',
+      departureLocalDate: '2099-01-01',
+      status: 'SCHEDULED',
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.collection('flightBookings').insertMany(
+      rows(25, (i) => ({
+        userId,
+        airlineId: new Types.ObjectId(),
+        flightId: pagingFlightId,
+        cabinClass: 'ECONOMY',
+        passengerCounts: { adults: 1, children: 0, infants: 0 },
+        seats: 1,
+        farePerPassengerCents: 45000,
+        infantFareCents: 4500,
+        totalCents: 45000,
+        baggageFeeCents: 0,
+        currency: 'USD',
+        status: 'CONFIRMED',
         createdAt: new Date(now.getTime() - i * 1000),
         updatedAt: now,
       })),
@@ -411,32 +499,59 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
       }
     });
 
-    it('the paginated 200 schema lists items, page, limit, total and totalPages', () => {
+    it('documents pagination fields for every response page', () => {
       for (const route of ROUTES) {
         const op = operations().find((o) => o.path === route.swagger)!.op;
         const ok = op.responses?.['200'] as {
-          content?: Record<
-            string,
-            { schema?: { properties?: object; $ref?: string } }
-          >;
+          content?: Record<string, { schema?: OpenApiSchema }>;
         };
         const schema = ok.content?.['application/json']?.schema;
         const doc = SwaggerModule.createDocument(
           app,
           new DocumentBuilder().build(),
         );
-        const resolved = schema?.$ref
-          ? (doc.components!.schemas![schema.$ref.split('/').pop()!] as {
-              properties?: object;
-            })
-          : schema;
-        expect({
-          route: route.swagger,
-          keys: Object.keys(resolved?.properties ?? {}).sort(),
-        }).toEqual({
-          route: route.swagger,
-          keys: ['items', 'limit', 'page', 'total', 'totalPages'],
-        });
+        const resolve = (value?: OpenApiSchema): OpenApiSchema | undefined => {
+          if (!value?.$ref) return value;
+          const name = value.$ref.split('/').pop();
+          const component = name ? doc.components?.schemas?.[name] : undefined;
+          return component as OpenApiSchema | undefined;
+        };
+        const propertiesOf = (
+          value?: OpenApiSchema,
+        ): Record<string, OpenApiSchema> => {
+          const resolved = resolve(value);
+          const properties = { ...(resolved?.properties ?? {}) };
+          for (const part of resolved?.allOf ?? []) {
+            Object.assign(properties, propertiesOf(part));
+          }
+          return properties;
+        };
+        const assertPageSchema = (value?: OpenApiSchema) => {
+          expect(Object.keys(propertiesOf(value)).sort()).toEqual([
+            'items',
+            'limit',
+            'page',
+            'total',
+            'totalPages',
+          ]);
+        };
+
+        if (route.swagger === '/api/flights/search' && schema?.oneOf) {
+          const oneWay = schema.oneOf.find(
+            (item) => propertiesOf(item).items !== undefined,
+          );
+          const roundTrip = schema.oneOf.find(
+            (item) => propertiesOf(item).outbound !== undefined,
+          );
+          expect(oneWay).toBeDefined();
+          expect(roundTrip).toBeDefined();
+          assertPageSchema(oneWay);
+          const roundTripProperties = propertiesOf(roundTrip);
+          assertPageSchema(roundTripProperties.outbound);
+          assertPageSchema(roundTripProperties.return);
+        } else {
+          assertPageSchema(schema);
+        }
       }
     });
   });

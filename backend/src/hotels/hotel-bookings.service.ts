@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Connection, Model, Types } from 'mongoose';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import {
   AuthenticatedUser,
   BookingStatus,
@@ -21,17 +22,17 @@ import {
   Role,
   toPaginated,
 } from '../common';
-import { assertOwner } from '../common/ownership';
 import { NotificationsService } from '../notifications';
+import { BookingLifecycle, BookingProviderRegistry } from '../payments';
 import { BookingPolicies, BookingProvider, BookingStatusSnapshot } from '../payments/booking-provider.interface';
-import { BookingProviderRegistry } from '../payments/booking-provider.registry';
+import { RefundsService } from '../refunds';
 import { UpcomingBookingsChecker, UpcomingBookingsRegistry } from '../users/upcoming-bookings';
 import { CreateHotelBookingDto } from './dto/create-hotel-booking.dto';
 import { HotelBookingDetailsDto } from './dto/hotel-booking-details.dto';
 import { HotelBookingResponseDto } from './dto/hotel-booking-response.dto';
 import { HotelBookingSummaryDto, HotelOfBooking } from './dto/hotel-booking-summary.dto';
 import { MyHotelBookingsQueryDto } from './dto/my-hotel-bookings-query.dto';
-import { coversStay, nightsBetween, stayTotalCents, todayUtc } from './hotel-availability.rules';
+import { coversStay, nightsBetween, rangeOverlaps, stayTotalCents, todayUtc } from './hotel-availability.rules';
 import { groupFilter, groupSort } from './hotel-booking-groups';
 import { HotelsService } from './hotels.service';
 import { RoomReservations } from './room-reservations';
@@ -46,6 +47,8 @@ interface FieldError {
   message: string;
 }
 
+const HOTEL_COMPLETION_BATCH_SIZE = 100;
+
 @Injectable()
 export class HotelBookingsService implements RoomReservations, BookingProvider, UpcomingBookingsChecker, OnModuleInit {
   constructor(
@@ -57,6 +60,8 @@ export class HotelBookingsService implements RoomReservations, BookingProvider, 
     private readonly upcomingBookings: UpcomingBookingsRegistry,
     private readonly notifications: NotificationsService,
     private readonly hotelsService: HotelsService,
+    private readonly bookingLifecycle: BookingLifecycle,
+    private readonly refunds: RefundsService,
   ) {}
 
   onModuleInit(): void {
@@ -80,7 +85,12 @@ export class HotelBookingsService implements RoomReservations, BookingProvider, 
 
     const booking = await this.connection.transaction(async (session) => {
       const selectedRooms = await this.rooms
-        .find({ _id: { $in: roomIds }, isActive: true })
+        // HTL-06: a room whose blocked range overlaps the stay is treated like an inactive one (409 below).
+        .find({
+          _id: { $in: roomIds },
+          isActive: true,
+          blockedRanges: { $not: { $elemMatch: rangeOverlaps(dto.checkIn, dto.checkOut) } },
+        })
         .select('hotelId name type maxOccupancy pricePerNightCents availability')
         .session(session)
         .lean<SelectedRoom[]>()
@@ -180,17 +190,6 @@ export class HotelBookingsService implements RoomReservations, BookingProvider, 
     return toPaginated(items, total, query.page, query.limit);
   }
 
-  /** HTL-20: one of the traveler's own reservations. Someone else's is a 404, like an unknown id (ACC-11). */
-  async findMineById(user: AuthenticatedUser, id: string, now: Date = new Date()): Promise<HotelBookingDetailsDto> {
-    const notFound = 'Reservation not found';
-    const booking = await this.bookings.findById(id).lean<HotelBookingLean>().exec();
-    if (!booking) throw new NotFoundException(notFound);
-    assertOwner(user, { ownerId: booking.userId }, notFound);
-
-    const hotel = (await this.hotelsOf([booking.hotelId])).get(booking.hotelId.toString());
-    return HotelBookingDetailsDto.from(booking, hotel, now);
-  }
-
   /** The hotels of some reservations in one query, hidden (inactive) hotels included: a stay outlives its listing. */
   private async hotelsOf(hotelIds: Types.ObjectId[]): Promise<Map<string, NonNullable<HotelOfBooking>>> {
     if (hotelIds.length === 0) return new Map();
@@ -203,10 +202,18 @@ export class HotelBookingsService implements RoomReservations, BookingProvider, 
   }
 
   /** RoomReservations: one query for all rooms that overlap a confirmed stay or a live hold. */
-  findReservedRoomIds(roomIds: string[], startDate: string, endDate: string): Promise<Set<string>> {
+  findReservedRoomIds(roomIds: string[], startDate: string, endDate: string, session?: ClientSession): Promise<Set<string>> {
     const ids = roomIds.filter((id) => Types.ObjectId.isValid(id)).map((id) => new Types.ObjectId(id));
     if (ids.length === 0) return Promise.resolve(new Set());
-    return this.reservedRoomIds(ids, startDate, endDate, new Date());
+    return this.reservedRoomIds(ids, startDate, endDate, new Date(), session);
+  }
+
+  /** HTL-06 (deleting a room): any reservation record that mentions the room, whatever its status. */
+  async hasAnyReservation(roomId: string, session?: ClientSession): Promise<boolean> {
+    if (!Types.ObjectId.isValid(roomId)) return false;
+    const query = this.bookings.exists({ 'rooms.roomId': new Types.ObjectId(roomId) });
+    if (session) query.session(session);
+    return (await query) !== null;
   }
 
   async hasConfirmedReservation(roomId: string, startDate: string, endDate: string): Promise<boolean> {
@@ -218,6 +225,26 @@ export class HotelBookingsService implements RoomReservations, BookingProvider, 
       checkOut: { $gt: startDate },
     });
     return exists !== null;
+  }
+
+  /** PAY-01: expose the stored reservation total through the documented payable shape. */
+  async getPayable(
+    id: string,
+    userId: string,
+  ): Promise<{ amountCents: number; currency: string; status: BookingStatus; holdExpiresAt: Date | null } | null> {
+    if (!Types.ObjectId.isValid(id) || !Types.ObjectId.isValid(userId)) return null;
+    const booking = await this.bookings
+      .findOne({ _id: new Types.ObjectId(id), userId: new Types.ObjectId(userId) })
+      .select('totalCents currency status holdExpiresAt')
+      .lean<Pick<HotelBookingLean, 'totalCents' | 'currency' | 'status' | 'holdExpiresAt'>>()
+      .exec();
+    if (!booking) return null;
+    return {
+      amountCents: booking.totalCents,
+      currency: booking.currency,
+      status: booking.status,
+      holdExpiresAt: booking.holdExpiresAt ?? null,
+    };
   }
 
   async getStatus(id: string): Promise<BookingStatusSnapshot | null> {
@@ -296,6 +323,101 @@ export class HotelBookingsService implements RoomReservations, BookingProvider, 
     return outcome.kind !== 'REFUSED';
   }
 
+  async getForUser(
+    id: string,
+    userId: string,
+    now: Date = new Date(),
+  ): Promise<HotelBookingResponseDto | null> {
+    const booking = await this.loadOwnedFresh(id, userId, now);
+    return booking ? HotelBookingResponseDto.from(booking) : null;
+  }
+
+  /**
+   * HTL-17 + HTL-20: the same read as getForUser (owner only, null for someone else's or an unknown id, a lapsed hold is expired and
+   * a finished stay completed first), with the hotel, the guests, the group and the refund of the reservation added.
+   */
+  async getDetailsForUser(
+    id: string,
+    userId: string,
+    now: Date = new Date(),
+  ): Promise<HotelBookingDetailsDto | null> {
+    const booking = await this.loadOwnedFresh(id, userId, now);
+    if (!booking) return null;
+
+    const [hotels, refund] = await Promise.all([
+      this.hotelsOf([booking.hotelId]),
+      // PAY-03: the refund recorded for this reservation, null if none. Read through its service, never its collection.
+      this.refunds.getLatestForBooking(BookingType.HOTEL, id),
+    ]);
+    return HotelBookingDetailsDto.of(booking, hotels.get(booking.hotelId.toString()), refund, now);
+  }
+
+  /** The reservation of this owner, after a lapsed hold is expired and a finished stay is completed; null if it is not theirs. */
+  private async loadOwnedFresh(id: string, userId: string, now: Date): Promise<HotelBookingLean | null> {
+    if (!Types.ObjectId.isValid(id) || !Types.ObjectId.isValid(userId)) return null;
+    const ownerFilter = { _id: new Types.ObjectId(id), userId: new Types.ObjectId(userId) };
+    const owned = await this.bookings
+      .findOne(ownerFilter)
+      .lean<HotelBookingLean>()
+      .exec();
+    if (!owned) return null;
+
+    await this.bookingLifecycle.expireIfDue(BookingType.HOTEL, id, now);
+    await this.completeStayIfDue(id, now);
+
+    return this.bookings
+      .findOne(ownerFilter)
+      .lean<HotelBookingLean>()
+      .exec();
+  }
+
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT, { timeZone: 'UTC' })
+  async completeCheckedOutStays(): Promise<void> {
+    await this.completePastStays();
+  }
+
+  async completePastStays(now: Date = new Date()): Promise<number> {
+    const checkoutDate = todayUtc(now);
+    let afterId: Types.ObjectId | undefined;
+    let completed = 0;
+
+    for (;;) {
+      const due = await this.bookings
+        .find({
+          status: BookingStatus.CONFIRMED,
+          checkOut: { $lt: checkoutDate },
+          ...(afterId ? { _id: { $gt: afterId } } : {}),
+        })
+        .sort({ _id: 1 })
+        .limit(HOTEL_COMPLETION_BATCH_SIZE)
+        .select('_id')
+        .lean<{ _id: Types.ObjectId }[]>()
+        .exec();
+      if (due.length === 0) return completed;
+
+      for (const { _id } of due) {
+        try {
+          await this.bookingLifecycle.transition(
+            BookingType.HOTEL,
+            _id.toString(),
+            BookingStatus.COMPLETED,
+          );
+          completed += 1;
+        } catch (error) {
+          if (
+            !(error instanceof ConflictException) &&
+            !(error instanceof NotFoundException)
+          ) {
+            throw error;
+          }
+        }
+        afterId = _id;
+      }
+
+      if (due.length < HOTEL_COMPLETION_BATCH_SIZE) return completed;
+    }
+  }
+
   async getPolicies(id: string): Promise<BookingPolicies | null> {
     if (!Types.ObjectId.isValid(id)) return null;
     const booking = await this.bookings
@@ -353,6 +475,30 @@ export class HotelBookingsService implements RoomReservations, BookingProvider, 
       details.push({ field: 'rooms', message: 'at least one adult is required for the reservation' });
     }
     if (details.length > 0) throw new BadRequestException({ message: 'Validation failed', details });
+  }
+
+  private async completeStayIfDue(id: string, now: Date): Promise<void> {
+    const booking = await this.bookings
+      .findOne({ _id: new Types.ObjectId(id), status: BookingStatus.CONFIRMED })
+      .select('checkOut')
+      .lean<Pick<HotelBookingLean, 'checkOut'>>()
+      .exec();
+    if (!booking || booking.checkOut >= todayUtc(now)) return;
+
+    try {
+      await this.bookingLifecycle.transition(
+        BookingType.HOTEL,
+        id,
+        BookingStatus.COMPLETED,
+      );
+    } catch (error) {
+      if (
+        !(error instanceof ConflictException) &&
+        !(error instanceof NotFoundException)
+      ) {
+        throw error;
+      }
+    }
   }
 
   private async reservedRoomIds(

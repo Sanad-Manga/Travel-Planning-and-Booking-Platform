@@ -16,24 +16,18 @@ import {
   ApiBody,
   ApiConflictResponse,
   ApiConsumes,
-  ApiCookieAuth,
   ApiCreatedResponse,
-  ApiForbiddenResponse,
   ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
   ApiPayloadTooLargeResponse,
-  ApiTags,
-  ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import {
   AuthenticatedUser,
   CurrentUser,
   ErrorResponseDto,
   IMAGE_MAX_BYTES,
-  Role,
-  Roles,
 } from '../common';
 import { UploadFile } from '../uploads';
 import { ActivitiesService } from './activities.service';
@@ -41,20 +35,11 @@ import { ActivityIdParamDto } from './dto/activity-id-param.dto';
 import { ActivityImageParamDto } from './dto/activity-image-param.dto';
 import { ActivityDto } from './dto/activity.dto';
 import { UpdateActivityDto } from './dto/update-activity.dto';
+import { UserRoutes } from './itineraries.swagger';
 
 // Activities belong to the owner of the itinerary (ITN-10), so every route needs the USER role. Adding one is
-// POST /api/itineraries/:id/days/:dayId/activities, in ItinerariesController. Ownership is checked in the service.
-@ApiTags('activities')
-@ApiCookieAuth()
-@ApiUnauthorizedResponse({
-  type: ErrorResponseDto,
-  description: 'Not logged in',
-})
-@ApiForbiddenResponse({
-  type: ErrorResponseDto,
-  description: 'Caller is not a registered user (admin or moderator)',
-})
-@Roles(Role.USER)
+// POST /api/itineraries/:id/days/:dayId/activities, in ItineraryItemsController. Ownership is checked in the service.
+@UserRoutes('activities')
 @Controller('activities')
 export class ActivitiesController {
   constructor(private readonly activities: ActivitiesService) {}

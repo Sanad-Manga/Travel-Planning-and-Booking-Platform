@@ -1,14 +1,16 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { ClientSession, Connection, Model, Types } from 'mongoose';
 import { AuthenticatedUser, Role } from '../common';
 import { AvailabilityResponseDto } from './dto/availability-response.dto';
+import { BlockedRangeResponseDto } from './dto/blocked-range-response.dto';
 import { CreateAvailabilityDto } from './dto/create-availability.dto';
 import { CreateRoomDto } from './dto/create-room.dto';
-import { UpdateAvailabilityDto } from './dto/update-availability.dto';
+import { BlockRangeDto, UpdateAvailabilityDto } from './dto/update-availability.dto';
 import { UpdateRoomDto } from './dto/update-room.dto';
 import { RoomResponseDto } from './dto/room-response.dto';
-import { ROOM_MAX_AVAILABILITY_RANGES } from './hotels.constants';
+import { rangeOverlaps, todayUtc } from './hotel-availability.rules';
+import { FAR_FUTURE_DATE, ROOM_MAX_AVAILABILITY_RANGES, ROOM_MAX_BLOCKED_RANGES } from './hotels.constants';
 import { RoomReservations } from './room-reservations';
 import { Room } from './schemas/room.schema';
 
@@ -16,6 +18,7 @@ import { Room } from './schemas/room.schema';
 export class RoomsService {
   constructor(
     @InjectModel(Room.name) private readonly rooms: Model<Room>,
+    @InjectConnection() private readonly connection: Connection,
     private readonly reservations: RoomReservations,
   ) {}
 
@@ -127,14 +130,149 @@ export class RoomsService {
    * still have the dates we read, so two concurrent edits of the same range cannot both apply. The
    * reservation check and the write are in two collections, so a booking confirmed in the few milliseconds
    * between them is not caught without a transaction (flagged for the lead/Hessain).
+   *
+   * HTL-06 shares this route (docs/contracts.md section 12), so this method only decides WHICH action the body
+   * asks for. Exactly one action per request: change a range (HTL-05), block dates (HTL-06) or (de)activate the
+   * room (HTL-06). Mixing them would make "what happened" ambiguous when one half fails, so it is a 400.
    */
   async updateAvailability(
     hotelId: string,
     roomId: string,
     dto: UpdateAvailabilityDto,
     actor: AuthenticatedUser,
-  ): Promise<AvailabilityResponseDto> {
+  ): Promise<AvailabilityResponseDto | BlockedRangeResponseDto | RoomResponseDto> {
     this.assertOwnHotel(hotelId, actor, 'edit availability of rooms of');
+
+    const changesRange = dto.rangeId !== undefined || dto.startDate !== undefined || dto.endDate !== undefined;
+    const actions = [changesRange, dto.block !== undefined, dto.isActive !== undefined].filter(Boolean).length;
+    if (actions !== 1) {
+      throw new BadRequestException({
+        message: 'Validation failed',
+        details: [{ field: 'body', message: 'send exactly one of: rangeId with startDate/endDate, block, isActive' }],
+      });
+    }
+
+    if (dto.block !== undefined) return this.blockRange(hotelId, roomId, dto.block);
+    if (dto.isActive !== undefined) return this.setActive(hotelId, roomId, dto.isActive);
+    if (dto.rangeId === undefined) {
+      throw new BadRequestException({
+        message: 'Validation failed',
+        details: [{ field: 'rangeId', message: 'rangeId is required to change a range' }],
+      });
+    }
+    return this.changeRange(hotelId, roomId, { ...dto, rangeId: dto.rangeId });
+  }
+
+  /**
+   * HTL-06: take dates out of sale for ONE of the moderator's rooms. Rejected (409) if a CONFIRMED reservation or an
+   * unexpired PENDING_PAYMENT hold overlaps the dates, or if the dates overlap another block of the room.
+   *
+   * The overlap rule is NOT re-written here: it is Hessain's `RoomReservations.findReservedRoomIds` (the same call
+   * search uses), so "reserved" means the same thing everywhere (contracts section 8).
+   *
+   * Concurrency: the reservation check and the write are in two collections, so both run in ONE transaction. A hold
+   * created in parallel updates the same room document (HotelBookingsService.serializeRoomUpdates), so the two
+   * transactions conflict and the loser is retried: either the hold sees the block, or the block sees the hold.
+   * The no-overlap-between-blocks rule is, like HTL-04, one atomic conditional update.
+   */
+  private async blockRange(hotelId: string, roomId: string, block: BlockRangeDto): Promise<BlockedRangeResponseDto> {
+    this.assertEndAfterStart(block.startDate, block.endDate);
+    if (!Types.ObjectId.isValid(roomId)) throw new NotFoundException('Room not found');
+
+    const range = { _id: new Types.ObjectId(), startDate: block.startDate, endDate: block.endDate };
+    const ownRoom = { _id: new Types.ObjectId(roomId), hotelId: new Types.ObjectId(hotelId) };
+
+    await this.connection.transaction(async (session) => {
+      await this.assertRoomExists(ownRoom, session);
+
+      const reserved = await this.reservations.findReservedRoomIds([roomId], range.startDate, range.endDate, session);
+      if (reserved.has(ownRoom._id.toString())) {
+        throw new ConflictException('These dates overlap a confirmed reservation or a reservation awaiting payment');
+      }
+
+      const result = await this.rooms.updateOne(
+        {
+          ...ownRoom,
+          blockedRanges: { $not: { $elemMatch: rangeOverlaps(range.startDate, range.endDate) } },
+          [`blockedRanges.${ROOM_MAX_BLOCKED_RANGES - 1}`]: { $exists: false },
+        },
+        { $push: { blockedRanges: range } },
+        { session },
+      );
+      if (result.modifiedCount === 0) {
+        // Only to choose the error; the decision was already made atomically above.
+        const room = await this.rooms.findOne(ownRoom, { blockedRanges: 1 }).session(session).lean();
+        if ((room?.blockedRanges ?? []).length >= ROOM_MAX_BLOCKED_RANGES) {
+          throw new ConflictException(`A room can have at most ${ROOM_MAX_BLOCKED_RANGES} blocked ranges`);
+        }
+        throw new ConflictException('These dates overlap an existing blocked range of the room');
+      }
+    });
+
+    return { id: range._id.toString(), roomId, hotelId, startDate: range.startDate, endDate: range.endDate };
+  }
+
+  /**
+   * HTL-06: take a room out of sale (`isActive: false`) or put it back. Inactive rooms are skipped by search, the
+   * free-rooms list and the hold, which all filter on `isActive`.
+   *
+   * Deactivating is rejected (409) while a CONFIRMED reservation or an unexpired PENDING_PAYMENT hold has not ended
+   * yet, i.e. overlaps [today, forever). Past stays do not matter. Same transaction and reuse of Hessain's overlap
+   * rule as `blockRange`. Setting the value the room already has is a no-op that answers 200.
+   */
+  private async setActive(hotelId: string, roomId: string, isActive: boolean): Promise<RoomResponseDto> {
+    if (!Types.ObjectId.isValid(roomId)) throw new NotFoundException('Room not found');
+    const ownRoom = { _id: new Types.ObjectId(roomId), hotelId: new Types.ObjectId(hotelId) };
+
+    return this.connection.transaction(async (session) => {
+      await this.assertRoomExists(ownRoom, session);
+
+      if (!isActive) {
+        const reserved = await this.reservations.findReservedRoomIds([roomId], todayUtc(), FAR_FUTURE_DATE, session);
+        if (reserved.has(ownRoom._id.toString())) {
+          throw new ConflictException('The room has a confirmed reservation or a reservation awaiting payment that has not ended yet');
+        }
+      }
+
+      const room = await this.rooms.findOneAndUpdate(ownRoom, { $set: { isActive } }, { new: true, session });
+      if (!room) throw new NotFoundException('Room not found');
+      return RoomResponseDto.from(room);
+    });
+  }
+
+  /**
+   * HTL-06: delete one of the moderator's rooms, only if it was NEVER reserved. "Reserved" means any reservation
+   * record that mentions the room, whatever its status (also expired, cancelled or completed ones): those records
+   * keep a snapshot of the room and must not lose their reference. A room that cannot be deleted can be deactivated.
+   * Same transaction as the other two actions: a hold created in parallel conflicts with the delete and one of them
+   * retries, so a room can never be deleted and reserved at the same time.
+   */
+  async remove(hotelId: string, roomId: string, actor: AuthenticatedUser): Promise<void> {
+    this.assertOwnHotel(hotelId, actor, 'delete rooms of');
+    if (!Types.ObjectId.isValid(roomId)) throw new NotFoundException('Room not found');
+    const ownRoom = { _id: new Types.ObjectId(roomId), hotelId: new Types.ObjectId(hotelId) };
+
+    await this.connection.transaction(async (session) => {
+      await this.assertRoomExists(ownRoom, session);
+      if (await this.reservations.hasAnyReservation(roomId, session)) {
+        throw new ConflictException('This room has been reserved before and cannot be deleted; deactivate it instead');
+      }
+      const result = await this.rooms.deleteOne(ownRoom, { session });
+      if (result.deletedCount === 0) throw new NotFoundException('Room not found');
+    });
+  }
+
+  /** The room must exist in the moderator's hotel BEFORE any reservation is looked at, so a 409 never reveals another hotel's room. */
+  private async assertRoomExists(ownRoom: { _id: Types.ObjectId; hotelId: Types.ObjectId }, session: ClientSession): Promise<void> {
+    if (!(await this.rooms.exists(ownRoom).session(session))) throw new NotFoundException('Room not found');
+  }
+
+  /** HTL-05: change the dates of one availability range (see `updateAvailability`). */
+  private async changeRange(
+    hotelId: string,
+    roomId: string,
+    dto: UpdateAvailabilityDto & { rangeId: string },
+  ): Promise<AvailabilityResponseDto> {
     if (dto.startDate === undefined && dto.endDate === undefined) {
       throw new BadRequestException({
         message: 'Validation failed',

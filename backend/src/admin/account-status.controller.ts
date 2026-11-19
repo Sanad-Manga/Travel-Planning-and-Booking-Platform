@@ -46,7 +46,7 @@ import {
 @ApiConflictResponse({
   type: ErrorResponseDto,
   description:
-    'DEACTIVATED or non-USER target, or administrator targeting themselves. Repeated target status succeeds as a no-op.',
+    'DEACTIVATED or ADMIN target, or administrator targeting themselves. Repeated target status succeeds as a no-op.',
 })
 @ApiInternalServerErrorResponse({
   type: ErrorResponseDto,
@@ -62,9 +62,9 @@ export class AccountStatusController {
     schema: { type: 'object', additionalProperties: false },
   })
   @ApiOperation({
-    summary: 'Suspend an ACTIVE registered USER (ADMIN only)',
+    summary: 'Suspend an ACTIVE USER or moderator (ADMIN only)',
     description:
-      'ADMIN-only, registered USER targets. Atomic ACTIVE to SUSPENDED; already SUSPENDED succeeds as a no-op. Preserves bookings/content. Status update precedes awaited audit, then best-effort ACCOUNT_SUSPENDED notification. Audit failure returns 500 after status may have changed; a retry recovers recorded pending work using its original actor. Completed repeats do not replay side effects. Status and audit are not transactionally atomic; crash/uncertain-ack recovery is not exactly-once.',
+      'ADMIN-only; USER, AIRLINE_MODERATOR and HOTEL_MODERATOR targets (never ADMIN). Never changes the linked airline or hotel.Atomic ACTIVE to SUSPENDED; already SUSPENDED succeeds as a no-op. Preserves bookings/content. Status update precedes awaited audit, then best-effort ACCOUNT_SUSPENDED notification. Audit failure returns 500 after status may have changed; a retry recovers recorded pending work using its original actor. Completed repeats do not replay side effects. Status and audit are not transactionally atomic; crash/uncertain-ack recovery is not exactly-once.',
   })
   @ApiOkResponse({ type: AccountStatusResponseDto })
   suspend(
@@ -82,9 +82,9 @@ export class AccountStatusController {
     schema: { type: 'object', additionalProperties: false },
   })
   @ApiOperation({
-    summary: 'Reactivate a SUSPENDED registered USER (ADMIN only)',
+    summary: 'Reactivate a SUSPENDED USER or moderator (ADMIN only)',
     description:
-      'ADMIN-only, registered USER targets. Atomic SUSPENDED to ACTIVE; already ACTIVE succeeds as a no-op. Rejects DEACTIVATED, ADMIN/moderator and self targets. Awaited audit precedes best-effort ACCOUNT_REACTIVATED notification. Audit failure returns 500 after status may have changed. Retries recover recorded operations without attributing historical actions to the retrying caller; incomplete historical/crash-window auditing cannot be reconstructed or guaranteed exactly-once.',
+      'ADMIN-only; USER, AIRLINE_MODERATOR and HOTEL_MODERATOR targets. Atomic SUSPENDED to ACTIVE; already ACTIVE succeeds as a no-op. Rejects DEACTIVATED, ADMIN and self targets. Awaited audit precedes best-effort ACCOUNT_REACTIVATED notification. Audit failure returns 500 after status may have changed. Retries recover recorded operations without attributing historical actions to the retrying caller; incomplete historical/crash-window auditing cannot be reconstructed or guaranteed exactly-once.',
   })
   @ApiOkResponse({ type: AccountStatusResponseDto })
   reactivate(

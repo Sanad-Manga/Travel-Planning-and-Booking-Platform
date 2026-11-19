@@ -1,7 +1,9 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { BookingStatus, RefundStatus } from '../../common';
+import { ApiProperty } from '@nestjs/swagger';
+import { RefundStatus } from '../../common';
+import { RefundSummary } from '../../refunds';
 import { groupOf, HotelBookingGroup } from '../hotel-booking-groups';
 import { HotelBookingLean } from '../schemas/hotel-booking.schema';
+import { HotelBookingResponseDto } from './hotel-booking-response.dto';
 import {
   HotelBookingGuestsDto,
   guestsOf,
@@ -42,40 +44,6 @@ export class HotelBookingHotelDetailsDto {
   checkOutTime: string | null;
 }
 
-export class HotelBookingRoomDetailsDto {
-  @ApiProperty({ example: '6730a1f2c3d4e5f607182940' })
-  roomId: string;
-
-  @ApiProperty({ example: '101' })
-  name: string;
-
-  @ApiProperty({ example: 'Double' })
-  type: string;
-
-  @ApiProperty({ example: 2 })
-  adults: number;
-
-  @ApiProperty({ example: 1 })
-  children: number;
-
-  @ApiProperty({ example: 3 })
-  maxOccupancy: number;
-
-  @ApiProperty({
-    example: 8500,
-    description:
-      'Price per night captured when the reservation was created, in cents.',
-  })
-  pricePerNightCents: number;
-
-  @ApiProperty({
-    example: 25500,
-    description:
-      'This room price multiplied by the number of nights, in cents.',
-  })
-  totalCents: number;
-}
-
 export class HotelBookingRefundDto {
   @ApiProperty({ enum: RefundStatus, example: RefundStatus.PENDING })
   status: RefundStatus;
@@ -87,80 +55,55 @@ export class HotelBookingRefundDto {
   amountCents: number;
 }
 
-/** `GET /api/hotel-bookings/:id` (HTL-20): one reservation of the logged-in traveler, with everything they paid for. */
-export class HotelBookingDetailsDto {
-  @ApiProperty({ example: '6730a1f2c3d4e5f607182950' })
-  id: string;
-
-  @ApiPropertyOptional({
-    example: 'HTL-9F2A41C07B3D5E68',
-    description: 'Given when payment confirms the reservation; absent before.',
+/**
+ * `GET /api/hotel-bookings/:id`: the HTL-17 reservation (every field, type and status code unchanged) plus what HTL-20 adds on top:
+ * the hotel, the guests, the group (Upcoming / Past / Cancelled), the refund of a cancelled reservation and the creation time.
+ */
+export class HotelBookingDetailsDto extends HotelBookingResponseDto {
+  @ApiProperty({
+    type: HotelBookingHotelDetailsDto,
+    description:
+      'HTL-20: the hotel of the reservation (hidden hotels included: a stay outlives its listing).',
   })
-  bookingReference?: string;
-
-  @ApiProperty({ type: HotelBookingHotelDetailsDto })
   hotel: HotelBookingHotelDetailsDto;
 
-  @ApiProperty({ example: '2027-03-10' })
-  checkIn: string;
-
-  @ApiProperty({ example: '2027-03-13' })
-  checkOut: string;
-
-  @ApiProperty({ example: 3 })
-  nights: number;
-
   @ApiProperty({
-    type: [HotelBookingRoomDetailsDto],
-    description:
-      'The price of each room is the one captured when the reservation was created.',
+    type: HotelBookingGuestsDto,
+    description: 'HTL-20: adults and children over all rooms.',
   })
-  rooms: HotelBookingRoomDetailsDto[];
-
-  @ApiProperty({ type: HotelBookingGuestsDto })
   guests: HotelBookingGuestsDto;
 
   @ApiProperty({
-    example: 25500,
-    description: 'Total of the reservation, in cents.',
+    enum: HotelBookingGroup,
+    example: HotelBookingGroup.UPCOMING,
+    description: 'HTL-20: the group of the reservation in "My reservations".',
   })
-  totalCents: number;
-
-  @ApiProperty({ example: 'USD' })
-  currency: string;
-
-  @ApiProperty({ enum: BookingStatus, example: BookingStatus.CONFIRMED })
-  status: BookingStatus;
-
-  @ApiProperty({ enum: HotelBookingGroup, example: HotelBookingGroup.UPCOMING })
   group: HotelBookingGroup;
-
-  @ApiPropertyOptional({
-    example: '2026-11-15T18:10:00.000Z',
-    description: 'Only while the reservation waits for payment.',
-  })
-  holdExpiresAt?: string;
 
   @ApiProperty({
     type: HotelBookingRefundDto,
     nullable: true,
     description:
-      'Refund of a cancelled reservation (PAY-03). null while no refund is recorded. ' +
-      'Payments (PAY-03) owns refunds: this field is filled from there once that module exists on this branch.',
+      'HTL-20: the refund of a cancelled reservation (PAY-03, read through RefundsService.getLatestForBooking). ' +
+      'null while no refund is recorded.',
   })
   refund: HotelBookingRefundDto | null;
 
-  @ApiProperty({ example: '2026-11-15T18:00:00.000Z' })
+  @ApiProperty({
+    example: '2026-11-15T18:00:00.000Z',
+    description: 'HTL-20: when the reservation was created.',
+  })
   createdAt: string;
 
-  static from(
+  /** `refund` is what PAY-03 recorded for this reservation (RefundsService.getLatestForBooking), or null. */
+  static of(
     booking: HotelBookingLean,
     hotel: HotelOfBooking,
+    refund: RefundSummary | null,
     now: Date,
   ): HotelBookingDetailsDto {
     return {
-      id: booking._id.toString(),
-      bookingReference: booking.bookingReference,
+      ...HotelBookingResponseDto.from(booking),
       hotel: {
         id: booking.hotelId.toString(),
         name: hotel?.name ?? MISSING_HOTEL_NAME,
@@ -169,27 +112,11 @@ export class HotelBookingDetailsDto {
         checkInTime: hotel?.checkInTime ?? null,
         checkOutTime: hotel?.checkOutTime ?? null,
       },
-      checkIn: booking.checkIn,
-      checkOut: booking.checkOut,
-      nights: booking.nights,
-      rooms: booking.rooms.map((room) => ({
-        roomId: room.roomId.toString(),
-        name: room.name,
-        type: room.type,
-        adults: room.adults,
-        children: room.children,
-        maxOccupancy: room.maxOccupancy,
-        pricePerNightCents: room.pricePerNightCents,
-        totalCents: room.totalCents,
-      })),
       guests: guestsOf(booking),
-      totalCents: booking.totalCents,
-      currency: booking.currency,
-      status: booking.status,
       group: groupOf(booking, now),
-      holdExpiresAt: booking.holdExpiresAt?.toISOString(),
-      // PAY-03 has no refund record to read yet. Until it exists this is always null, never a guess.
-      refund: null,
+      refund: refund
+        ? { status: refund.status, amountCents: refund.amountCents }
+        : null,
       createdAt: booking.createdAt.toISOString(),
     };
   }

@@ -42,12 +42,17 @@ export class FlightCabinsReader {
   async findWithSeats(
     flightIds: Types.ObjectId[],
     seats: number,
+    cabinClass?: CabinClass,
   ): Promise<Map<string, CabinOption[]>> {
     const byFlight = new Map<string, CabinOption[]>();
     if (flightIds.length === 0) return byFlight;
 
     const rows = await this.model
-      .find({ flightId: { $in: flightIds }, ...hasAtLeastSeats(seats) })
+      .find({
+        flightId: { $in: flightIds },
+        ...hasAtLeastSeats(seats),
+        ...(cabinClass ? { cabinClass } : {}),
+      })
       .sort({ priceCents: 1 })
       .lean<CabinLean[]>()
       .exec();

@@ -306,6 +306,56 @@ describe('flight search (FLT-11) over HTTP (e2e)', () => {
       ]);
     });
 
+    it('returns separately paginated outbound and reverse-route results with cabin filtering', async () => {
+      const outbound = await createFlight();
+      const returning = await createFlight({
+        flightNumber: 'MS778',
+        departureAirport: 'JFK',
+        arrivalAirport: 'CAI',
+        departureLocalTime: '2090-12-02T10:00',
+        arrivalLocalTime: '2090-12-02T18:30',
+      });
+      for (const id of [outbound, returning]) {
+        await addCabin(id, 'ECONOMY', 100, 0, 0, 45000);
+        await addCabin(id, 'BUSINESS', 100, 0, 0, 120000);
+      }
+
+      const res = await http()
+        .get(SEARCH)
+        .query(query({ returnDate: '2090-12-02', passengers: 2, cabinClass: 'BUSINESS' }))
+        .expect(200);
+
+      expect(res.body.outbound).toMatchObject({
+        page: 1,
+        limit: 10,
+        total: 1,
+        items: [{ id: outbound, cabins: [{ cabinClass: 'BUSINESS', priceCents: 120000 }] }],
+      });
+      expect(res.body.return).toMatchObject({
+        page: 1,
+        limit: 10,
+        total: 1,
+        items: [{ id: returning, cabins: [{ cabinClass: 'BUSINESS', priceCents: 120000 }] }],
+      });
+    });
+
+    it('keeps one-way response shape and filters its cabins when cabinClass is supplied', async () => {
+      const id = await createFlight();
+      await addCabin(id, 'ECONOMY', 100, 0, 0, 45000);
+      await addCabin(id, 'BUSINESS', 100, 0, 0, 120000);
+
+      const res = await http()
+        .get(SEARCH)
+        .query(query({ cabinClass: 'ECONOMY' }))
+        .expect(200);
+
+      expect(res.body.items[0].id).toBe(id);
+      expect(res.body.outbound).toBeUndefined();
+      expect(res.body.items[0].cabins).toEqual([
+        { cabinClass: 'ECONOMY', priceCents: 45000, availableSeats: 100 },
+      ]);
+    });
+
     it('counts held seats as unavailable (total - booked - held)', async () => {
       const id = await createFlight();
       await addCabin(id, 'ECONOMY', 10, 4, 4, 45000); // 2 available
@@ -531,6 +581,8 @@ describe('flight search (FLT-11) over HTTP (e2e)', () => {
 
       it('impossible calendar date', () => failsOn(query({ departureDate: '2090-02-30' }), 'departureDate'));
       it('malformed date', () => failsOn(query({ departureDate: '01/12/2090' }), 'departureDate'));
+      it('impossible return date', () => failsOn(query({ returnDate: '2090-02-30' }), 'returnDate'));
+      it('return date before outbound date', () => failsOn(query({ returnDate: '2090-11-30' }), 'returnDate'));
       it('identical airports', () => failsOn(query({ arrivalAirport: 'CAI' }), 'arrivalAirport'));
       it('unknown airport', () => failsOn(query({ departureAirport: 'ZZZ' }), 'departureAirport'));
       it('passengers = 0', () => failsOn(query({ passengers: 0 }), 'passengers'));
@@ -549,6 +601,20 @@ describe('flight search (FLT-11) over HTTP (e2e)', () => {
         expect(res.body).toMatchObject({ statusCode: 400, error: 'Bad Request' });
         expect(res.body.path).toContain('/api/flights/search');
         expect(typeof res.body.timestamp).toBe('string');
+      });
+    });
+
+    it('documents round-trip response variants and filter query parameters in Swagger', async () => {
+      const docs = await http().get('/api/docs-json').expect(200);
+      const operation = docs.body.paths['/api/flights/search'].get;
+      const parameters = operation.parameters.map(
+        (parameter: { name: string }) => parameter.name,
+      );
+
+      expect(parameters).toContain('returnDate');
+      expect(parameters).toContain('cabinClass');
+      expect(operation.responses['200'].content['application/json'].schema.oneOf).toContainEqual({
+        $ref: '#/components/schemas/FlightRoundTripSearchResponseDto',
       });
     });
   });

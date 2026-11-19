@@ -56,8 +56,11 @@ export class HotelBookingResponseDto {
   @ApiProperty({ enum: BookingStatus, example: BookingStatus.PENDING_PAYMENT })
   status: BookingStatus;
 
-  @ApiProperty({ example: '2026-11-15T18:10:00.000Z' })
-  holdExpiresAt: string;
+  @ApiProperty({ example: '2026-11-15T18:10:00.000Z', nullable: true })
+  holdExpiresAt: string | null;
+
+  @ApiProperty({ example: 'HTL-1A2B3C4D5E6F7788', nullable: true })
+  bookingReference: string | null;
 
   static from(booking: HotelBookingDocument | HotelBookingLean): HotelBookingResponseDto {
     return {
@@ -79,7 +82,8 @@ export class HotelBookingResponseDto {
       totalCents: booking.totalCents,
       currency: booking.currency,
       status: booking.status,
-      holdExpiresAt: booking.holdExpiresAt!.toISOString(),
+      holdExpiresAt: booking.holdExpiresAt?.toISOString() ?? null,
+      bookingReference: booking.bookingReference ?? null,
     };
   }
 }

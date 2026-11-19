@@ -7,9 +7,11 @@ import { MongoMemoryServer } from 'mongodb-memory-server';
 import { Connection, Types } from 'mongoose';
 import request from 'supertest';
 import { AuthModule } from '../src/auth/auth.module';
-import { BookingStatus, Role } from '../src/common';
+import { BookingStatus, BookingType, RefundStatus, Role } from '../src/common';
 import configuration from '../src/config/configuration';
 import { HotelBooking } from '../src/hotels/schemas/hotel-booking.schema';
+import { FakeStripeGateway } from '../src/payments/fake-stripe-gateway';
+import { STRIPE_GATEWAY } from '../src/payments/stripe-gateway';
 import { setupApp, setupSwagger } from '../src/setup-app';
 import {
   TEST_ACCESS_SECRET,
@@ -105,6 +107,27 @@ describe('my hotel reservations (HTL-20) over HTTP', () => {
     return _id.toHexString();
   }
 
+  /** A stored refund of a hotel reservation, as PAY-03 saves it (one per payment). */
+  async function refund(
+    bookingId: string,
+    status: RefundStatus,
+    amountCents: number,
+  ): Promise<void> {
+    await db.collection('refunds').insertOne({
+      bookingType: BookingType.HOTEL,
+      bookingId: new Types.ObjectId(bookingId),
+      userId: ids.traveler,
+      stripePaymentIntentId: `pi_${bookingId}`,
+      stripeRefundId: `re_${bookingId}`,
+      amountCents,
+      currency: 'USD',
+      status,
+      reason: 'internal reason',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+  }
+
   beforeAll(async () => {
     process.env.JWT_ACCESS_SECRET = TEST_ACCESS_SECRET;
     process.env.JWT_REFRESH_SECRET = TEST_REFRESH_SECRET;
@@ -121,7 +144,10 @@ describe('my hotel reservations (HTL-20) over HTTP', () => {
         AuthModule,
         (await import('../src/hotels/hotels.module')).HotelsModule,
       ],
-    }).compile();
+    })
+      .overrideProvider(STRIPE_GATEWAY)
+      .useValue(new FakeStripeGateway())
+      .compile();
     app = moduleRef.createNestApplication();
     setupApp(app);
     setupSwagger(app);
@@ -156,6 +182,7 @@ describe('my hotel reservations (HTL-20) over HTTP', () => {
 
   beforeEach(async () => {
     await db.collection('hotelBookings').deleteMany({});
+    await db.collection('refunds').deleteMany({});
   });
 
   afterAll(async () => {
@@ -518,8 +545,8 @@ describe('my hotel reservations (HTL-20) over HTTP', () => {
     });
   });
 
-  describe('GET /api/hotel-bookings/:id (details)', () => {
-    it('returns the full reservation for its owner', async () => {
+  describe('GET /api/hotel-bookings/:id (details, additive on HTL-17)', () => {
+    it('keeps every HTL-17 field and adds the hotel, guests, group, refund and creation time', async () => {
       const id = await booking();
       const response = await http()
         .get(`/api/hotel-bookings/${id}`)
@@ -527,16 +554,9 @@ describe('my hotel reservations (HTL-20) over HTTP', () => {
         .expect(200);
 
       expect(response.body).toEqual({
+        // HTL-17, unchanged
         id,
-        bookingReference: expect.stringMatching(/^HTL-/),
-        hotel: {
-          id: hotelId.toHexString(),
-          name: 'Nile Palace',
-          address: '1 Corniche Street',
-          cityId: 'CAI',
-          checkInTime: '15:00',
-          checkOutTime: '11:00',
-        },
+        hotelId: hotelId.toHexString(),
         checkIn: day(10),
         checkOut: day(12),
         nights: 2,
@@ -562,10 +582,21 @@ describe('my hotel reservations (HTL-20) over HTTP', () => {
             totalCents: 10_000,
           },
         ],
-        guests: { adults: 3, children: 1 },
         totalCents: 27_000,
         currency: 'USD',
         status: BookingStatus.CONFIRMED,
+        holdExpiresAt: null,
+        bookingReference: expect.stringMatching(/^HTL-/),
+        // HTL-20, added
+        hotel: {
+          id: hotelId.toHexString(),
+          name: 'Nile Palace',
+          address: '1 Corniche Street',
+          cityId: 'CAI',
+          checkInTime: '15:00',
+          checkOutTime: '11:00',
+        },
+        guests: { adults: 3, children: 1 },
         group: 'UPCOMING',
         refund: null,
         createdAt: expect.any(String),
@@ -575,7 +606,7 @@ describe('my hotel reservations (HTL-20) over HTTP', () => {
       );
     });
 
-    it('shows the hold end of a reservation waiting for payment', async () => {
+    it('shows the hold end of a reservation waiting for payment, and no reference yet (as HTL-17 does)', async () => {
       const holdExpiresAt = minutesFromNow(10);
       const id = await booking({
         status: BookingStatus.PENDING_PAYMENT,
@@ -592,11 +623,14 @@ describe('my hotel reservations (HTL-20) over HTTP', () => {
         status: BookingStatus.PENDING_PAYMENT,
         group: 'UPCOMING',
         holdExpiresAt: holdExpiresAt.toISOString(),
+        bookingReference: null,
+        refund: null,
       });
     });
 
-    it('opens a cancelled reservation, in the CANCELLED group', async () => {
+    it('shows the refund of a cancelled reservation: its status and amount, nothing else', async () => {
       const id = await booking({ status: BookingStatus.CANCELLED });
+      await refund(id, RefundStatus.PENDING, 12_750);
       const response = await http()
         .get(`/api/hotel-bookings/${id}`)
         .set('Cookie', cookies.traveler)
@@ -605,11 +639,71 @@ describe('my hotel reservations (HTL-20) over HTTP', () => {
       expect(response.body).toMatchObject({
         status: BookingStatus.CANCELLED,
         group: 'CANCELLED',
+        refund: { status: RefundStatus.PENDING, amountCents: 12_750 },
       });
+      expect(Object.keys(response.body.refund).sort()).toEqual([
+        'amountCents',
+        'status',
+      ]);
+      expect(JSON.stringify(response.body)).not.toContain('re_');
+      expect(JSON.stringify(response.body)).not.toContain('internal reason');
     });
 
-    it("answers 404 for someone else's reservation, the same as for an unknown one", async () => {
-      const theirs = await booking({ userId: ids.other });
+    it.each([RefundStatus.PENDING, RefundStatus.REFUNDED, RefundStatus.FAILED])(
+      'shows a %s refund as it is',
+      async (status) => {
+        const id = await booking({ status: BookingStatus.CANCELLED });
+        await refund(id, status, 9_000);
+        const response = await http()
+          .get(`/api/hotel-bookings/${id}`)
+          .set('Cookie', cookies.traveler)
+          .expect(200);
+
+        expect(response.body.refund).toEqual({ status, amountCents: 9_000 });
+      },
+    );
+
+    it('keeps the refund null for a cancelled reservation without one (nothing paid back), and never shows the refund of another reservation', async () => {
+      const without = await booking({ status: BookingStatus.CANCELLED });
+      const other = await booking({ status: BookingStatus.CANCELLED });
+      await refund(other, RefundStatus.REFUNDED, 5_000);
+
+      const response = await http()
+        .get(`/api/hotel-bookings/${without}`)
+        .set('Cookie', cookies.traveler)
+        .expect(200);
+
+      expect(response.body.refund).toBeNull();
+    });
+
+    it('ignores a refund recorded for a flight booking with the same id', async () => {
+      const id = await booking({ status: BookingStatus.CANCELLED });
+      await db.collection('refunds').insertOne({
+        bookingType: BookingType.FLIGHT,
+        bookingId: new Types.ObjectId(id),
+        userId: ids.traveler,
+        stripePaymentIntentId: 'pi_flight_same_id',
+        stripeRefundId: 're_flight_same_id',
+        amountCents: 1_000,
+        currency: 'USD',
+        status: RefundStatus.REFUNDED,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      const response = await http()
+        .get(`/api/hotel-bookings/${id}`)
+        .set('Cookie', cookies.traveler)
+        .expect(200);
+
+      expect(response.body.refund).toBeNull();
+    });
+
+    it("answers 404 for someone else's reservation, the same as for an unknown one, and never shows their refund", async () => {
+      const theirs = await booking({
+        userId: ids.other,
+        status: BookingStatus.CANCELLED,
+      });
+      await refund(theirs, RefundStatus.REFUNDED, 5_000);
 
       const notMine = await http()
         .get(`/api/hotel-bookings/${theirs}`)
@@ -620,16 +714,14 @@ describe('my hotel reservations (HTL-20) over HTTP', () => {
         .set('Cookie', cookies.traveler)
         .expect(404);
       expect(notMine.body.message).toBe(unknown.body.message);
+      expect(JSON.stringify(notMine.body)).not.toContain('5000');
     });
 
-    it('answers 400 on id for a malformed id', async () => {
-      const response = await http()
+    it('answers 404, as HTL-17 does, for a malformed id', async () => {
+      await http()
         .get('/api/hotel-bookings/not-an-id')
         .set('Cookie', cookies.traveler)
-        .expect(400);
-      expect(response.body.details).toEqual([
-        { field: 'id', message: 'id must be a valid id' },
-      ]);
+        .expect(404);
     });
   });
 
@@ -646,7 +738,7 @@ describe('my hotel reservations (HTL-20) over HTTP', () => {
         expect.arrayContaining(['200', '400', '401', '403']),
       );
       expect(Object.keys(details.responses)).toEqual(
-        expect.arrayContaining(['200', '400', '401', '403', '404']),
+        expect.arrayContaining(['200', '401', '403', '404']),
       );
     });
   });

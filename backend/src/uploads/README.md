@@ -1,7 +1,7 @@
 # GEN-08 / SCRUM-22 — Image upload service
 
 This module provides server image storage for FLT-01, HTL-01, ITN-12 and BLG-10.
-It exports `UploadService` through `UploadsModule`. It adds public image GET/HEAD
+It exports `UploadService` through `UploadsModule`. It adds visibility-checked image GET/HEAD
 serving at `/uploads/`, but no standalone upload POST or DELETE endpoint.
 
 ## Contract and integration
@@ -9,6 +9,7 @@ serving at `/uploads/`, but no standalone upload POST or DELETE endpoint.
 ```typescript
 save(file: UploadFile, target: UploadTarget): Promise<{ id: string; url: string }>
 remove(id: string): Promise<void>
+removeForTarget(id: string, target: UploadTarget): Promise<void> // deletes only if stored for that kind/ownerId, else no-op
 ```
 
 `UploadFile` accepts a buffered Multer file: `{ buffer, size, mimetype }`.
@@ -97,10 +98,10 @@ Returned URLs are backend-origin relative, e.g. `/uploads/<id>.jpg`, **without
 Only `public/` is served by `ServeStaticModule`, with no directory index, hidden
 files or SPA fallback; images use `X-Content-Type-Options: nosniff`.
 
-**Public image URLs do not enforce private itinerary, draft-post or hidden-content
-visibility.** Unguessable IDs are not access control. Consumer owners must account
-for this approved limitation before attaching sensitive images. This ticket
-does not alter their visibility or authentication rules.
+Blog images now follow the GH-116 policy below. Hotel images, airline logos and
+itinerary activity images retain their existing public visibility; this fix does
+not introduce private-itinerary image authorization. Unguessable IDs are not
+access control. Final Ahmed/Yusuf approval of the Blog privacy policy is pending.
 
 Local storage requires a persistent deployment volume and coordinated backups
 of files and MongoDB. Multiple server instances need the same shared filesystem;
@@ -148,7 +149,8 @@ consumers and are reclaimed by the lease recovery path.
 MongoDB and the filesystem are not an atomic transaction. Cleanup can be delayed
 while either is unavailable; recovery converges when service is restored.
 Publication precedes the ready acknowledgement, so a validated but uncommitted
-file can temporarily exist publicly at an unannounced random URL. Ready uploads
+file can temporarily exist on disk. The GH-116 gate denies non-ready metadata;
+Blog files also require an actual parent attachment before serving. Ready uploads
 whose caller failed to attach them are not automatically expired: the upload
 service cannot infer consumer references. Consumers must handle attachment
 compensation and reconcile ambiguous outcomes. Replacing a full entity's image
@@ -208,3 +210,87 @@ used the existing MongoDB 8.2.6 binary to start disposable instances. No existin
 locked package versions changed. All GEN-08 whitespace checks passed; the
 repository-wide check separately reports a pre-existing final blank line in
 AI_PROMPTS.txt, which was deliberately left untouched under the task restriction.
+
+## GH-116 — Blog image visibility (local implementation; policy approval pending)
+
+Previously, Blog API authorization did not cover ServeStatic's `/uploads/` route:
+a draft post returned 404 to anonymous callers while its image returned 200.
+The production-AppModule regression reproduced that leak before this change.
+
+`UploadsModule.configure()` now mounts one root `/uploads` middleware before
+ServeStatic's `onModuleInit` registration. ServeStatic remains the sole file
+server; there is no replacement controller or second public route. Authorization
+finishes before static GET/HEAD, ETag/Last-Modified or range handling. Failures are
+finished through the existing error formatter because ServeStatic's own excluded-
+route error handler would otherwise replace forwarded failures with 404.
+
+Every request requires a canonical generated filename and matching ready, active
+upload metadata. Blog metadata must identify an existing Post whose `images`
+contains the same ID and canonical URL. Missing/deleted parents, unattached
+images, invalid metadata and non-ready records return a nondisclosing 404.
+
+| Blog state | Public | Author | Non-author ADMIN |
+|---|---|---|---|
+| PUBLISHED, not hidden | Yes | Yes | Yes |
+| DRAFT | No | Yes | No |
+| PUBLISHED, hidden | No | Yes | Yes |
+| Missing/deleted parent or missing attachment | No | No | No |
+
+Private access invokes the unchanged `JwtAuthGuard`, wired with the existing
+`UsersService`, `Reflector`, official `readJwtSecrets` helper and HS256 options.
+No JWT/session verification logic is copied. The guard verifies the access cookie,
+signature, expiry, claims, ACTIVE account, credential version and forced-password-
+change restriction. The image context has no public/forced-change exemption.
+Invalid credentials return 404; public images do not require a valid cookie.
+Refresh cookies do not authenticate image requests. Logout retains the project's
+existing semantics: revoking a refresh token does not independently revoke an
+already-issued access token before expiry or credential-version invalidation.
+
+URLs remain `/uploads/<id>.jpg` or `.png`, without `/api`. Authorized requests
+retain JPEG/PNG MIME, exact bytes, HEAD, conditional/range responses and nosniff.
+Noncanonical encodings, separators and traversal aliases are rejected. Hotel,
+activity and airline ready uploads retain public GET/HEAD and caching behavior.
+No attachment/removal endpoints, limits, schemas, storage or recovery logic changed.
+
+Metadata, Post or account-state lookup failures return a sanitized 503 without
+serving bytes or mutating metadata/files; fixed-stage diagnostics identify the
+image for retry. Missing metadata returns 404. This deliberately trades upload
+availability for privacy: all upload kinds require metadata availability. Each
+request adds one indexed upload lookup, Blog requests add a Post lookup, and
+private Blog requests also use the guard's account lookup. No authorization cache
+is used. A decision applies when checked; an already-authorized in-flight transfer
+cannot be recalled after a concurrent visibility change.
+
+All Blog responses use `Cache-Control: no-store` and `Vary: Cookie`, including
+permitted partial/conditional responses. Subsequent unauthorized conditional or
+range requests return 404 before the file server. Previously downloaded copies
+cannot be revoked. Deployment must route `/uploads` through Nest, never directly
+through a public filesystem/CDN origin. Purge any previously cached Blog images
+and ensure proxies respect no-store; application changes cannot invalidate old
+external caches retroactively.
+
+`backend/test/upload-visibility.e2e-spec.ts` uses the actual AppModule, real static
+routing, disposable MongoDB, synthetic accounts and temporary files. It covers
+the policy for GET/HEAD, invalid/stale/forced/inactive authentication, visibility
+transitions, metadata failures, missing files, JPEG/PNG, conditional/range and URL
+bypass attempts, plus real shared UploadService fixtures for all public kinds.
+The GEN-08 public fixture now uses `hotel` rather than an unattached synthetic
+`post`; its existing assertions are preserved. Standard Jest/E2E configuration
+and scripts are unchanged.
+
+The student authorized this local proposed fix. GH-116 had no owner comments
+when checked; Ahmed and Yusuf's final privacy-policy approval remains pending.
+Local verification does not authorize merging or establish team approval.
+
+Verified 2026-11-18/19: focused E2E 148/148 (6 suites), focused Jest 111/111
+(8 suites), full Jest 1,141/1,141 (78 suites), standard full E2E 1,496/1,496
+(58 suites), build and full ESLint passed. Privacy E2E: 67/67, including 14
+explicit authentication/spoofing cases and 3 public consumer-kind cases.
+Existing shared uploads: 37/37 Jest and 7/7 E2E; BLG-10 E2E: 12/12;
+auth E2E: 24/24; itinerary activity images: 13/13 Jest. Full E2E emitted
+MaxListenersExceededWarning messages during existing suites; no tests failed.
+Lint initially flagged computed-property line breaks in the new test; a small
+request helper fixed them. The affected privacy suite was rerun (67/67) after
+that test-only cleanup; production code was unchanged after the full runs.
+No dependencies were installed, real environment files read, or shared Atlas
+connections made. Team policy approval remains pending.

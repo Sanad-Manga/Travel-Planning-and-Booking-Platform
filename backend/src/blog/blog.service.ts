@@ -5,20 +5,22 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
-import { Connection, FilterQuery, Model, Types } from 'mongoose';
-import { AuthenticatedUser, MAX_IMAGES_PER_ENTITY, paginate, PaginatedResponse, PaginationDto, POST_MAX_TAGS, PostStatus, Role } from '../common';
+import { Connection, FilterQuery, Model, ProjectionType, Types } from 'mongoose';
+import { AuthenticatedUser, DEFAULT_PAGE, DEFAULT_PAGE_SIZE, paginate, PaginatedResponse, PaginationDto, POST_MAX_TAGS, PostStatus, Role, toPaginated } from '../common';
 import { UsersService } from '../users/users.service';
 import { CommentsService } from './comments.service';
+import { PostItineraryService } from './post-itinerary.service';
 import { BrowsePostsQueryDto } from './dto/browse-posts-query.dto';
 import { CreatePostDto } from './dto/create-post.dto';
 import { MyPostRowDto } from './dto/my-post-row.dto';
 import { PostDetailDto } from './dto/post-detail.dto';
 import { PostLikeResponseDto } from './dto/post-like-response.dto';
-import { PostListRowDto } from './dto/post-list-row.dto';
+import { POST_LIST_ROW_PROJECTION, PostListRowDto } from './dto/post-list-row.dto';
 import { PostResponseDto } from './dto/post-response.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 import { Like } from './schemas/like.schema';
 import { Post } from './schemas/post.schema';
+import { PostImagesService } from './post-images.service';
 
 // See deletePostAndDependents for the assumption behind these names.
 const DEPENDENT_COLLECTIONS = ['comments', 'likes'];
@@ -27,6 +29,11 @@ const DEPENDENT_COLLECTIONS = ['comments', 'likes'];
 const UNKNOWN_AUTHOR = 'Unknown user';
 
 type LeanPost = Post & { _id: Types.ObjectId };
+
+/** Makes user text safe inside a RegExp, so a keyword like "c++" or "(" is searched as plain text. */
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 function isDuplicateKeyError(error: unknown): boolean {
   return (
@@ -45,6 +52,8 @@ export class BlogService {
     @InjectConnection() private readonly connection: Connection,
     private readonly users: UsersService,
     private readonly commentsService: CommentsService,
+    private readonly postItinerary: PostItineraryService,
+    private readonly postImages: PostImagesService,
   ) {}
 
   /**
@@ -54,7 +63,6 @@ export class BlogService {
   async create(dto: CreatePostDto, actor: AuthenticatedUser): Promise<PostResponseDto> {
     // Limits re-checked here too, so they hold for any caller of the service (contracts section 3).
     this.assertLimit('tags', dto.tags, POST_MAX_TAGS);
-    this.assertLimit('images', dto.images, MAX_IMAGES_PER_ENTITY);
 
     const status = dto.status ?? PostStatus.DRAFT;
     const post = await this.posts.create({
@@ -62,7 +70,7 @@ export class BlogService {
       title: dto.title,
       body: dto.body,
       tags: dto.tags ?? [],
-      images: dto.images ?? [],
+      images: [], // attached later through POST /posts/:id/images (BLG-10)
       status,
       isHidden: false,
       ...(status === PostStatus.PUBLISHED ? { publishedAt: new Date() } : {}),
@@ -86,15 +94,18 @@ export class BlogService {
    * BLG-02: the public list. Only PUBLISHED, not hidden posts, newest published first, optionally
    * filtered by one tag. Drafts and hidden posts can never appear here. Author names are looked up once
    * per page (one lookup per distinct author), not once per row.
+   * BLG-09: with `q` it becomes a search, see searchPublished.
    */
   async listPublished(query: BrowsePostsQueryDto): Promise<PaginatedResponse<PostListRowDto>> {
     const filter: FilterQuery<Post> = { status: PostStatus.PUBLISHED, isHidden: false };
     if (query.tag) filter.tags = query.tag;
+    if (query.q) return this.searchPublished(filter, query.q, query);
 
     const page = await paginate(this.posts, filter, query, {
       map: PostListRowDto.fromLean,
       sort: { publishedAt: -1, _id: -1 },
-      projection: { body: 0, images: 0 },
+      // Mongoose's types do not know aggregation expressions in a find projection, MongoDB does.
+      projection: POST_LIST_ROW_PROJECTION as unknown as ProjectionType<Post>,
     });
 
     const names = await this.authorNames(page.items.map((row) => row.author.id));
@@ -105,6 +116,57 @@ export class BlogService {
         author: { id: row.author.id, name: names.get(row.author.id) ?? UNKNOWN_AUTHOR },
       })),
     };
+  }
+
+  /**
+   * BLG-09: search the posts matched by `base` (always published and not hidden, so drafts and hidden posts
+   * cannot appear). The keyword is split into words; every word must appear (case-insensitive, as plain text,
+   * never as a regular expression) in the title, in one of the tags or in the author's name. The author name
+   * lives in the users collection, so it is joined in the same aggregation (read only). Order: interaction
+   * score (likeCount + commentCount) descending, then newest published first, then _id so pages are stable.
+   * No match is an empty page, not an error.
+   * LIMITATION: substring matching cannot use an index, so it scans the published posts; fine at this scale.
+   */
+  private async searchPublished(
+    base: FilterQuery<Post>,
+    keyword: string,
+    pagination: Pick<PaginationDto, 'page' | 'limit'>,
+  ): Promise<PaginatedResponse<PostListRowDto>> {
+    const page = pagination.page ?? DEFAULT_PAGE;
+    const limit = pagination.limit ?? DEFAULT_PAGE_SIZE;
+    const words = keyword
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((word) => new RegExp(escapeRegExp(word), 'i'));
+
+    const [result] = await this.posts.aggregate<{
+      items: (Post & { _id: Types.ObjectId; authorName?: string })[];
+      total: { n: number }[];
+    }>([
+      { $match: base },
+      { $lookup: { from: 'users', localField: 'authorId', foreignField: '_id', pipeline: [{ $project: { name: 1 } }], as: 'authorDocs' } },
+      { $match: { $and: words.map((word) => ({ $or: [{ title: word }, { tags: word }, { 'authorDocs.name': word }] })) } },
+      {
+        $addFields: {
+          score: { $add: [{ $ifNull: ['$likeCount', 0] }, { $ifNull: ['$commentCount', 0] }] },
+          sortDate: { $ifNull: ['$publishedAt', '$createdAt'] },
+          authorName: { $arrayElemAt: ['$authorDocs.name', 0] },
+        },
+      },
+      { $sort: { score: -1, sortDate: -1, _id: -1 } },
+      {
+        $facet: {
+          items: [{ $skip: (page - 1) * limit }, { $limit: limit }, { $project: { ...POST_LIST_ROW_PROJECTION, authorName: 1 } }],
+          total: [{ $count: 'n' }],
+        },
+      },
+    ]);
+
+    const items = result.items.map((doc) => ({
+      ...PostListRowDto.fromLean(doc),
+      author: { id: doc.authorId.toString(), name: doc.authorName ?? UNKNOWN_AUTHOR },
+    }));
+    return toPaginated(items, result.total[0]?.n ?? 0, page, limit);
   }
 
   /** BLG-08: clicking a tag lists its published, non-hidden posts. Same rules and rows as the public list. */
@@ -135,11 +197,14 @@ export class BlogService {
     const authorId = post.authorId.toString();
     const names = await this.authorNames([authorId]);
     const comments = await this.commentsService.list(id, query, viewer);
+    // BLG-13: the attached itinerary, or null while it is not public.
+    const itinerary = await this.postItinerary.visibleItinerary(post.itineraryId);
 
     return PostDetailDto.fromLean(
       post,
       names.get(authorId) ?? UNKNOWN_AUTHOR,
       comments.items,
+      itinerary,
     );
   }
 
@@ -287,8 +352,8 @@ export class BlogService {
    * post becomes PUBLISHED and kept afterwards (also if it goes back to DRAFT and is re-published).
    */
   async update(id: string, dto: UpdatePostDto, actor: AuthenticatedUser): Promise<PostResponseDto> {
-    const changes: Partial<Record<'title' | 'body' | 'tags' | 'images' | 'status', unknown>> = {};
-    for (const key of ['title', 'body', 'tags', 'images', 'status'] as const) {
+    const changes: Partial<Record<'title' | 'body' | 'tags' | 'status', unknown>> = {};
+    for (const key of ['title', 'body', 'tags', 'status'] as const) {
       const value = dto[key];
       if (value === null) {
         throw new BadRequestException({ message: 'Validation failed', details: [{ field: key, message: `${key} must not be null` }] });
@@ -299,7 +364,6 @@ export class BlogService {
       throw new BadRequestException({ message: 'Validation failed', details: [{ field: 'body', message: 'Send at least one field to update' }] });
     }
     this.assertLimit('tags', dto.tags, POST_MAX_TAGS);
-    this.assertLimit('images', dto.images, MAX_IMAGES_PER_ENTITY);
 
     const filter = this.ownedFilter(id, actor);
     const update: Record<string, unknown> = { $set: changes };
@@ -327,13 +391,15 @@ export class BlogService {
    * and the field below.
    * LIMITATION: not wrapped in a MongoDB transaction (standalone servers and the in-memory test server
    * do not support them), so the post delete and the cascade are not atomic.
+   * BLG-10: the post's image files are removed last, best effort (see PostImagesService.removeStoredImages).
    */
   async deletePostAndDependents(filter: FilterQuery<Post>): Promise<void> {
-    const post = await this.posts.findOneAndDelete(filter).select('_id').lean();
+    const post = await this.posts.findOneAndDelete(filter).select('_id images').lean();
     if (!post) throw new NotFoundException('Post not found');
     for (const name of DEPENDENT_COLLECTIONS) {
       await this.connection.collection(name).deleteMany({ postId: post._id });
     }
+    await this.postImages.removeStoredImages(post._id.toString(), post.images ?? []);
   }
 
   /** Only published posts open here. A hidden one opens only for its author and admins. Drafts never open (the author uses /mine). */

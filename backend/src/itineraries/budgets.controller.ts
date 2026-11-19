@@ -9,41 +9,22 @@ import {
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
-  ApiCookieAuth,
-  ApiForbiddenResponse,
   ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
-  ApiTags,
-  ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import {
-  AuthenticatedUser,
-  CurrentUser,
-  ErrorResponseDto,
-  Role,
-  Roles,
-} from '../common';
+import { AuthenticatedUser, CurrentUser, ErrorResponseDto } from '../common';
 import { BudgetsService } from './budgets.service';
 import { BudgetIdParamDto } from './dto/budget-id-param.dto';
 import { BudgetDto } from './dto/budget.dto';
 import { UpdateBudgetDto } from './dto/update-budget.dto';
+import { UserRoutes } from './itineraries.swagger';
 
 // Budget entries belong to the owner of the itinerary (ITN-14), so every route needs the USER role. Adding one is
 // POST /api/itineraries/:id/days/:dayId/budgets and the summary is GET /api/itineraries/:id/budget-summary, both in
-// ItinerariesController. Ownership is checked in the service.
-@ApiTags('budgets')
-@ApiCookieAuth()
-@ApiUnauthorizedResponse({
-  type: ErrorResponseDto,
-  description: 'Not logged in',
-})
-@ApiForbiddenResponse({
-  type: ErrorResponseDto,
-  description: 'Caller is not a registered user (admin or moderator)',
-})
-@Roles(Role.USER)
+// ItineraryItemsController. Ownership is checked in the service.
+@UserRoutes('budgets')
 @Controller('budgets')
 export class BudgetsController {
   constructor(private readonly budgets: BudgetsService) {}

@@ -125,10 +125,11 @@ describe('BLG-01 create post (e2e)', () => {
       expect(res.body.tags).toEqual(['cairo', 'budget']);
     });
 
-    it('accepts up to 5 image references and returns them as {id,url}', async () => {
-      const images = Array.from({ length: 5 }, (_, i) => ({ id: `img${i}`, url: `/uploads/posts/img${i}.jpg` }));
-      const res = await http().post('/api/posts').set('Cookie', userCookie).send(validPost({ images })).expect(201);
-      expect(res.body.images).toEqual(images);
+    it('rejects an images field (even empty): images are attached through POST /posts/:id/images (BLG-10)', async () => {
+      for (const images of [[{ id: 'img0', url: '/uploads/posts/img0.jpg' }], []]) {
+        const res = await http().post('/api/posts').set('Cookie', userCookie).send(validPost({ images })).expect(400);
+        expect(res.body.details[0].field).toBe('images');
+      }
     });
 
     it('rejects a guest with 401 and the shared error shape', async () => {
@@ -172,20 +173,6 @@ describe('BLG-01 create post (e2e)', () => {
       expect(res.body.tags).toEqual(['a', 'b', 'c', 'd', 'e']);
     });
 
-    it('rejects more than 5 images and malformed image references', async () => {
-      const six = Array.from({ length: 6 }, (_, i) => ({ id: `i${i}`, url: `/uploads/posts/${i}.jpg` }));
-      const tooMany = await http().post('/api/posts').set('Cookie', userCookie).send(validPost({ images: six })).expect(400);
-      expect(tooMany.body.details[0].field).toBe('images');
-      const bad = await http().post('/api/posts').set('Cookie', userCookie).send(validPost({ images: [{ id: 'x' }] })).expect(400);
-      expect(bad.body.details[0].field).toBe('images.0.url');
-    });
-
-    it('rejects image urls that are not an /uploads/ path (external, scheme, traversal)', async () => {
-      for (const url of ['https://evil.example/x.jpg', '//evil.example/x.jpg', 'javascript:alert(1)', '/uploads/../etc/passwd', '/other/x.jpg']) {
-        const res = await http().post('/api/posts').set('Cookie', userCookie).send(validPost({ images: [{ id: 'i', url }] })).expect(400);
-        expect(res.body.details[0].field).toBe('images.0.url');
-      }
-    });
 
     it('rejects an invalid status', async () => {
       const res = await http().post('/api/posts').set('Cookie', userCookie).send(validPost({ status: 'ARCHIVED' })).expect(400);
@@ -413,10 +400,12 @@ describe('BLG-01 create post (e2e)', () => {
       expect(stored).toMatchObject({ title: 'New title', likeCount: 0, commentCount: 0, isHidden: false });
     });
 
-    it('replaces images and enforces the same validation as create', async () => {
+    it('rejects an images field (even empty) and enforces the same validation as create', async () => {
       const post = await createPost();
-      const res = await patch(post.id, userCookie, { images: [{ id: 'i1', url: '/uploads/posts/1.jpg' }] }).expect(200);
-      expect(res.body.images).toEqual([{ id: 'i1', url: '/uploads/posts/1.jpg' }]);
+      const res = await patch(post.id, userCookie, { images: [{ id: 'i1', url: '/uploads/posts/1.jpg' }] }).expect(400);
+      expect(res.body.details[0].field).toBe('images');
+      await patch(post.id, userCookie, { images: [] }).expect(400);
+      expect((await posts().findOne({ _id: new Types.ObjectId(post.id) }))?.images).toEqual([]);
       await patch(post.id, userCookie, { title: '   ' }).expect(400);
       await patch(post.id, userCookie, { tags: ['1', '2', '3', '4', '5', '6'] }).expect(400);
       await patch(post.id, userCookie, { status: 'ARCHIVED' }).expect(400);

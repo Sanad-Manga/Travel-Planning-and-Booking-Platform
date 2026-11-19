@@ -176,4 +176,60 @@ describe('POST /api/auth/refresh (e2e)', () => {
       expectInvalidSession(await refreshWith(session.refresh).expect(401));
     });
   });
+
+  describe('rotation: a refresh token is single use (issue #115)', () => {
+    const jtiOf = async (token: string) => (await refreshJwt.verifyAsync<{ jti: string }>(token)).jti;
+    const consumed = async (token: string) => (await testApp.connection.collection('revokedTokens').countDocuments({ jti: await jtiOf(token) })) === 1;
+
+    it('replaying the old cookie A after A->B gives 401 and the standard error body; B still works', async () => {
+      const session = await loginFresh();
+      const first = await refreshWith(session.refresh).expect(200);
+      const b = valueOf(find(first, 'refresh_token'));
+
+      const replay = await refreshWith(session.refresh).expect(401);
+      expect(replay.body).toMatchObject({ statusCode: 401, error: 'Unauthorized', message: 'Invalid or expired session', path: '/api/auth/refresh' });
+      expect(replay.body.timestamp).toEqual(expect.any(String));
+
+      // The rejected replay did not log the user out of the new session.
+      const second = await refreshWith(b).expect(200);
+      expect(valueOf(find(second, 'refresh_token'))).not.toBe(b);
+    });
+
+    it('5 parallel refreshes with the same cookie: exactly one 200 and four 401', async () => {
+      const session = await loginFresh();
+      const results = await Promise.all(Array.from({ length: 5 }, () => refreshWith(session.refresh)));
+      const statuses = results.map((r) => r.status).sort();
+      expect(statuses).toEqual([200, 401, 401, 401, 401]);
+      const winner = results.find((r) => r.status === 200)!;
+      await refreshWith(valueOf(find(winner, 'refresh_token'))).expect(200);
+    });
+
+    it('a rejected refresh does not consume the jti (suspended, then reactivated user can still use the token once)', async () => {
+      const session = await loginFresh();
+      await users().updateOne({ _id: new Types.ObjectId(session.id) }, { $set: { status: 'SUSPENDED' } });
+      await refreshWith(session.refresh).expect(401);
+      expect(await consumed(session.refresh)).toBe(false);
+
+      await users().updateOne({ _id: new Types.ObjectId(session.id) }, { $set: { status: 'ACTIVE' } });
+      await refreshWith(session.refresh).expect(200);
+      expect(await consumed(session.refresh)).toBe(true);
+    });
+
+    it('a deactivated user does not consume the jti', async () => {
+      const session = await loginFresh();
+      await users().updateOne({ _id: new Types.ObjectId(session.id) }, { $set: { status: 'DEACTIVATED' } });
+      await refreshWith(session.refresh).expect(401);
+      expect(await consumed(session.refresh)).toBe(false);
+    });
+
+    it('an access token, garbage or expired cookie is still 401 and consumes nothing', async () => {
+      const session = await loginFresh();
+      const before = await testApp.connection.collection('revokedTokens').countDocuments();
+      const expired = await refreshJwt.signAsync({ sub: session.id, jti: 'x' }, { expiresIn: -10 });
+      for (const cookie of [session.access, 'garbage', expired]) {
+        expectInvalidSession(await refreshWith(cookie).expect(401));
+      }
+      expect(await testApp.connection.collection('revokedTokens').countDocuments()).toBe(before);
+    });
+  });
 });

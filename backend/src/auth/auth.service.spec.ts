@@ -6,6 +6,7 @@ import { compare, hashSync } from 'bcryptjs';
 import { AccountStatus, Role } from '../common';
 import { UsersService } from '../users/users.service';
 import { AuthService } from './auth.service';
+import { EmailVerificationService } from './email-verification.service';
 import { TokenRevocationService } from './token-revocation.service';
 
 const ID = '6730a1f2c3d4e5f607182930';
@@ -22,7 +23,8 @@ describe('AuthService', () => {
     replacePasswordHash: jest.fn(),
   };
   const jwtService = { signAsync: jest.fn(), verifyAsync: jest.fn() };
-  const revocations = { revoke: jest.fn(), isRevoked: jest.fn() };
+  const emailVerification = { sendInBackground: jest.fn() };
+  const revocations = { revoke: jest.fn(), isRevoked: jest.fn(), consume: jest.fn() };
   const claims = (extra: Record<string, unknown> = {}) => ({ sub: ID, jti: 'jti-1', exp: 1_900_000_000, ...extra });
   const dto = { name: 'Ali', email: 'ali@example.com', password: 'Passw0rdOK', acceptTerms: true };
   const storedHash = hashSync('Passw0rdOK', 4);
@@ -50,6 +52,7 @@ describe('AuthService', () => {
         { provide: UsersService, useValue: usersService },
         { provide: JwtService, useValue: jwtService },
         { provide: TokenRevocationService, useValue: revocations },
+        { provide: EmailVerificationService, useValue: emailVerification },
         // Fake secrets, only for this test.
         { provide: ConfigService, useValue: new ConfigService({ JWT_ACCESS_SECRET: 'a'.repeat(32), JWT_REFRESH_SECRET: 'r'.repeat(32) }) },
       ],
@@ -73,6 +76,13 @@ describe('AuthService', () => {
       const result = await service.register(dto);
       expect(result).toMatchObject({ id: ID, email: dto.email, role: Role.USER, status: AccountStatus.ACTIVE });
       expect(JSON.stringify(result)).not.toContain('passwordHash');
+    });
+
+    it('creates the account unverified and starts the verification email in the background (ACC-02)', async () => {
+      usersService.findByEmail.mockResolvedValue(null);
+      await service.register(dto);
+      expect(usersService.create.mock.calls[0][0].emailVerified).toBe(false);
+      expect(emailVerification.sendInBackground).toHaveBeenCalledTimes(1);
     });
 
     it('rejects a duplicate email with a field-level 409 and creates nothing', async () => {
@@ -215,6 +225,7 @@ describe('AuthService', () => {
     beforeEach(() => {
       jwtService.verifyAsync.mockResolvedValue(claims());
       revocations.isRevoked.mockResolvedValue(false);
+      revocations.consume.mockResolvedValue(true);
     });
 
     it('verifies with the refresh secret and HS256, then issues a new access AND refresh token', async () => {
@@ -270,6 +281,56 @@ describe('AuthService', () => {
       expect(revocations.isRevoked).toHaveBeenCalledWith('jti-1');
       expect(usersService.findById).not.toHaveBeenCalled();
       expect(jwtService.signAsync).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('refresh rotation (issue #115)', () => {
+    beforeEach(() => {
+      jwtService.verifyAsync.mockResolvedValue(claims());
+      revocations.isRevoked.mockResolvedValue(false);
+      revocations.consume.mockResolvedValue(true);
+      usersService.findById.mockResolvedValue(userDoc());
+    });
+
+    it('consumes the presented jti until the token would have expired, then issues the new tokens', async () => {
+      await service.refresh('x');
+      expect(revocations.consume).toHaveBeenCalledWith('jti-1', ID, new Date(1_900_000_000 * 1000));
+      expect(jwtService.signAsync).toHaveBeenCalledTimes(2);
+    });
+
+    it('401 and no new tokens when another request consumed the jti first (replay or parallel refresh)', async () => {
+      revocations.consume.mockResolvedValue(false);
+      await expect(service.refresh('x')).rejects.toThrow('Invalid or expired session');
+      expect(jwtService.signAsync).not.toHaveBeenCalled();
+    });
+
+    it('a database error while consuming propagates and issues nothing', async () => {
+      revocations.consume.mockRejectedValue(new Error('db down'));
+      await expect(service.refresh('x')).rejects.toThrow('db down');
+      expect(jwtService.signAsync).not.toHaveBeenCalled();
+    });
+
+    it('does not consume when the token is already revoked', async () => {
+      revocations.isRevoked.mockResolvedValue(true);
+      await expect(service.refresh('x')).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(revocations.consume).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['suspended', { status: AccountStatus.SUSPENDED }],
+      ['deactivated', { status: AccountStatus.DEACTIVATED }],
+      ['outdated tokenVersion', { tokenVersion: 5 }],
+      ['mustChangePassword', { mustChangePassword: true }],
+    ])('does not consume the jti when the user is rejected (%s)', async (_name, overrides) => {
+      usersService.findById.mockResolvedValue(userDoc(overrides));
+      await expect(service.refresh('x')).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(revocations.consume).not.toHaveBeenCalled();
+    });
+
+    it('does not consume when the token fails verification', async () => {
+      jwtService.verifyAsync.mockRejectedValue(new Error('invalid signature'));
+      await expect(service.refresh('bad')).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(revocations.consume).not.toHaveBeenCalled();
     });
   });
 

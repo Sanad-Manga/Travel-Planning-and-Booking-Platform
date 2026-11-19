@@ -1,5 +1,6 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { randomBytes } from 'node:crypto';
 import { Connection, Model, Types } from 'mongoose';
 import { BookingStatus, BookingType, NotificationType } from '../common';
 import { AirlinesService } from '../airlines';
@@ -14,6 +15,7 @@ import { BookingProviderRegistry } from '../payments/booking-provider.registry';
 import {
   FlightBooking,
   FlightBookingLean,
+  getFlightBookingSegments,
 } from './schemas/flight-booking.schema';
 
 export interface FlightPayable {
@@ -22,6 +24,33 @@ export interface FlightPayable {
   status: BookingStatus;
   holdExpiresAt: Date | null;
 }
+
+/** How many times a confirmation is retried when the generated reference collides. */
+const BOOKING_REFERENCE_ATTEMPTS = 5;
+const DUPLICATE_KEY_CODE = 11000;
+
+/**
+ * FLT-23: an opaque, upper-case flight booking reference. Uniqueness is guaranteed by the
+ * sparse unique index on `bookingReference`, not by reading first (another confirmation can
+ * be generating one at the same moment).
+ */
+export function generateBookingReference(): string {
+  return `FLT-${randomBytes(8).toString('hex').toUpperCase()}`;
+}
+
+function isDuplicateKeyError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    ((error as { code?: unknown }).code === DUPLICATE_KEY_CODE ||
+      (error instanceof Error && error.message.includes('E11000')))
+  );
+}
+
+type ConfirmationOutcome = {
+  kind: 'CONFIRMED_NOW' | 'ALREADY' | 'REFUSED';
+  booking: FlightBookingLean | null;
+};
 
 /**
  * Flights B's side of the booking-provider contract (docs/contracts.md section 7): what BookingLifecycle,
@@ -110,20 +139,27 @@ export class FlightBookingProvider implements BookingProvider, OnModuleInit {
         .exec();
       if (!before) return;
 
-      if (to === BookingStatus.EXPIRED) {
-        await this.inventory.releaseHeldSeats(
-          before.flightId,
-          before.cabinClass,
-          before.seats,
-          session,
-        );
-      } else if (to === BookingStatus.CANCELLED) {
-        await this.inventory.returnBookedSeats(
-          before.flightId,
-          before.cabinClass,
-          before.seats,
-          session,
-        );
+      if (
+        to === BookingStatus.EXPIRED ||
+        to === BookingStatus.CANCELLED
+      ) {
+        for (const segment of getFlightBookingSegments(before)) {
+          if (to === BookingStatus.EXPIRED) {
+            await this.inventory.releaseHeldSeats(
+              segment.flightId,
+              segment.cabinClass,
+              segment.seats,
+              session,
+            );
+          } else {
+            await this.inventory.returnBookedSeats(
+              segment.flightId,
+              segment.cabinClass,
+              segment.seats,
+              session,
+            );
+          }
+        }
       }
       applied = true;
     });
@@ -131,59 +167,17 @@ export class FlightBookingProvider implements BookingProvider, OnModuleInit {
   }
 
   /**
-   * Payment succeeded: PENDING_PAYMENT -> CONFIRMED with the payment reference, held seats become booked seats,
-   * all in one transaction. Idempotent: confirming an already confirmed booking with the SAME reference is a
-   * successful no-op (the webhook and the late-paid expiry path can both arrive). False if the booking does not
-   * exist or is no longer waiting for payment.
+   * Payment succeeded: PENDING_PAYMENT -> CONFIRMED with the payment reference and a unique booking
+   * reference, held seats become booked seats, all in one transaction (FLT-23). Idempotent:
+   * confirming an already confirmed booking with the SAME reference is a successful no-op (the
+   * webhook and the late-paid expiry path can both arrive) and never changes the reference, the
+   * inventory or the notification count. A different payment reference never reconfirms it.
+   * False if the booking does not exist or is no longer waiting for payment.
    */
   async markConfirmed(id: string, paymentRef: string): Promise<boolean> {
     if (!Types.ObjectId.isValid(id)) return false;
 
-    // A holder object (not loose variables) because the callback below may run more than once.
-    const outcome: {
-      kind: 'CONFIRMED_NOW' | 'ALREADY' | 'REFUSED';
-      booking: FlightBookingLean | null;
-    } = { kind: 'REFUSED', booking: null };
-    await this.connection.transaction(async (session) => {
-      outcome.kind = 'REFUSED';
-      outcome.booking = null;
-      const before = await this.model
-        .findOneAndUpdate(
-          { _id: id, status: BookingStatus.PENDING_PAYMENT },
-          {
-            $set: { status: BookingStatus.CONFIRMED, paymentRef },
-            $unset: { holdExpiresAt: '' },
-          },
-          { session },
-        )
-        .lean<FlightBookingLean>()
-        .exec();
-
-      if (before) {
-        await this.inventory.confirmHeldSeats(
-          before.flightId,
-          before.cabinClass,
-          before.seats,
-          session,
-        );
-        outcome.booking = before;
-        outcome.kind = 'CONFIRMED_NOW';
-        return;
-      }
-
-      const existing = await this.model
-        .findById(id)
-        .session(session)
-        .select('status paymentRef')
-        .lean<Pick<FlightBookingLean, 'status' | 'paymentRef'>>()
-        .exec();
-      if (
-        existing?.status === BookingStatus.CONFIRMED &&
-        existing.paymentRef === paymentRef
-      ) {
-        outcome.kind = 'ALREADY';
-      }
-    });
+    const outcome = await this.confirmWithUniqueReference(id, paymentRef);
 
     if (outcome.kind === 'CONFIRMED_NOW' && outcome.booking) {
       // After the commit, and never throws: telling the traveler must not undo a confirmed booking.
@@ -197,6 +191,77 @@ export class FlightBookingProvider implements BookingProvider, OnModuleInit {
       });
     }
     return outcome.kind !== 'REFUSED';
+  }
+
+  /**
+   * One transaction confirms the booking and assigns its reference. If the sparse unique index
+   * rejects a freshly generated reference, the whole transaction rolls back and a new reference is
+   * tried, so a collision can never leave a booking confirmed without its seat conversion.
+   */
+  private async confirmWithUniqueReference(
+    id: string,
+    paymentRef: string,
+  ): Promise<ConfirmationOutcome> {
+    for (let attempt = 1; ; attempt++) {
+      // A holder object (not loose variables) because the callback below may run more than once.
+      const outcome: ConfirmationOutcome = { kind: 'REFUSED', booking: null };
+      try {
+        await this.connection.transaction(async (session) => {
+          outcome.kind = 'REFUSED';
+          outcome.booking = null;
+          const before = await this.model
+            .findOneAndUpdate(
+              { _id: id, status: BookingStatus.PENDING_PAYMENT },
+              {
+                $set: {
+                  status: BookingStatus.CONFIRMED,
+                  paymentRef,
+                  bookingReference: generateBookingReference(),
+                },
+                $unset: { holdExpiresAt: '' },
+              },
+              { session },
+            )
+            .lean<FlightBookingLean>()
+            .exec();
+
+          if (before) {
+            for (const segment of getFlightBookingSegments(before)) {
+              await this.inventory.confirmHeldSeats(
+                segment.flightId,
+                segment.cabinClass,
+                segment.seats,
+                session,
+              );
+            }
+            outcome.booking = before;
+            outcome.kind = 'CONFIRMED_NOW';
+            return;
+          }
+
+          const existing = await this.model
+            .findById(id)
+            .session(session)
+            .select('status paymentRef')
+            .lean<Pick<FlightBookingLean, 'status' | 'paymentRef'>>()
+            .exec();
+          if (
+            existing?.status === BookingStatus.CONFIRMED &&
+            existing.paymentRef === paymentRef
+          ) {
+            outcome.kind = 'ALREADY';
+          }
+        });
+        return outcome;
+      } catch (error) {
+        if (
+          !isDuplicateKeyError(error) ||
+          attempt >= BOOKING_REFERENCE_ATTEMPTS
+        ) {
+          throw error;
+        }
+      }
+    }
   }
 
   /**

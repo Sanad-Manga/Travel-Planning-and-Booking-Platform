@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { PostStatus } from '../../common';
 import { PostDocument } from '../schemas/post.schema';
-import { PostImageDto } from './create-post.dto';
+import { PostImageDto } from './post-image.dto';
 
 export class PostResponseDto {
   @ApiProperty({ example: '6730a1f2c3d4e5f607182930' })
@@ -28,6 +28,14 @@ export class PostResponseDto {
   @ApiProperty({ description: 'true = hidden by moderation; visible only to the author and admins.' })
   isHidden: boolean;
 
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: '674a1b2c3d4e5f6a7b8c9d0e',
+    description: 'The attached itinerary (BLG-13), or null. Set with PATCH /api/posts/:id/itinerary.',
+  })
+  itineraryId: string | null;
+
   @ApiPropertyOptional({ example: '2026-11-20T14:30:00.000Z', description: 'Set when the post is published.' })
   publishedAt?: string;
 
@@ -47,6 +55,7 @@ export class PostResponseDto {
       images: (post.images ?? []).map((i) => ({ id: i.id, url: i.url })),
       status: post.status,
       isHidden: post.isHidden,
+      itineraryId: post.itineraryId?.toString() ?? null,
       ...(post.publishedAt ? { publishedAt: post.publishedAt.toISOString() } : {}),
       createdAt: (post.createdAt ?? new Date(0)).toISOString(),
       updatedAt: (post.updatedAt ?? new Date(0)).toISOString(),

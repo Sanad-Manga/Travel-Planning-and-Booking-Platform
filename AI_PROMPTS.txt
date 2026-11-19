@@ -1571,6 +1571,14 @@ Added 28 actual-AppModule E2E cases proving role/status/input policies, stored h
 Verification: 101/101 focused unit tests (5 suites), 28/28 real-AppModule E2E tests, 24/24 Blog adapter regression tests, full Jest 869/869 (55 suites), full E2E 1032/1032 (39 suites), TypeScript build and full ESLint passed. Full E2E emitted listener warnings without suppression. Tests ran sequentially in an environment-free temporary copy with existing dependencies, temporary storage, synthetic accounts and disposable MongoDB. Final Git whitespace/conflict/source-identity checks verify only intended changes. No real .env/credentials/Atlas access, dependency installation, commit, push, branch switch, stash, reset, merge, rebase, PR creation or Jira modification occurred. Remaining limitations: credential/audit writes are not transactionally atomic; audit failure/crash may follow a completed credential change; consumed/lost temporary sessions may require another admin reset; invalidation cannot cancel already-authorized in-flight work. Ziad's final coordination confirmation/auth review remains pending as explicitly requested, without blocking this local implementation.
 
 Date: 2026-11-15
+Student: Abdulrahman Mohamad Hosny
+Tool: Copilot (VS Code)
+Related Requirement: FLT-12 (SCRUM-83)
+Prompt:
+Implement FLT-12 on a branch from current develop: add round-trip search with separate outbound and return results and optional cabin filter; create one booking containing both segments, one payment/reference, age-derived passenger types and per-leg fares/baggage; reserve and transition both legs atomically; cancel the booking as a whole using the outbound airline's cancellation tiers. Test the API and Swagger, update this prompt log, then prepare the changes for Git. Follow-up: use PAY-02 code only if it supplies a needed dependency; keep the positive-refund integration gap explicit rather than claiming completion if Payments has no refund issuer.
+How the output was used:
+Added the optional returnDate and cabinClass search parameters, separate paginated outbound/return results, segment-aware booking storage and responses, per-leg pricing/baggage, atomic seat reservation/confirmation/release, and a traveler cancellation endpoint using the outbound policy. Added round-trip search/booking/rollback/cancellation and Swagger E2E coverage; `npm run build`, `npm run lint`, and the focused E2E suites were run. PAY-02's policy-acceptance code does not provide `RefundsService.issue`; zero-refund cancellations succeed, while positive-refund cancellations explicitly return 503 without changing booking or inventory. Therefore positive-refund cancellation remains incomplete and must be integrated with Payments before FLT-12 can be reported as fully complete. No PAY-02 code was copied because it does not resolve that dependency.
+Date: 2026-11-15
 Student: Hessain Elrefaey
 Tool: GitHub Copilot (Copilot SDK in VS Code)
 Related Requirement: HTL-16 (Book one or more rooms in one reservation)
@@ -1578,7 +1586,6 @@ Prompt:
 Implement HTL-16 on a fresh branch from updated develop after HTL-15 merged. Accept selected roomIds with checkIn/checkOut from the HTL-15 free-rooms endpoint and adult/child assignments per room. Re-check room availability and reservation overlaps inside an atomic transaction, snapshot each room's price in cents, and create one same-hotel reservation. Bind RoomReservations.findReservedRoomIds so search excludes confirmed/unexpired-held rooms. Register the hotel booking provider and the ACC-12 upcoming-confirmed-bookings checker through UsersModule; use the shared Payments and notification contracts, and do not implement reviews before that module exists.
 How the output was used:
 Created the reservation schema, validated request/response DTOs, POST /api/hotel-bookings, transactional availability/overlap checks, per-room serialization for competing holds, price snapshots and the hotel reservation provider integrations. Updated HotelsModule wiring and added hotel-booking API documentation. The branch started from develop after HTL-15 merged. Tests and validation are recorded in the PR evidence after they run.
-================================================
 Date: 2026-11-15
 Student: Abdelrahman ElGabarty
 Tool: Claude (Claude Code, Sonnet 5)
@@ -1615,11 +1622,595 @@ check-out day is today or earlier (BookingLifecycle may not have completed it ye
 CANCELLED, EXPIRED and a pending hold that ran out. The tests were written first and watched failing: 14 unit tests for the
 rules and 19 HTTP tests (my-hotel-bookings.e2e-spec.ts) for roles, ownership, grouping, ordering, paging, validation and
 Swagger. A mutation check (owner removed from the list filter) made the ownership test fail, as it should.
-HotelBookingsService.findMine and findMineById read through the shared assertOwner helper (ACC-11); someone else's
-reservation is a 404 like an unknown id. Hotel names are joined with one query (hidden hotels included, and a missing
-hotel record gives a placeholder name instead of a 500). paymentRef is never returned.
-Refund status: PAY-03 (refunds) is not merged and there is no refund record to read, so the details answer has a
-`refund` field that is null until PAY-03 exists. I did not invent a refunds schema; this is flagged in the PR.
+HotelBookingsService.findMine reads the traveler's own reservations (the owner is part of the query). Hotel names are
+joined with one query (hidden hotels included, and a missing hotel record gives a placeholder name instead of a 500).
+paymentRef is never returned.
 A first prettier run reformatted another developer's hotel-bookings service; I reverted that file and applied only my
 own lines. The shared GEN-05 pagination test got one row for the new list route.
+Follow-up, after HTL-17, HTL-21 and PAY-03 were merged (Hessain Elrefaey's answer, "option B"): my first version also had
+its own GET /api/hotel-bookings/:id, which clashed with HTL-17's route of the same path. Hessain approved this: I keep
+HTL-17's GET :id (its fields, types, status codes, owner-only rule and the lazy expiry and completion on read stay as they
+are) and add hotel, guests, group, refund and createdAt to its answer, in my HTL-20 branch, with the lead's approval before
+it merges. The tests were rewritten first and watched failing (11 red), then: HotelBookingDetailsDto now extends
+HotelBookingResponseDto, and HotelBookingsService.getDetailsForUser shares one private lookup (loadOwnedFresh) with
+getForUser, whose behaviour is unchanged (HTL-17's own suite still passes). refund is { status, amountCents } read with
+RefundsService.getLatestForBooking(HOTEL, id) (PAY-03), never from the refunds collection: it is null when none is
+recorded, for a flight refund with the same id, and never shows the refund of someone else's reservation (a 404 comes
+first). A malformed id stays a 404 as in HTL-17 (my own route used to answer 400). I did not keep a test of the lazy
+expiry on read: it needs a transaction, and HTL-17's suite covers it on a replica set through the same route.
+Changed in Hessain's files (flagged in the PR): hotel-bookings.controller.ts (list route, :id answers the details, a 403
+doc line), hotel-bookings.service.ts (findMine, getDetailsForUser, loadOwnedFresh, RefundsService injected),
+docs/api/hotel-bookings.md and test/pagination.e2e-spec.ts (one row).
 ================================================
+Related Requirement: none (clean-code request from the group leader, itineraries module)
+Prompt:
+The group leader wants clean code: when he opens three files they start with about 20 lines of imports. Clean up the
+itineraries module. (I chose the bigger option: split the big files, not only tidy the imports.)
+How the output was used:
+Measured first: itineraries.service.ts (768 lines) and itineraries.controller.ts (412 lines) each began with a 57-line
+import block. I split by job, moving whole methods and not editing their bodies: ItinerariesPublicService (search and the
+public view), ItineraryCloneService, ItineraryHotelsService; ItineraryItemsController (add activity, budget entry,
+transport cost, budget summary), ItineraryHotelsController, ItineraryCloneController. Same URLs and Swagger tag, so the
+API does not change. The class decorators every controller repeated and the 400/404 documentation of each route became
+UserRoutes, ApiBadRequest and ApiNotFound in itineraries.swagger.ts. A duplicate mongoose import was removed. Specs call
+the service that now owns each method; no test was removed (988 unit, 1112 e2e).
+Result, said plainly: the service block went from 57 to 35 lines and the controller block from 57 to 42, so they are
+smaller but still over 20; the module block grew from 24 to 30 because it lists the new classes. I did not add a DTO
+barrel because prettier prints one name per line, so it would not have shortened anything. The leader should say which
+three files he meant if more is wanted.
+================================================
+
+================================================
+Date: 2026-11-16
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-15 (SCRUM-76)
+Prompt:
+Implement ACC-15 only, following docs/contracts.md, on a fresh branch from updated develop (not from the unmerged ACC-13 branch). Let an admin suspend and reactivate moderators through the existing ACC-16 routes, and add PATCH /api/admin/providers/:type/:id/deactivate and /reactivate for hotels and airlines, ADMIN only, one atomic conditional update each, separate from the moderator account status, never touching bookings, with notifications to the linked moderators (PROVIDER_DEACTIVATED) and an audit entry. Read first what search and booking already do for an inactive provider and prove it with real-database e2e tests instead of editing other modules.
+How the output was used:
+Widened ACC-16 AccountStatusService (role filter USER plus both moderator roles, ADMIN still 409, same wording style) with matching Swagger text and test edits, and added ProviderStatusService/Controller/DTOs to the admin module using the Hotel and Airline Mongoose models registered in AdminModule (no airlines/hotels/common/auth changes). Found that User.hotelId/airlineId are Mixed in the schema, so the moderator lookup matches both an ObjectId and a string. Audit failure reverts the flag with a conditional update (documented difference from ACC-16 journal). Added 10 unit tests and an 18-test real-AppModule e2e suite (replica-set MongoDB): admin-only, validation, notifications and audit, parallel calls, separation both ways, real login/cookie checks for suspended moderators (login is 403 Account suspended, not 401), byte-for-byte unchanged CONFIRMED bookings, and the existing isActive behaviour of hotel search, free rooms, hotel booking, flight search and flight hold. Wrote docs/api/admin-account-and-provider-status.md and updated the admin README. No gap was found in other owners' modules.
+Verification: eslint and nest build clean; full serial unit run 64 suites / 997 tests passed; full serial e2e run 43 suites / 1128 tests passed (--forceExit on the command line only). No Atlas access, no .env read, no secrets.
+Follow-up prompt (2026-11-16): checked how ACC-13 stores airlineId/hotelId (ObjectId) and added an e2e test that provider notifications reach moderators linked as an ObjectId or as a string; the ACC-15 e2e suite is now 20 tests.
+Student: Yusuf Eser
+Tool: Claude Code
+Related Requirement: HTL-06
+Prompt:
+Use the travel-platform skill, read the earlier sessions and docs/contracts.md, then implement HTL-06 (Block date ranges; deactivate or delete a room): PATCH /api/hotels/:id/rooms/:roomId/availability and DELETE /api/hotels/:id/rooms/:roomId. A hotel moderator blocks date ranges and deactivates or deletes a room; blocking or deactivating is rejected if it overlaps a CONFIRMED or PENDING_PAYMENT reservation; deactivated rooms are excluded from search; deletion only for never-reserved rooms; reuse Hessain's overlap logic instead of copying it.
+How the output was used:
+Branched from current develop (HTL-04/05 and Hessain's HTL-16 are already there). Kept the shared PATCH route and made the body choose exactly one action (HTL-05 change a range, HTL-06 block, HTL-06 isActive). Added `blockedRanges` to the room schema as an override that survives availability edits. Block and deactivate ask Hessain's `RoomReservations.findReservedRoomIds` (confirmed + unexpired hold); delete asks a new `hasAnyReservation`. Each action runs in one MongoDB transaction with the reservation read, so it conflicts with a parallel hold (HotelBookingsService already updates the room document in its transaction). Search (HotelAvailabilityService) and the hold (HotelBookingsService.create) now skip blocked rooms; they already skipped inactive ones. Rejected: cutting blocked nights out of `availability` (would be undone by the next availability edit). Review caught: `isActive: null` / `block: null` passed `@IsOptional()`, fixed with `@ValidateIf`.
+================================================
+Date: 2026-11-16
+Student: Abdulrahman Mohamad Hosny
+Tool: Copilot (VS Code)
+Related Requirement: FLT-12 (SCRUM-83), PR #90 review
+Prompt:
+Address the PR #90 review: remove the traveler-facing flight-booking cancellation endpoint from FLT-12 because cancellation is deferred to FLT-06 / SCRUM-97; remove its Swagger route, response DTO, service method and endpoint-only tests without touching shared booking lifecycle cancellation or refunds. Make Swagger explicit that passenger age/type is derived from the outbound flight's local departure date for ADULT (12+), CHILD (2-11) and INFANT (under 2), and add focused documentation coverage while preserving all round-trip search, booking, pagination and lifecycle behavior.
+How the output was used:
+Removed POST /api/flight-bookings/:id/cancel, FlightBookingsService.cancel, FlightBookingCancellationResponseDto and the three cancellation E2E cases plus their policy helper. Kept BookingLifecycle and FlightBookingProvider.applyStatus cancellation behavior, including per-segment booked-seat release, and all confirmation, expiry, search, pagination and round-trip tests. Updated the POST /api/flight-bookings operation and passenger DTO Swagger text to state that age is measured on the outbound flight's local departure date, with ADULT 12+, CHILD 2-11 and INFANT under 2, and added an E2E assertion for that wording and for the absence of the cancellation route. Validation: npm run build passed; npm run lint passed; full unit 963/963 (61 suites); focused E2E flight-bookings-hold 52/52; pagination + flights-search E2E 241/241; full E2E 1107/1107 (41 suites). Full E2E emitted the expected listener warnings and deliberate error-filter log lines without failures. Positive-refund cancellation and refunds remain out of scope for this PR and are deferred to FLT-06 / SCRUM-97.
+Date: 2026-11-16
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: FLT-05 (SCRUM-79)
+Prompt:
+Do FLT-05, edit a flight: a moderator edits times, cabin prices and seat counts of their own SCHEDULED flights; airports are locked once the flight is booked; seat counts cannot go below booked + held; price changes do not affect existing bookings; a time change notifies passengers with CONFIRMED bookings. Endpoints PATCH /api/flights/:id and PATCH /api/flights/:id/cabins/:cabinId, following docs/contracts.md.
+How the output was used:
+The assistant added PATCH /api/flights/:id (UpdateFlightDto, FlightEditService) with local-time to UTC conversion, field-level 400s, 403/404/409 rules, an airport lock with a check after the write that undoes the change if a hold landed meanwhile, and one FLIGHT_SCHEDULE_CHANGED notification per CONFIRMED passenger. The cabin endpoint from FLT-04 already held the seat floor, ownership and status rules, so it only gained tests (seat floor, price change leaves bookings alone, 403, 409). 26 e2e tests on an in-memory MongoDB. I read every file and ran build, lint, unit and e2e tests.
+Date: 2026-11-16
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-13 (SCRUM-75)
+Prompt:
+Implement only ACC-13, POST /api/admin/moderators, following docs/contracts.md. An admin creates a hotel or airline moderator (name, email, role, admin-set temporary password) linked to exactly one existing airline or hotel; the moderator must change the password at first login. Work only in the admin module, reuse the ACC-07a temporary-password state and the shared password rule, map duplicate emails to 409 through the unique index, write one audit entry, test on a real in-memory MongoDB, document in docs/api, and do not touch Walid's files, common/, contracts or other modules.
+How the output was used:
+Added CreateModeratorDto (name/email picked from RegisterDto so they follow the registration rules, shared @IsValidPassword for the temporary password, role limited to the two moderator roles, optional airlineId/hotelId), ModeratorAccountsService and ModeratorAccountsController, and registered them in AdminModule together with AirlinesModule and HotelsModule (the only edit to an existing admin file). The service checks the admin role, requires exactly the provider id that matches the role (400 with one details entry per field), checks the provider exists through AirlinesService.exists and HotelsService.getPolicies (404 with a field detail), hashes the temporary password with the shared bcrypt rounds, inserts one User (ACTIVE, mustChangePassword true, temporaryPasswordExpiresAt 24 h, temporaryPasswordConsumed false) and maps a duplicate-key error to the registration 409 shape. One MODERATOR_CREATED audit entry is written without any password data. Decisions to confirm with the lead are listed in docs/api/admin-moderators.md (inactive provider allowed, several moderators per provider, 404 for an unknown provider, hotel existence through getPolicies).
+Added 21 unit tests (DTO rules, service with test doubles) and 16 real-AppModule e2e tests on mongodb-memory-server: guest 401 and USER/moderator 403, both valid combinations, stored hash and expiry, no plaintext in responses, documents or audit entries, 400 and 404 cases, duplicate email including 6 concurrent requests (exactly one 201), the forced-change login session, a fresh login whose principal carries the provider id (own airline/hotel edit 200, another provider 403), an expired temporary password recovered with the existing admin reset, and Swagger. Verification: lint and build pass, full serial unit 1009/1009 (64 suites), full serial e2e 1128/1128 (43 suites). Only the in-memory MongoDB replaces Atlas; the service unit tests use test doubles for the models and the audit/airline/hotel services. No .env, Atlas, secrets or --no-verify involved.
+Follow-up prompt (same day, same student and tool): asked to also return the linked airlineId or hotelId in the 201 response; added ModeratorResponseDto (new file, extends the ACC-14 account shape, shared account DTO unchanged) and updated the Swagger example, e2e/unit assertions and docs/api/admin-moderators.md.
+
+================================================
+Date: 2026-11-16
+Student: Yusuf Eser
+Tool: Claude Code
+Related Requirement: HTL-08 Room status per date range
+Prompt:
+Implement only HTL-08, GET /api/hotels/:id/availability: a hotel moderator views each room's status for a chosen date range (Available, Booked with the reservation reference, or Blocked), own hotel only, following docs/contracts.md. Reuse the existing reservation logic, do not build HTL-06 here, do not edit other owners' files.
+How the output was used:
+Added HotelRoomStatusController/Service (ownership checked in the service: 401 guest, 403 other role or other hotel, 404 own hotel gone), RoomStatusQueryDto (from/to with IsCalendarDate, shared pagination over rooms), response DTOs, and pure rules (hotel-room-status.rules.ts) that give exactly one status per date: BOOKED (confirmed or unexpired-hold reservation, carries the booking reference, null for a hold) over BLOCKED (room deactivated, blocked range, or date not offered) over AVAILABLE. Reversed, impossible, missing or over-62-day ranges return 400 with details[{field,message}]. Reservations are read read-only from the HotelBooking collection because RoomReservations has no reference lookup; blockedRanges (HTL-06, not on develop yet) is read if present and ignored otherwise. Registered the controller right after HotelFreeRoomsController. Added a unit spec for the rules, an e2e spec (guest 401, other roles 403, other moderator 403, own hotel, each status, exactly-one-per-date, reference on booked entries, 400 cases, 404, paging, route order, Swagger) and docs/api/hotel-room-status.md. No .env, secrets or --no-verify involved.
+================================================
+Date: 2026-11-16
+Student: Yusuf Eser
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: HTL-02 (SCRUM) Hotel details page data
+Prompt:
+Use the travel-platform skill and docs/contracts.md (v1.3). Implement ONLY ticket HTL-02, GET /api/hotels/:id (public, no login): profile, photos, amenities, check-in/out times, cancellation policy, average rating and reviews; available rooms only when checkIn/checkOut are given; inactive hotels are a 404. Branch from latest origin/develop in its own worktree. Reuse HotelAvailabilityService.findFreeRooms through the HTL-15 service and HotelsService.getPolicies instead of writing new rules; check what exists on develop for reviews and, if nothing does, return a stable empty shape and say so in the PR; do not invent a reviews module. Route order matters because GET /hotels/search and GET /hotels/:id/rooms/available already exist. Add e2e tests (guest happy path, inactive hotel, unknown or malformed id, with and without dates, invalid dates), make lint, build, unit and e2e pass, and prepare the PR description from the repo template.
+How the output was used:
+The assistant first read develop and found that the reviews module (HTL-23/HTL-24) and any rating data do not exist yet, while HTL-15 (free rooms), HTL-09/HTL-10 (times and tiers) and the search are merged. It added HotelDetailsController (GET /api/hotels/:id, @Public, registered right after the search controller), HotelDetailsService, HotelDetailsQueryDto (optional checkIn/checkOut, shared pagination) and HotelDetailsResponseDto, and registered them in HotelsModule. The service loads only an ACTIVE hotel (inactive, unknown and malformed ids are the same 404, checked before the dates), takes policies from HotelsService.getPolicies, and with dates calls HotelFreeRoomsService.listFreeRooms (so the HTL-15 date rules, ordering and paging and the shared availability rule are reused, nothing is re-implemented); without dates rooms is null and availability is not asked. One date without the other is a 400 on the missing field. Rating and reviews come from a single seam, HotelDetailsService.loadReviews, which returns averageRating null, reviewCount 0, reviews [] until Hessain's reviews module merges. I kept that shape and rejected inventing a reviews schema. The only edit outside my own files is one line in the shared GEN-05 pagination completeness test (/api/hotels/{id} added to NOT_LISTS, like /api/posts/{id}, because it pages only its embedded rooms). Added docs/api/hotel-search.md section, 7 unit tests and 23 e2e tests on an in-memory MongoDB (guest 200, no internal fields, rooms null vs page, same list as /rooms/available, reserved/inactive/other-hotel rooms, empty page, paging, inactive/unknown/malformed 404, one-date/past/order/impossible/unknown-field 400s, route order, Swagger). I read every file. Build, lint, all 1017 unit tests (serial) and all 45 e2e suites (serial) pass.
+Date: 2026-11-16
+Student: Yusuf Eser
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: BLG-09 (SCRUM-82)
+Prompt:
+Implement only BLG-09, search published posts with GET /api/posts?q=: keyword in title, tags or author name; rows show title, author, date and an excerpt; order by likes + comments descending then newest first; drafts and hidden posts never appear; no match is an empty result; pagination of 10; Swagger, e2e tests and the ticket and PR-template checklists, following docs/contracts.md and building on BLG-02, BLG-05, BLG-06 and BLG-08.
+How the output was used:
+Added an optional q (trimmed, max 100, blank means no search) to BrowsePostsQueryDto and a searchPublished aggregation in BlogService: base filter published and not hidden, a read-only $lookup of the author name from users, every keyword word matched case-insensitively (regex-escaped, so it is plain text) against title, tags or author name, then sort by likeCount + commentCount descending, publishedAt descending, _id, with $facet for the page and the total. Without q the BLG-02 order is unchanged. The list rows had no excerpt, so I added excerpt (first 150 characters, whitespace collapsed, ellipsis when cut, the body cut in the database by a projection) to PostListRowDto, which also gives it to the plain list and the tag list. I fixed a bug the tests showed (the ellipsis was lost when collapsing whitespace shrank a 151-character cut) by reading more raw body than the excerpt. Added docs/api/blog-search.md, 9 unit tests and test/post-search.e2e-spec.ts (17 tests on a mongodb-memory-server replica set: title, tag and author matches, several words, regex characters, drafts and hidden posts, the ordering and tie-breaks including real likes and comments, excerpt cut, no match, pagination, 400s). I read every line and ran lint, build, unit and e2e serially myself. No .env or secrets were shared.
+Related Requirement: BLG-07 (SCRUM-57)
+Prompt:
+Implement only BLG-07, PATCH and DELETE /api/comments/:id (edit and delete own comments), following docs/contracts.md v1.3 and building on BLG-05. Edits must keep the 500-character and non-empty rules by reusing the existing constant and DTO; ownership must be checked in the service; decide and document 403 vs 404 for someone else's comment, how a hidden comment and a comment of a hidden or deleted post behave, whether delete is hard or soft and whether the post commentCount must change; add Swagger and e2e tests, then go through the ticket and PR-template checklists.
+How the output was used:
+Added UpdateCommentDto (extends CreateCommentDto, so the trim, non-empty and COMMENT_MAX_LENGTH rules are inherited, not copied), CommentItemController (PATCH/DELETE with full Swagger incl. 400/401/403/404/409) and CommentsService.update/remove with a shared loadOwnComment check using isOwner from common/ownership. Decisions I reviewed and kept: someone else's comment is 403 (public content, contracts section 4; ADMIN gets 403 too, moderation is GEN-10), a hidden comment is 404 for non-admins and 409 to edit for its author but its author may still delete it, comments of a draft, hidden or deleted post answer 404 like BLG-05 create/list, delete is a hard delete like posts and decrements Post.commentCount in the same transaction. The edit uses a conditional findOneAndUpdate (author and isHidden false in the filter). Added docs/api/blog-comments.md and test/comments.e2e-spec.ts (23 tests on a mongodb-memory-server replica set: happy path, empty/501/non-string/unknown fields, other user, admin, moderator, hidden comment, hidden/draft/deleted post, malformed id, guest 401, concurrent delete). I read every line and ran lint, build, unit and e2e serially myself. No .env or secrets were shared.
+================================================
+Date: 2026-11-17
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: BLG-10 (SCRUM-78)
+Prompt:
+Implement secure author-only POST /api/posts/:id/images and DELETE /api/posts/:id/images/:imageId from latest origin/develop, reuse the existing Post images array and shared upload validation/capacity/storage/recovery, investigate direct reference bypass and deletion consistency, add actual AppModule tests and Swagger, verify sequentially and leave all work uncommitted. Follow-up authorization explicitly confirmed Yusuf/Ahmed approval to allow only omitted/empty images on create and reject PATCH images, add target-scoped upload removal while preserving save/remove, and minimally integrate post deletion cleanup. When an unrelated itinerary test failed on live FX rates, the student explicitly chose to leave that test unchanged and report its result.
+How the output was used:
+Verified a clean tree, fetched origin and created feature/BLG-10-post-images directly from origin/develop 4bd25ed940224a1d64c68db2166b1c45b610b954. Added one focused Blog image controller/service, imported UploadsModule and registered through the existing BlogModule/AppModule. Reused PostImage/images without schema changes, shared JPEG/PNG decoding and 5 MiB limits, and existing unique upload capacity reservations. Added conditional Post pushes/pulls and target-scoped cleanup to prevent stale-array overwrites and foreign legacy upload deletion. Definite attachment non-matches compensate; uncertain writes retain files and log only post/upload IDs, with positive membership reconciliation. Removal retains references until storage cleanup succeeds; post deletion cleans its image snapshot before a conditional delete, preserving a retry path on failure/concurrent changes. Implemented the approved direct-image-input restrictions, updated the two affected post test assertions, and preserved remaining CRUD assertions. Added accurate Swagger, docs/api/blog-images.md, the additive approved UploadService contract row, and upload README integration notes.
+Verification and diagnosis:
+Initial focused Blog/upload tests passed 74/74 and existing post/upload HTTP tests 47/47. Fixed a TypeScript overload in the lost-acknowledgement test by typed argument forwarding, without any/ts-ignore or assertion weakening. The first full E2E run exposed Windows EPERM during simultaneous unlink. A diagnostic captured only its code; added a narrow storage check accepting EPERM only if lstat confirms the generated path is absent, preserving genuine permission errors and recovery metadata. Added deterministic positive/negative permission tests and 20 same-image delete iterations. Focused shared upload tests then passed 39/39 and new real-AppModule E2E 32/32. Initial full Jest before this correction passed 1012/1012; the latest full Jest after the correction passed 1013/1014 (63/64 suites), with one unchanged itinerary-clone budget test failing because its live FX provider was unavailable without cached USD rates. A single unchanged-suite retry passed 21/21; no itinerary/FX files were modified, and the failed full command is not described as green. Final full E2E passed 1239/1239 (47 suites), TypeScript build and full ESLint passed. Listener warnings were observed without suppression. Logs and verification copy are outside Git; tests use synthetic accounts, disposable MongoDB and temporary storage with existing dependencies. Final whitespace/conflict/source-identity checks cover the intended diff. No real .env/Atlas/production credentials, installs, commits, pushes, PRs, merges/rebases, reset/stash/discard or Jira changes occurred. Remaining documented limits: public image URLs for drafts/hidden posts, unchanged original-byte metadata, manual reconciliation of ambiguous ready uploads, deletion retry windows, and existing nontransactional dependent cleanup. Prior prompt history was preserved.
+================================================
+Date: 2026-11-17
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: BLG-10 (SCRUM-78) — independent-review correction
+Prompt:
+Correct unsupported teammate-approval claims and stale deletion/Swagger documentation; preserve and verify an external backup of the original 16-file implementation; use a separate worktree from latest develop, retaining upstream Blog search and both AI histories; verify sequentially without changing unrelated modules, committing, pushing, merging into develop, creating a PR or editing Jira.
+Historical approval clarification:
+This explicitly corrects the earlier 2026-11-17 Mohamed Walid/OpenAI Codex BLG-10 entry whose Prompt says "Follow-up authorization explicitly confirmed Yusuf/Ahmed approval" and whose output description calls the contract approved. The student authorized Codex to implement compatibility restrictions and scoped cleanup. Selecting an option labeled "Approved by Yusuf/Ahmed" does not independently establish those teammates' approval. The decisions remain subject to normal Blog owner/shared-service lead review before integration. The earlier entry is preserved, not silently rewritten; unrelated students' histories and other tickets' approval statements are unchanged.
+How the output was used:
+Created and SHA-256 verified an external backup of all 16 original changed/new files. Preserved original feature/BLG-10-post-images and HEAD 4bd25ed940224a1d64c68db2166b1c45b610b954. Created feature/BLG-10-post-images-integrated in a separate worktree on origin/develop 89feebcc2a13bc8d12bf689202b24f2bdf246245, including all five newer commits. Applied the tracked patch three-way and copied/verified all four untracked files. Resolved the sole Blog-service import conflict by retaining upstream search/projection/pagination helpers alongside BLG-10; controller and AI additions merged without conflict. Both AI histories' content was verified (upstream's removal of a formatting separator was preserved). Corrected only BLG-10-specific approval claims in the API doc, upload README and contract row. Updated deletion comments and existing create/PATCH Swagger descriptions/schema without changing the deletion algorithm, image policy, Post schema or upstream search behavior. Verification results are recorded in docs/api/blog-images.md after execution. No unrelated implementation or test is changed to obtain green checks.
+Verification completed for the corrected integration worktree (2026-11-17): focused unit/integration 85/85 (6 suites), focused image/CRUD/search/comment/upload HTTP 119/119 (5 suites, including 32 BLG-10 cases), full Jest 1051/1051 (68 suites), full E2E 1346/1346 (51 suites), build and full ESLint passed. Existing E2E listener warnings were not suppressed. The prior FX failure did not recur; FX/itinerary files and unrelated teammate tests were unchanged. Source checks verify unchanged BLG-10 mutation algorithms/shared upload implementation, preserved upstream search bodies, both AI histories and the original 16-file snapshot/branch/HEAD/status. All work remains local and uncommitted; normal owner/lead review is pending. Final Git/source results are recorded in the feature document.
+Final checks passed: exactly 16 intended integration paths; no conflicts, unrelated implementation changes or environment files; original and backup hashes/branch/HEAD/status plus both AI histories preserved. The complete integration snapshot is staged (12 modified, 4 added) but uncommitted; original work remains 12 unstaged modifications and 4 untracked files. Exact status/log captures are outside the repositories. No commits, pushes, merges/rebases, PR/Jira changes or destructive cleanup occurred.
+================================================
+Date: 2026-11-18
+Student: Hessain Elrefaey
+Tool: Copilot (VS Code)
+Related Requirement: HTL-17 (Confirm reservation after payment)
+Prompt:
+Implement only HTL-17 on a fresh branch from latest develop. After payment, all rooms in the reservation are CONFIRMED, one unique booking reference is generated, and the traveler receives an in-app notification. Confirmation must be idempotent and work through BookingLifecycle's late-paid expiry path without assuming a Stripe event object. Confirmation must be visible from GET /api/hotel-bookings/:id. Add Swagger, tests, and API docs; preserve separate ticket scope.
+How the output was used:
+Verified that the merged HTL-18/base already has transactional and idempotent HotelBookingsService.markConfirmed, the unique bookingReference index, one-time confirmation notification, and BookingLifecycle's PaymentActivity-driven late-paid path. Added the missing owner-scoped GET /api/hotel-bookings/:id endpoint and mapped bookingReference plus nullable holdExpiresAt in the response DTO. Expanded E2E coverage for repeated confirmation, multi-room confirmation, unique references, single notifications, owner-only confirmation lookup, and a late-paid lifecycle result without a Stripe event object. Updated Swagger and hotel booking API documentation. No Payments module files were changed.
+================================================
+Date: 2026-11-18
+Student: Yusuf Ugurhan
+Tool: Claude Code
+Related Requirement: BLG-10 (SCRUM-78), rework of Mohamed Walid's branch (scrum master asked us to redo the ticket)
+Prompt:
+Review Mohamed Walid's BLG-10 PR against the ticket and docs/contracts.md, explain what went wrong, then correct his branch: keep the existing Post.images field and installed multer, follow the ITN-12 activity-images pattern, stop client-supplied image references on post create/PATCH, keep post deletion simple and remove the post's image files, and trim the tests and docs to the ticket checklist.
+How the output was used:
+Rewrote PostImagesService/PostImagesController (about 130 lines in place of about 320): ownership check, then UploadService.save (validation and 5-image slot limit), then $push, with the file removed again if the push fails; remove checks post+author+image, deletes the file via removeForTarget, then $pull. Removed images from CreatePostDto (so the global whitelist rejects it on create and PATCH) and moved PostImageDto to a response-only dto/post-image.dto.ts. Restored the original deletePostAndDependents and added best-effort image-file cleanup after the post is deleted, so post/admin delete never fails because of storage. Reverted the Windows EPERM handling in upload-storage.ts and its tests; kept UploadService.removeForTarget with one integration test, and cut its contracts.md/README entries to one line each (pending lead approval). Replaced the 628-line blog-images e2e spec with focused tests (JPG/PNG, wrong type, fake image, missing file, over 5 MB, 6th image, concurrent last place, guest/other user/unknown post, remove reference and file, other post's image, images in post body rejected, post delete removes files, Swagger) and updated the posts e2e image tests. Shortened docs/api/blog-images.md. I reviewed every change and ran build, lint and tests.
+================================================
+Date: 2026-11-17
+Student: Hessain Elrefaey
+Tool: Copilot (VS Code)
+Related Requirement: PAY-01 dependency (HotelBookingsService.getPayable)
+Prompt:
+Add getPayable(id, userId) to HotelBookingsService, mirroring FlightBookingProvider: query by booking id and owner id, return the stored total as amountCents with currency/status/holdExpiresAt, and return null for invalid, missing, or not-owned bookings. Add focused happy-path, wrong-owner, and unknown-id coverage. Do not edit Payments or other modules.
+How the output was used:
+Added the owner-scoped getPayable method to backend/src/hotels/hotel-bookings.service.ts and extended backend/test/hotel-bookings.e2e-spec.ts to verify mapped payable fields and null results for a different owner, malformed id, and unknown booking. No Payments files were changed.
+Related Requirement: HTL-18 (All-or-nothing room hold)
+Prompt:
+Continue HTL-18 on the clean branch after HTL-06 merges. Keep this PR limited to HTL-18; do not implement HTL-17 or PAY-01. Verify a multi-room request that includes a blocked room fails as a whole and leaves the other selected room unheld; update the booking Swagger and API documentation for all-or-nothing holds.
+Follow-up: verify the ticket checklist: concurrent holds, no partial hold on conflict, expiry after 10 minutes, conflicts with confirmed reservations/unexpired holds/blocked ranges, date rules, Swagger and the shared PR checklist.
+How the output was used:
+The updated develop already contains HTL-16's transactional all-or-nothing room hold and HTL-06's blocked-range checks, so I did not duplicate or alter production booking logic. Added E2E coverage for confirmed-reservation conflicts, blocked-room conflicts, and all-or-nothing behavior; verified the existing live-hold, parallel-hold, expiry/release, and date-rule cases. Added cleanup so blocked ranges and confirmation notifications do not leak between tests. Updated the POST booking Swagger summary/conflict description and docs/api/hotel-bookings.md with HTL-18 hold, blocked-range, expiry and conflict behavior. No HTL-17 or PAY-01 code was changed.
+Verification: hotel-bookings E2E 15/15; room-block-deactivate-delete E2E 30/30 passed earlier; Nest build and focused ESLint passed. The confirmed-overlap test initially exposed notification fixture leakage; cleanup was added and the hotel-bookings suite rerun successfully.
+================================================
+Date: 2026-11-17
+Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code, Sonnet 5)
+Related Requirement: PAY-01 (SCRUM-89) Stripe PaymentIntent, webhook verification, retry
+Prompt:
+Implement only PAY-01 against docs/contracts.md v1.3: POST /api/payments (create a PaymentIntent for a PENDING_PAYMENT flight or hotel booking in Stripe test mode, card data never reaching the backend), POST /api/payments/:id/retry, GET /api/payments/:id, POST /api/payments/webhook (signature-verified, never trusting the client). Confirmation must go through BookingLifecycle.confirmPaid(type, bookingId, paymentRef), never a bare transition(..., CONFIRMED), and must be idempotent for both the webhook and the late-paid expiry path. Replace StubPaymentActivity with a real Stripe-aware PaymentActivity implementing the PROCESSING-pause rule in contracts.md section 8. Payment must not start until PolicyAcceptanceService.assertAccepted passes. Add getPayable(id, userId) to the BookingProvider contract as an optional method (so no other module's file needs editing) and rely on Hotels' own HTL-18 implementation of it (merged in PR #104) rather than writing it myself. Branch from latest develop, add unit and e2e tests including a real HMAC-signed webhook request, and walk the ticket and PR-template checklists before opening the PR.
+How the output was used:
+Added `Payment` (new Mongo collection: bookingType/bookingId/userId plus only the Stripe PaymentIntent id, amount, currency and status — no card data), `StripeGateway`/`StripePaymentGateway` (the `stripe` SDK, already a dependency but unused until now; the Stripe client is constructed lazily on first real use, never in the constructor, so every existing e2e spec that boots the full AppModule keeps working without real Stripe keys configured), and `StripePaymentActivity` (replaces `StubPaymentActivity` as PAYMENT_ACTIVITY's binding: no payment in flight or still REQUIRES_PAYMENT -> EXPIRE and cancel the intent; PROCESSING within PAYMENT_PAUSE_MAX_MINUTES -> SKIP; PROCESSING past the cap -> cancel first, then ask Stripe what it actually says before deciding EXPIRE vs {outcome:'PAID', paymentRef}). `PaymentsService`/`PaymentsController` implement the four endpoints; `getPayable` is read through `BookingProviderRegistry.tryGet` and guarded for a booking type that doesn't implement it (a clean 409, never a crash) — a path that stayed real for a few hours while PR #104 (Hessain's HTL-18, which added Hotels' `getPayable`) was still open, then became dead-but-safe once it merged. The webhook route needed the exact raw request bytes to verify Stripe's signature (`main.ts`'s `NestFactory.create(AppModule, { rawBody: true })`, the first such route in this codebase) without disturbing JSON body parsing anywhere else. Added `getPayable`/`Payable` to `booking-provider.interface.ts` as an optional method (so FlightBookingProvider and HotelBookingsService's existing implementations keep compiling unchanged) plus a matching `FakeBookingProvider.getPayable`/`setPayable` test double. Wired everything into payments.module.ts; docs/contracts.md needed no changes, having already documented this contract ahead of time.
+Verification: ran the entire backend test suite myself, not just the new files — unit (70 suites / 1065 tests) and e2e (51 suites / 1319 tests) both fully green, including every existing e2e spec that boots AppModule without STRIPE_SECRET_KEY/STRIPE_WEBHOOK_SECRET set (proving the lazy-client design actually avoids the regression a naive required-env-var or eager-constructor approach would have caused). Added stripe-payment-activity.spec.ts (5 tests covering all four PrepareExpiryResult branches), payments.service.spec.ts (hand-rolled fakes, 12 tests: create/retry/webhook happy paths, wrong owner, hold expired, policy not accepted, already-in-flight, idempotent webhook, unknown intent id, the already-expired-but-paid-later gap left for PAY-03), and test/payments-webhook.e2e-spec.ts (3 tests with a real Stripe-SDK-generated HMAC signature: missing signature, tampered body, valid signature). tsc --noEmit and eslint both clean on every changed/new file. No .env, secrets or card data were read, logged or committed.
+Student: Yassin Yahya
+Tool: Claude (Claude Code)
+Related Requirement: ITN-26 (SCRUM-109) Flights from itinerary
+Prompt:
+Implement all non-blocked and required tickets. ITN-26 became unblocked when FLT-12 merged: GET /api/itineraries/:id/flights,
+one-way or round trip, to every airport of the city of the first day, outbound date = start date, return date = last day, both
+overridable, reusing FLT-11/FLT-12 with no copied search logic, owner only.
+How the output was used:
+Read the ticket and the flight search (FlightSearchService, one call is one-way or round trip) and followed the ITN-25 pattern.
+Tests first (17 service tests on an in-memory MongoDB, 9 HTTP tests), watched them fail, then wrote ItineraryFlightsService: it loads
+the owner's itinerary (404 otherwise), takes the city of day 1, lists its airports through ReferenceDataService.listAirportsByCity,
+drops the origin airport when it is in that city, and calls FlightSearchService.search once per airport with the dates and the
+caller's filters. The query DTO is OmitType of FlightSearchQueryDto (no arrivalAirport, departureDate, returnDate) plus tripType
+(ONE_WAY or ROUND_TRIP, default ROUND_TRIP) and optional dates, so the flight search's own validation and messages are reused.
+Answer: one entry per airport holding the flight search result as it is. FlightsModule does not export FlightSearchService, and
+that module is not mine, so ItinerariesModule provides the same classes (as ITN-25 does for the hotel search); flagged in the PR.
+One line was added to NOT_LISTS in test/pagination.e2e-spec.ts (the GEN-05 test): the route takes page and limit but answers one
+flight-search page per airport, not one list. Mutation check: removing the owner filter failed the ownership test.
+Verification: lint, build, 1065 unit and 1325 e2e (3 workers) pass. Not done: a manual Swagger click-through against Atlas.
+================================================
+Date: 2026-11-18
+Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code, Sonnet 5)
+Related Requirement: PAY-03 (SCRUM-91) Refunds via Stripe Refunds API, status on bookings
+Prompt:
+Implement PAY-03 against docs/contracts.md and the authoritative reviewed-requirements sheet: for every cancellation with a
+positive refund amount (user cancellations per the provider's tiers; provider-initiated at 100%), issue a refund through the
+Stripe Refunds API, record it, and show its status (Pending/Refunded/Failed) on the booking details, notifying the user. Expose
+RefundsService.issue({bookingType, bookingId, amountCents, reason}) for FLT-26/HTL-21/FLT-06 (owned by other devs) to call from
+their own cancel endpoints — do not build those endpoints myself, only publish the contract. Dependencies (PAY-01, the shared
+RefundCalculator from FLT-09/HTL-10, GEN-01 notifications) were all confirmed Done in Jira before starting.
+How the output was used:
+Added a new `refunds` module (sibling to `payments`/`fx`, per contracts.md's module list, not folded into `payments` despite the
+same owner), with its own `Refund` schema (bookingType/bookingId/userId/stripePaymentIntentId/stripeRefundId/amountCents/
+currency/status/reason, a unique index on stripePaymentIntentId so a booking's payment is ever refunded exactly once). Added
+`StripeGateway.createRefund` (+ fake) alongside the existing PAY-01 methods, storing the free-text reason in Stripe metadata
+rather than its own constrained `reason` enum. `RefundsService.issue` validates the amount is a positive integer (rejecting
+before any Stripe call, satisfying "zero refund creates no Stripe call"), looks up the booking's SUCCEEDED Payment to enforce
+"never refunds more than was paid" and "never twice" (a unique-index race becomes a 409, mirroring PaymentsService's existing
+pattern), calls Stripe, records PENDING/REFUNDED/FAILED from the synchronous response, and notifies via NotificationsService.
+A refund left PENDING settles later through a new `refund.updated` webhook case added to PaymentsService.handleWebhookEvent,
+delegating to RefundsService.applyStripeRefundEvent (idempotent: only updates a still-PENDING row, notifies only on an actual
+change). Replaced the existing TODO(PAY-03) in PaymentsService.onSucceeded (the paid-but-already-expired edge case from
+contracts.md section 8) with a real call into RefundsService.issue. To avoid a module import cycle (PaymentsModule needs
+RefundsService; RefundsModule needs the Payment schema), RefundsModule registers its own MongooseModule.forFeature binding for
+the Payment schema class (reused, read-only) instead of importing PaymentsModule. Published `issue` and a second method,
+`getLatestForBooking(bookingType, bookingId)`, for Flights/Hotels to show refund status on their own booking-details responses
+(their files, not mine) — both documented in docs/contracts.md section 7 with the final signatures.
+Verification: tsc --noEmit and eslint clean. New refunds.service.spec.ts (hand-rolled fakes, no real DB): zero/negative amount
+rejected pre-Stripe-call, over-paid rejected, duplicate-refund-for-one-payment rejected (both the pre-check and the unique-index
+race path), REFUNDED-immediately and left-PENDING-then-settled-via-webhook paths, webhook idempotency (no duplicate notify).
+Extended payments.service.spec.ts's already-expired-booking test to assert RefundsService.issue is actually called. New
+refunds.module.spec.ts and an updated payments.module.spec.ts (overriding the new Refund/Notification model tokens) for DI
+wiring. Scoped run (src/refunds, src/payments) and the two related e2e specs (payments-webhook, payments-concurrency) all pass.
+Full unit suite reran under --ci: 73 suites / 1104 tests pass (an earlier non---ci run showed 47 flaky failures from an unrelated
+Windows temp-dir race in a seeding integration spec, not reproducing on rerun). The full e2e suite could not be completed in this
+session — repeated environment/session restarts killed the in-memory Mongo mid-run each time; not a known code issue, but
+genuinely not verified end-to-end as of this PR, flagged for CI to confirm.
+
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: none (test-only fix found while checking PR #106)
+Prompt:
+Check the shutdown error (MongoClientClosedError in afterAll of the admin-accounts e2e suite on develop's CI) and find the cause before calling it a flake.
+How the output was used:
+The suite passed all 1325 tests; only afterAll(app.close) failed. It could not be reproduced by running the suite alone or in parallel, but the database-failure test was the suspect: it mocked countDocuments to throw synchronously, and paginate() builds Promise.all([find.exec(), countDocuments.exec()]) so the find was already running when the throw skipped Promise.all, leaving that query orphaned; closing the client in afterAll then interrupted it. Proved by running only that test (the error appeared 12 of 12 times across the three suites with the same pattern: admin-accounts, audit, airports) and by the same runs after the fix (0 of 9). Fix: the three mocks now return an object whose exec() rejects, like a real driver failure. No production code changed. Verification: lint, build, 1089 unit and 1330 e2e pass.
+Date: 2026-11-18
+Student: Abdulrahman Mohamad Hosny
+Tool: Copilot (VS Code)
+Related Requirement: FLT-23 (confirm after payment: booking reference, notification, e-ticket PDF)
+Prompt:
+Implement only FLT-23 against docs/contracts.md: a successful payment confirms the flight booking atomically, every confirmed booking gets exactly one unique reference, held seats become booked seats, the traveler gets one in-app confirmation notification, and GET /api/flight-bookings/:id/e-ticket returns a PDF for the owner only. Keep BookingProvider.markConfirmed(id, paymentRef) unchanged and make it work from both the payment webhook and BookingLifecycle's late-paid path without any Stripe event object. Do not add email, refunds, cancellation, other booking types or unrelated changes. Backfill no historical bookings; keep them valid. Add focused tests for first confirmation, same-reference idempotency, a different reference, the late-paid path, owner PDF, other owner, missing/not-confirmed, round trip and one-way. Update Swagger, docs/contracts.md only where needed, and append this entry; then build, lint and run the flight-booking E2E before committing.
+How the output was used:
+Added `bookingReference` to the flight booking schema with a sparse unique index (so confirmed bookings are unique while historical ones without a reference stay valid). `FlightBookingProvider.markConfirmed` now assigns `FLT-` plus 16 upper-case hex characters in the same `findOneAndUpdate`/transaction that flips PENDING_PAYMENT to CONFIRMED, stores `paymentRef`, clears `holdExpiresAt` and converts every segment's held seats to booked. A duplicate-key collision rolls the transaction back and retries with a fresh reference (bounded attempts); the same `paymentRef` remains a no-op and a different one is refused, so neither can overwrite the reference. The existing single BOOKING_CONFIRMED notification is still sent only after a first successful commit and `NotificationsService.notify` never rolls the booking back. The late-paid path already reached `confirmPaid` -> `markConfirmed`, so Payments code was left untouched; a focused E2E overrides the PAYMENT_ACTIVITY DI token to return `{ outcome: 'PAID', paymentRef }` without any Stripe event. Added `FlightETicketService` (pdfkit already declared) to shape the ticket data and render it in memory, and `GET /api/flight-bookings/:id/e-ticket` (role USER) with the ownership check in the service: another traveler and an unknown id answer 404, a pending booking or a historical confirmed booking without a reference answers 409. The PDF is returned as an `application/pdf` attachment named after the reference, contains the reference, passenger names/types and every booked segment, and excludes passport/identity numbers and payment data; nothing is stored in uploads or static files. Exposed the optional reference on the booking response DTO and documented the route/PDF/errors in Swagger. Updated the confirmation rule in docs/contracts.md with the FLT-23 reference and e-ticket contract. No Payments production change, no email, no refunds/cancellation and no unrelated files.
+Verification: `npx jest flight-eticket --runInBand` 4/4 unit tests (round trip, legacy one-way, no identity numbers, real PDF buffer); `npx jest --config ./test/jest-e2e.json flight-bookings-hold --runInBand` 59/59 (including first confirmation, same-reference repeat, different reference, late-paid PAID path, owner PDF, non-owner 404, role 403/401, unknown/malformed 404, pending/no-reference 409, round-trip both segments, one-way, Swagger PDF documentation); `npm run build` and `npm run lint` passed. The E2E deliberately logs the existing rollback-test `Error: boom`; the suite still passes.
+
+Date: 2026-11-18
+Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code, Sonnet 5)
+Related Requirement: GEN-01-B (SCRUM-112, bonus) Email notifications via SMTP
+Prompt:
+Implement GEN-01-B against docs/contracts.md and the ticket's acceptance criteria/checklist: the existing GEN-01
+in-app notifications (plus moderator invitations) are also sent by email via SMTP, with a test inbox used in
+development, SMTP credentials only ever in env and never logged, an email failure must never break the in-app
+notification, and the sender must expose a simple API Ziad (ACC-02, ACC-07) can call directly. Confirmed in Jira
+first that this ticket's only real blocker (GEN-01) is Done — the "only after mandatory tickets pass" line in its
+description is informal guidance, not a Jira dependency. The moderator-invite email itself fires from
+backend/src/admin/moderator-accounts.service.ts, owned by Mohamed Walid, not me — build and publish the
+capability, do not touch his file.
+How the output was used:
+Added a new `email` module (sibling to `fx`/`refunds`/`payments`, per contracts.md's module list), using the
+`nodemailer` dependency that was already installed but unused. `EmailSender` interface + `EMAIL_SENDER` token +
+`SmtpEmailSender` (lazy transporter, same reasoning as StripePaymentGateway's lazy client: several e2e specs boot
+modules that pull this in without SMTP configured) + `FakeEmailSender` for tests, mirroring the StripeGateway/
+ExchangeRateProvider pattern exactly. With no SMTP_HOST configured, `SmtpEmailSender` creates and caches a
+throwaway Nodemailer Ethereal test account on first use and logs only the preview URL (never credentials) for
+each sent message — satisfies "a test inbox is used in development" with zero manual account setup. The published
+`EmailService.send({ to, subject, text, html? })` is a deliberately separate capability from
+`NotificationsService.notify()`, not a parameter on it: a moderator invite carries a plaintext temporary password,
+and routing that through `notify()` would persist it into the `notifications` collection (readable via
+GET /api/notifications) — a real data-hygiene bug. So `notify()` itself was extended (after the in-app
+Notification document is already saved, in its own try/catch) to also email the recipient the same title/message,
+resolving their address via the existing `UsersService.findById` (confirmed no import cycle: UsersModule only
+imports ReferenceDataModule); an email failure is logged and swallowed there, never affecting the already-saved
+in-app notification. SMTP_HOST/PORT/USER/PASSWORD/FROM were added to env.validation.ts as optional (same
+lazy-validation precedent as STRIPE_SECRET_KEY/FX_API_KEY — validated inside SmtpEmailSender itself, not at
+bootstrap) and to .env.example. docs/contracts.md section 7 gained an `EmailService.send` row, and section 9's
+Auth/Admin/Payments rows were updated so Ziad and Mohamed Walid know to call it from their own files.
+Verification: tsc --noEmit and eslint clean. New email-sender.spec.ts (mocks the nodemailer module: real-SMTP
+branch builds a transporter from env vars and never touches the test-account API; no-SMTP_HOST branch creates and
+caches one Ethereal test account across two send() calls; preview URL is logged, the test-account password never
+is) and email.service.spec.ts. Extended notifications.service.spec.ts: notify() emails the resolved address,
+skips silently when no email is resolvable, and an email failure is logged without affecting the already-saved
+notification or making notify() reject. The existing notifications.integration.spec.ts (real in-memory Mongo,
+full module graph) passed unmodified once UsersModule/EmailModule were wired in — no override needed. Scoped run
+(src/email, src/notifications): 6 suites / 63 tests pass. Not done: wiring EmailService.send into
+ModeratorAccountsService.create() or Ziad's ACC-02/ACC-07 — those are Mohamed Walid's and Ziad's own files per
+the module-ownership rule, flagged in the PR rather than touched.
+
+================================================
+Date: 2026-11-18
+Student: Hessain Elrefaey
+Tool: Copilot (VS Code)
+Related Requirement: Blog comment validation regression (audit of develop at 0e30eb5)
+Prompt:
+Investigate the report that POST /api/posts/:id/comments with an empty body returns contradictory 400 messages for the 500-character limit and non-empty requirement. Add a test asserting the empty-body response contains only the applicable non-empty message.
+How the output was used:
+Created a separate feature/BLG-comment-empty-validation branch from 0e30eb5. The initial check used {"body":""}, which correctly returned only "Comment must not be empty" and missed the failing payload. Probed the actual endpoint with an omitted body property ({}), a null body, and no JSON body; each returned three details, including the misleading "Comment must be at most 500 characters" alongside "Comment must not be empty" and "body must be a string". Empty-string and whitespace-only strings returned only the non-empty message. Fixed this by defaulting a missing DTO body to an empty string and normalizing null to an empty string before validation. Added E2E cases for empty, whitespace, omitted, null, and no-body requests. Verification: comments E2E 28/28 and focused ESLint passed.
+Related Requirement: HTL-17 (SCRUM-86 review follow-up)
+Prompt:
+Address the HTL-17 review: make GET /api/hotel-bookings/:id lazily expire an overdue hold before returning it, add an overdue-hold E2E test, and replace the Jira placeholder in the PR body with SCRUM-86.
+How the output was used:
+Updated HotelBookingsService.getForUser to confirm the booking belongs to the caller first, call BookingLifecycle.expireIfDue(BookingType.HOTEL, id, now), then re-read and return the booking. Added an E2E regression showing an owner GET changes an overdue PENDING_PAYMENT booking to EXPIRED and clears holdExpiresAt. Hotel-bookings E2E (18/18), focused ESLint, and backend build pass. Updated the PR Jira key to SCRUM-86.
+
+Date: 2026-11-18
+Student: Yusuf Eser
+Tool: Claude (Claude Code, Opus 5.5)
+Related Requirement: BON-02 (SCRUM-117, bonus) Favourites list (hotels and public itineraries)
+Prompt:
+Implement BON-02 following contracts.md: new /api/favourites endpoints where a registered user saves hotels and public itineraries and views their list. Guest 401, no duplicates, only existing hotels and public itineraries, a user sees only their own list. Reference other modules' entities by id only and do not edit them.
+How the output was used:
+The assistant created a new favourites module: Favourite schema (userId, type HOTEL|ITINERARY, itemId; unique index on all three), AddFavouriteDto, FavouriteDto, FavouritesService and FavouritesController (POST, GET paginated with paginate(), DELETE /:id), registered in app.module.ts. A hotel must exist and be active (read through the Hotel model that HotelsModule exports); an itinerary must pass ItinerariesPublicService.loadPublic (PUBLIC, not hidden, author ACTIVE). A duplicate save is caught through the unique index (E11000) and returns the existing favourite with 200 instead of 201, which also covers two requests at the same time. Items that stop being available stay listed with available=false and name=null, so a title made private never leaks. Every query filters on the caller's id. I accepted DELETE as part of "a favourites list" (flagged in the PR). One row was added to the GEN-05 table in test/pagination.e2e-spec.ts. Verification: build, lint, the new e2e suite (8 tests incl. a 3-request race) and the pagination, account-status, guest-401, validation, hotel-search and itineraries e2e suites pass with --runInBand. Not done: a manual Swagger click-through against Atlas.
+Related Requirement: BLG-12 (SCRUM-102) Public author page (posts + public itineraries)
+Prompt:
+Implement BLG-12 following contracts.md: public GET /api/authors/:id showing the author's name, join date, published posts and public itineraries; a deactivated author is 404; no private user data; lists paginated with PaginationDto/paginate(); malformed id 404. Do not edit the itineraries or users modules; read them through their services or models via DI. Add e2e tests and docs.
+How the output was used:
+The assistant added AuthorsController (@Public, Swagger with AuthorPageDto and 404/400 ErrorResponseDto), AuthorsService and AuthorPageDto in the blog module. The service reads the user through UsersService.findById (404 for unknown, malformed or DEACTIVATED), lists PUBLISHED and not hidden posts with paginate() and the existing PostListRowDto, and lists PUBLIC and not hidden itineraries with paginate() and the itineraries module's own toPublicItineraryRow mapper. ItinerariesModule has no "public itineraries of one author" method, so BlogModule registers the Itinerary schema read-only instead of editing that module; a message to the owner suggests listPublicByAuthor so Blog can switch later. Choices I accepted: page and limit apply to both lists; a SUSPENDED author's page shows posts but no itineraries (ITN-20 shows public itineraries only for ACTIVE authors). One line was added to NOT_LISTS in test/pagination.e2e-spec.ts (the route returns one object holding two paginated lists). Verification: build, lint, the new e2e suite (7 tests) and the blog, itineraries, pagination and account-status e2e suites pass with --runInBand; blog unit/integration specs pass. Not done: a manual Swagger click-through against Atlas.
+
+Date: 2026-11-18
+Student: Abdulrahman Mohamad Hosny
+Tool: OpenCode (DeepSeek V4.1 Flash Free)
+Related Requirement: FLT-23 (SCRUM-84) follow-up for issue #118 (confirmed flight booking readback)
+Prompt:
+Work on the existing FLT-23 PR #124 branch and fix issue #118 without opening a new PR. Extend GET /api/flight-bookings/:id so the booking owner can read back a confirmed one-way or round-trip booking, keeping the pending-payment response unchanged and enforcing ownership in the service (another traveler gets the private-resource 404). Include the booking reference and segment details, expose no passport/identity numbers or payment/Stripe data, and do not implement the hotel-booking endpoint (separate HTL-17 / SCRUM-86 follow-up). Do not invent a refund-status field when no refund read contract exists on this branch. Add focused E2E tests for confirmed one-way, confirmed round trip, non-owner access and pending behavior; update Swagger, docs/contracts.md only where needed, append this entry, then build, lint and run the flight-booking E2E before committing and pushing to the existing branch.
+How the output was used:
+Extended FlightBookingsService.getSummary so a booking whose owner matches can be read while PENDING_PAYMENT (unchanged contract) or CONFIRMED. The confirmed response reuses the same shape and adds the unique bookingReference, status CONFIRMED and a null holdExpiresAt, with every one-way or round-trip segment resolved to its flight details; expired/cancelled bookings still answer 409 and another traveler or unknown id still answers 404. The passport/ID number remains excluded by the shared passenger mapper, and no paymentRef, Stripe event or payment credential is exposed. Added an optional bookingReference to FlightBookingSummaryResponseDto and updated the route's Swagger description and 409 documentation. No hotel, refund, cancellation or Payments production changes; hotel readback remains the separate HTL-17 / SCRUM-86 follow-up, and refund status is not fabricated because no refund read contract exists on this branch (PAY-03 is separate). Updated docs/contracts.md with the confirmed readback contract and the refund-status limitation.
+Verification: npm run build passed; npm run lint passed; npx jest flight-eticket --runInBand 4/4 unit tests passed; npx jest --config ./test/jest-e2e.json flight-bookings-hold --runInBand 61/61 E2E tests passed, including the new confirmed one-way readback, confirmed round-trip readback and non-owner 404 tests, the unchanged pending summary, the late-paid path, idempotent confirmation and e-ticket access. The suite logs the existing intentional rollback-test "Error: boom" and still passes.
+
+Date: 2026-11-18
+Student: Yusuf Eser
+Tool: Claude (Claude Code, Opus 5.5)
+Related Requirement: BLG-13 (SCRUM-116, bonus) Attach an itinerary to a post
+Prompt:
+Implement BLG-13 following contracts.md: PATCH /api/posts/:id/itinerary, the author attaches one of their own itineraries to their own post; readers see it only if the itinerary is public. Read Yassin's itineraries only, do not edit his module. Add e2e tests and docs.
+How the output was used:
+The assistant added an optional itineraryId to the Post schema, AttachItineraryDto (a valid id, or null to remove), PostItineraryController and PostItineraryService in the blog module (same separate-controller pattern as BLG-10 images). attach() gives 404 for a missing or someone else's post, then 404 for an itinerary that is missing or not the caller's own, then sets the field with one update filtered on post id and author. GET /api/posts/:id now returns `itinerary` (the public itinerary row) only when it is PUBLIC, not hidden and its author ACTIVE (same rule as ITN-20/21), otherwise null; PostResponseDto returns itineraryId. It reuses the read-only Itinerary model from BLG-12, so this branch is based on feature/BLG-12-author-page. Finding: the global JwtAuthGuard returns early on @Public routes, so GET /api/posts/:id never knows the reader; an "author always sees it" exception was dropped because it could never run. Verification: build, lint, the new e2e suite (8 tests) and the blog, author-page, blog-images, pagination and account-status e2e suites (341 tests) plus 46 blog unit/integration tests pass with --runInBand. Not done: a manual Swagger click-through against Atlas.
+
+Date: 2026-11-18
+Student: Hessain Elrefaey
+Tool: Copilot (VS Code)
+Related Requirement: HTL-23 (complete stays and reservation reviews)
+Prompt:
+Implement HTL-23 only: complete CONFIRMED hotel reservations after checkout through BookingLifecycle, add one owner-only rating/review per completed reservation with editable/deletable author-only endpoints, recalculate the hotel rating, and connect reviews to the existing HTL-02 hotel details response. Respect the existing review item shape, add Swagger, tests and docs, and do not add another hotel details route or change unrelated modules.
+How the output was used:
+Added a UTC daily checkout-completion sweep and lazy completion during an owned booking read. Added a HotelReview schema with a unique bookingId index, validated create/update DTOs, nested review creation, author edit/delete endpoints, visible review averages/counts, and deactivated-author display as "Deleted user". Connected HotelDetailsService.loadReviews to the new service without adding a GET route. Added E2E coverage for checkout completion, authorization, duplicate/concurrent submissions, validation, edit/delete, aggregation, hidden reviews, deactivated authors, and Swagger; updated the hotel booking/details docs. Updated the HotelDetailsService unit-test fixture to inject the new review-summary dependency. Changes are limited to the Hotels module and directly related tests/docs plus this prompt log. Verification: backend build, focused lint, hotel-bookings and hotel-details E2E suites, and full backend Jest (75 suites, 1121 tests).
+================================================
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GitHub issue #115 (ACC-06 follow-up) Old refresh token still works after refresh and after logout
+Prompt:
+Implement only GitHub issue #115 following contracts.md, in the auth module only: refresh tokens must rotate and be single use. Consume the presented jti atomically in AuthService.refresh() after the signature, revocation and user checks, with a new TokenRevocationService.consume() (upsert on the unique jti index); the same generic 401 for a replay; no reuse detection; logout unchanged. Add unit and e2e tests (replay, parallel refreshes, logout, rejected users not consuming) and docs.
+How the output was used:
+The assistant added TokenRevocationService.consume() (returns true only for the request that inserted the row, E11000 counts as lost, other errors propagate) and called it in AuthService.refresh() after the user checks, so a rejected request never burns a token and no new tokens are issued unless the consume succeeded. It updated the Swagger text of POST /api/auth/refresh, added unit tests (auth.service.spec.ts, token-revocation.service.spec.ts), e2e tests in refresh.e2e-spec.ts and logout.e2e-spec.ts (replay, 5 parallel refreshes giving one 200 and four 401, suspended or deactivated users not consuming, logout after rotation), and docs/api/auth-refresh-rotation.md (no ACC-06 doc existed). Nothing in common/ or other modules was changed.
+Student: Abdulrahman Mohamad Hosny
+Tool: OpenCode (DeepSeek V4.1 Flash Free)
+Related Requirement: FLT-23 (SCRUM-84) follow-up for issue #118 â€” refund status after merging develop
+Prompt:
+After the PR branch merged develop (which brought PAY-03's refunds module), re-check the booking-details refund requirement. If the stable read contract is now available, consume it exactly instead of leaving a limitation.
+How the output was used:
+Imported RefundsModule into FlightsModule and injected RefundsService into FlightBookingsService. The confirmed-booking readback now returns `refund` from `getLatestForBooking(BookingType.FLIGHT, bookingId)`, using PAY-03's published RefundSummary shape (id, bookingType, bookingId, status, amountCents, currency, reason, createdAt) or null when no refund was issued; Stripe ids and userId are not copied into the flight response. The field is absent from pending-payment responses so the FLT-21 contract stays unchanged. Updated the summary DTO, Swagger description, docs/contracts.md and the flight E2E suite (latest-refund ordering, null refund, no Stripe ids, pending response has no refund field).
+Verification: npm run build passed; npm run lint passed; npx jest --config ./test/jest-e2e.json flight-bookings-hold --runInBand 62/62 passed; npx jest refunds.service.spec --runInBand 13/13 passed.
+Date: 2026-11-18
+Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code, Sonnet 5)
+Related Requirement: none (GitHub issue #114, found by an audit of develop)
+Prompt:
+Fix GitHub issue #114: (1) retrievePaymentIntent in stripe-payment-activity.ts has no try/catch, so a Stripe
+error during the hold-expiry sweep/lazy check escapes prepareExpiry, crashes a booking read with a 500, and
+leaves the hold stuck (the sweep keeps failing the same way every minute); a Stripe failure here should leave
+the booking as it is (SKIP, retried next sweep). (2) create/retry in payments.service.ts let a Stripe error from
+createPaymentIntent escape as a generic 500; expected a clear 502/503. Fix with tests.
+How the output was used:
+Wrapped the `retrievePaymentIntent` call in `StripePaymentActivity.prepareExpiry` in a try/catch that returns
+'SKIP' on failure, leaving the in-flight payment row untouched so the next sweep or lazy check tries again,
+instead of letting the error reach the caller (a booking read) as an unhandled 500. Added a private
+`createPaymentIntentOrThrow` helper in `PaymentsService` that wraps the existing `stripe.createPaymentIntent`
+call, logs the failure, and throws `ServiceUnavailableException` (503) with a clear "try again shortly" message;
+both `create()` and `retry()` now call it instead of the gateway method directly. Added `@ApiServiceUnavailableResponse`
+to both endpoints in `payments.controller.ts`. Chose 503 (not 502) since the backend itself is healthy — it is the
+upstream payment provider that is unavailable, which is exactly what 503 communicates. Tests use the existing
+hand-rolled `FakeStripeGateway`, monkey-patching its `retrievePaymentIntent`/`createPaymentIntent` methods to
+reject for one call (the project's established style for a single-shot failure, same as `forceDuplicateKeyOnce`
+elsewhere in this module) rather than new e2e specs — these are deterministic, synchronous-failure-mode bugs,
+not concurrency, so a real in-memory Mongo/HTTP round trip buys nothing a unit test with a fake doesn't already
+prove, and matches how every other Stripe-gateway failure mode in this module is already tested.
+Verification: tsc --noEmit and eslint clean. New tests: `stripe-payment-activity.spec.ts` (SKIP on an
+unreachable Stripe, in-flight row left untouched) and two in `payments.service.spec.ts` (create/retry each
+return ServiceUnavailableException when Stripe is down). Scoped unit (`src/payments`, `src/refunds`): 146/146
+pass. Related e2e (`payments-webhook`, `payments-concurrency`, capped at 2 workers): 5/5 pass.
+
+Date: 2026-11-19
+Student: Abdulrahman Mohamad Hosny
+Tool: OpenCode (DeepSeek V4.1 Flash Free)
+Related Requirement: FLT-26
+Prompt:
+Implement FLT-26 "Cancel own flight booking with tier-based refund" in the flights module only: POST /api/flight-bookings/:id/cancel as a two-step flow on the same endpoint (confirm:false previews the airline-tier refund; confirm:true plus expectedRefundAmountCents cancels), owner-only USER access with 404 for another traveler or an unknown booking, only CONFIRMED bookings before the outbound departure, tiers through AirlinesService.getCancellationTiers and RefundCalculator.compute with the full booking total and fractional days, BookingLifecycle.transition(...CANCELLED) so seats return in the same transaction, then RefundsService.issue only for a positive amount (zero refund cancels/releases without issue), a changed amount as 409 with the current amount, round trips cancelled as a whole by the outbound segment, no double release or duplicate refund, Swagger/docs/tests updated, and no edits to common/, Payments, Refunds, Airlines or hotels production code.
+How the output was used:
+Added CancelFlightBookingDto (required boolean confirm, conditional integer expectedRefundAmountCents) and FlightBookingCancelResponseDto, plus pure helpers in flights/utils/cancellation-refund.ts (fractional days and highest-applicable-tier selection for display; the amount itself always comes from Payments' RefundCalculator). FlightBookingsService.cancel() loads the booking, applies the shared assertOwner helper (unknown/other traveler = 404), rejects any status other than CONFIRMED and any time at/after the outbound departure (getFlightBookingSegments supplies the legacy one-way fallback), reads the outbound segment's stored airline tiers, computes the refund, returns the preview without writes, and on confirm compares the expected amount, rechecks status/departure/amount immediately before BookingLifecycle.transition(FLIGHT, id, CANCELLED), then calls RefundsService.issue only when the amount is positive with a stable cancellation reason. A changed amount is a 409 whose message and details carry the current cents; zero refund returns refund:null and never calls issue. The controller route is role USER, answers 200 (@HttpCode), and documents preview/confirm, 400/401/403/404/409 and the zero-refund behavior in Swagger. The flight E2E module now overrides STRIPE_GATEWAY with the existing FakeStripeGateway, clears payments between tests, and adds 11 FLT-26 tests (preview no-op, matching confirmation with one refund, changed-amount 409 then fresh preview, missing confirm/invalid amount, owner/role isolation, pending/expired/completed/already-cancelled, after departure, zero refund, round trip using outbound airline and releasing both segments, two concurrent confirmations, Swagger contract). Updated docs/contracts.md and adjusted the old FLT-19 Swagger assertion that no cancellation route existed. No other module or common/ production file was changed.
+Verification: npm run build passed; npm run lint passed; npx jest --runInBand "src/flights" "src/common/pagination" 51/51 passed (includes cancellation-refund.spec.ts 3/3); npx jest --config ./test/jest-e2e.json flight-bookings-hold --runInBand 73/73 passed; airline-cancellation-policy 23/23 passed; refunds-concurrency 1/1 passed; refund-calculator + refunds unit 22/22 passed; pagination 223/223 passed.
+Date: 2026-11-18
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-07 (SCRUM-111, bonus) Email-based forgotten password
+Prompt:
+Implement only SCRUM-111 / ACC-07 following docs/contracts.md: POST /api/auth/forgot-password (always the same 200,
+only an ACTIVE account is emailed, sending happens after the response and a failed send changes nothing) and
+POST /api/auth/reset-password (token = 32 random bytes base64url, only its SHA-256 hash stored, 30 minute expiry,
+single use via one compare-and-set, a newer request invalidates older links, one generic 400 on `token`, new bcrypt
+hash with compare-and-set on the old hash, tokenVersion bump, lockout and temporary-password state cleared, no
+auto-login). Use EmailService from the email module, add unit and e2e tests (parallel resets, parallel requests,
+expiry, session kill), docs/api/forgot-password.md, Swagger on both routes, and report assumptions and gaps.
+How the output was used:
+Added PasswordResetService, the passwordResetTokens schema (one row per user, so one atomic upsert supersedes older
+links even for parallel requests), two DTOs, the two @Public() routes in AuthController, and
+UsersService.completeEmailPasswordReset (the only change outside the auth folder files). Found by the e2e test that an
+upsert stored userId as a string, and fixed it with an explicit ObjectId. Verified: lint and build clean; full unit
+(--runInBand) 76 suites / 1140 tests pass; full e2e (--runInBand) 58 suites / 1408 tests pass. A parallel unit run
+showed mongodb-memory-server start-up timeouts in unrelated suites; they pass when run serially.
+
+Date: 2026-11-18
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: SCRUM-111 / ACC-07 review follow-up (rate limiting on forgot-password)
+Prompt:
+Sanad asked for rate limiting on PR #128. In the auth module only, no new dependency: a 60 second per-email cooldown on POST /api/auth/forgot-password (no token, no email, identical 200, old link stays valid, check and write in one atomic conditional upsert), and an in-memory fixed-window per-IP limiter (10 requests per 15 minutes, separate counters per route, 429 in the standard error shape with Retry-After, purged and overridable for tests) on forgot-password and reset-password. Update Swagger and docs/api/forgot-password.md, add unit and e2e tests.
+How the output was used:
+The assistant added requestedAt to the password reset token row and changed storeToken into one conditional upsert whose filter only matches a row older than the cooldown (or without requestedAt); a row inside the cooldown makes the upsert hit the unique userId index (11000), which is treated as the silent cooldown, so parallel requests send exactly one email. It added auth-rate-limit.ts (AuthRateLimiter, AuthRateLimitGuard, AuthRateLimited marker, AUTH_RATE_LIMIT_CONFIG token registered in AuthModule so tests can override it), put the guard on the two routes, added the 429 Swagger responses and rewrote the rate limiting section of the doc. Existing ACC-07 e2e tests that sent a second request for the same account now move requestedAt back, and that spec raises the IP limit. I reviewed the code, ran lint, build, unit and e2e tests.
+
+Date: 2026-11-18
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: SCRUM-111 / ACC-07 review follow-up (rate limiting on forgot-password)
+Prompt:
+Sanad asked for rate limiting on PR #128. In the auth module only, no new dependency: a 60 second per-email cooldown on POST /api/auth/forgot-password (no token, no email, identical 200, old link stays valid, check and write in one atomic conditional upsert), and an in-memory fixed-window per-IP limiter (10 requests per 15 minutes, separate counters per route, 429 in the standard error shape with Retry-After, purged and overridable for tests) on forgot-password and reset-password. Update Swagger and docs/api/forgot-password.md, add unit and e2e tests.
+How the output was used:
+The assistant added requestedAt to the password reset token row and changed storeToken into one conditional upsert whose filter only matches a row older than the cooldown (or without requestedAt); a row inside the cooldown makes the upsert hit the unique userId index (11000), which is treated as the silent cooldown, so parallel requests send exactly one email. It added auth-rate-limit.ts (AuthRateLimiter, AuthRateLimitGuard, AuthRateLimited marker, AUTH_RATE_LIMIT_CONFIG token registered in AuthModule so tests can override it), put the guard on the two routes, added the 429 Swagger responses and rewrote the rate limiting section of the doc. Existing ACC-07 e2e tests that sent a second request for the same account now move requestedAt back, and that spec raises the IP limit. I reviewed the code, ran lint, build, unit and e2e tests.
+
+================================================
+Date: 2026-11-18
+Student: Hessain Elrefaey
+Tool: Copilot (VS Code)
+Related Requirement: HTL-24 (view hotel rating and reviews)
+Prompt:
+Implement HTL-24 after HTL-23: add a guest-accessible GET /api/hotels/:id/reviews endpoint with the visible average
+rating, rating/review count, newest-first pagination (default page size 10), hidden-review exclusion, and
+"Deleted user" for deactivated authors. Reuse HTL-23 review behavior, update Swagger, tests, and directly related docs,
+and keep the changes separate from other tickets.
+How the output was used:
+Added the public reviews route to the existing HotelDetailsController and delegated to HotelReviewsService. The service
+validates active hotels, paginates visible reviews through the shared PaginationDto/paginate contract, sorts by
+createdAt then _id descending, populates only author display fields, and calculates the visible average separately.
+Added response DTO documentation, E2E coverage for guest access, paging, hidden reviews, rating aggregation,
+deactivated authors, validation, 404s and Swagger, registered the route in the whole-app pagination E2E table, and
+documented HTL-24 in the hotel API docs. Changes are limited to the Hotels module and directly related tests/docs and
+AI_PROMPTS.txt. Verification: backend build and focused ESLint passed; `hotel-reviews.e2e-spec.ts`,
+`hotel-details.e2e-spec.ts`, and `pagination.e2e-spec.ts` passed (265 tests total).
+
+Date: 2026-11-18
+Student: Abdulrahman Mohamad Hosny
+Tool: OpenCode (DeepSeek V4.1 Flash Free)
+Related Requirement: FLT-25
+Prompt:
+Implement FLT-25 "My flight bookings" in the flights module only: GET /api/flight-bookings (owner-only, paginated with the shared PaginationDto, default size 10) grouped Upcoming/Past/Cancelled, each row showing reference, flight, date, passengers, cabin and status; keep GET /api/flight-bookings/:id as the full owner-only detail including refund status; update Swagger, docs/contracts.md and AI_PROMPTS.txt; add focused tests and validate with build, lint, unit and flight E2E.
+How the output was used:
+Added FlightBookingsService.listMine() (plus GET /api/flight-bookings on the existing controller) and a flights-module MyFlightBookingsQueryDto/FlightBookingListRowDto. Ownership is part of the MongoDB query (the shared bookingVisibilityFilter narrowed to the caller's userId for role USER, so it can never widen), and the group is derived in the pipeline from the outbound segment's flight departureAt through one $lookup, so the group filter, skip/limit and total are computed in the database and pages stay stable (createdAt desc, _id desc). Legacy records without a segments array fall back to the top-level flightId, and a missing bookingReference stays absent instead of being generated. List rows reuse the existing segment/passenger mappers, so passport/identity numbers, paymentRef and Stripe ids never appear. GET /:id was left unchanged and still reads the latest refund through RefundsService.getLatestForBooking. Updated Swagger (route, query params, paginated schema, 400/401/403), docs/contracts.md and the flight E2E suite (grouping, cancellation precedence, round-trip grouping, legacy one-way, owner isolation, pagination/default/invalid pages, Swagger) plus a mapper unit test. No common/ or other module files were changed.
+Verification: npm run build passed; npm run lint passed; npx jest flight-booking-list-row --runInBand 3/3 passed; npx jest --config ./test/jest-e2e.json flight-bookings-hold --runInBand 68/68 passed.
+Student: Yassin Yahya
+Tool: Claude (Claude Code)
+Related Requirement: HTL-21 (SCRUM-88) Cancel whole reservation with tier-based refund
+Prompt:
+Implement HTL-21 (asked together with ITN-27, which is a separate branch and PR): POST /api/hotel-bookings/:id/cancel cancels the traveler's own CONFIRMED
+reservation as a whole before check-in; the refund comes from the hotel tiers (HTL-10) on the full total and is shown before cancelling;
+the reservation becomes CANCELLED, all rooms are released and a refund is created through PAY-03. No partial cancellation.
+How the output was used:
+Read the ticket, BookingLifecycle, RefundCalculator, RefundsService, HotelsService.getPolicies and the HTL-17/HTL-18 booking code. Tests first
+(4 unit tests for the time rules, 20 HTTP tests on an in-memory replica set with the fake Stripe gateway), watched them fail, then wrote
+HotelBookingCancellationService (own file, not added to the big HotelBookingsService) and its controller: GET :id/cancel-preview and
+POST :id/cancel. The owner filter is part of the query (404 for someone else's, unknown or malformed ids); only CONFIRMED before the check-in
+moment (check-in date at the hotel check-in time, UTC, 00:00 when unset) is cancellable, else 409. The refund is RefundCalculator.compute on the
+hotel's tiers, the fractional days to check-in and the full total, so preview and cancel agree. The status change is BookingLifecycle.transition
+(atomic, frees the rooms in the same write), then RefundsService.issue; a refund of 0 is not issued and refund is null. HotelsModule imports
+RefundsModule (one line, flagged in the PR); no other module was edited. Mutation checks: removing the owner filter failed the ownership test, and
+disabling the status guard failed five tests.
+Verification: lint and build pass; 1173 unit (81 suites) and 1480 e2e (60 suites, 3 workers) pass. Not done: a manual Swagger click-through against Atlas.
+Follow-up in the same PR (user: "fix them", about the known limit above): if RefundsService.issue fails after the status change, the reservation used to stay CANCELLED with no way to finish
+the refund. Now the cancel route records what the cancellation refunds (two optional fields on the hotel booking schema: cancellationRequestedAt and cancellationRefundCents, written only while the
+reservation is CONFIRMED, just before the status changes). A failure that is not a refusal by the refund rules answers 503 with a message saying the reservation is cancelled and to send the request again;
+cancelling a CANCELLED reservation that has a recorded refund and no refund yet issues the recorded amount (not the tier of the retry day), also after the check-in time, and two simultaneous retries
+give one refund. Tests first (7 new HTTP tests, Stripe failure simulated with a spy), watched failing; mutation check: issuing a different amount on retry failed three tests.
+Verification of the follow-up: lint and build pass; 1192 unit (83 suites) and 1510 e2e (62 suites, 3 workers) pass. Not done: a manual Swagger click-through against Atlas.
+
+Date: 2026-11-19
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: GH-116 / SCRUM-78 (BLG-10), SCRUM-22 (GEN-08)
+Prompt:
+Fix private Blog images exposed at /uploads using the existing GH116 worktree;
+verify middleware ordering against actual AppModule/static serving, reuse the
+complete JwtAuthGuard, fail closed on database errors, preserve public upload
+consumers and existing URLs, stay within the file whitelist, and leave changes
+local for independent review. Ahmed/Yusuf privacy-policy approval remains pending.
+How the output was used:
+Confirmed fix/GH-116-upload-privacy was clean, fetched origin/develop and applied
+the authorized fast-forward-only update from b6aab1810cac63757c2751a05e82ee953e3cc3d0
+to 1316126ac4b9f18e78090566adba318152009553. Reproduced the vulnerability first:
+the real draft Post API returned 404 while its anonymous direct image URL returned
+200, causing the new regression assertion to fail as intended.
+Retained ServeStaticModule and mounted a narrowly scoped root /uploads gate in
+UploadsModule.configure(), before static registration. Matching ready upload
+metadata and actual Post attachment are required. Published visible images stay
+public; drafts allow their author only; hidden published images allow author or
+ADMIN. Inaccessible/missing/orphan images return 404; failed metadata/Post/account
+reads return sanitized 503 without serving bytes or altering files/metadata.
+The middleware calls the unchanged JwtAuthGuard with existing UsersService,
+Reflector and official readJwtSecrets/HS256 configuration. It preserves account,
+credential-version, forced-change and existing logout/access-token semantics.
+No JWT authentication logic was copied, protected auth files changed, or new
+serving controller introduced. Blog responses use no-store and Vary: Cookie;
+external caches must be purged and /uploads must route through Nest. An in-flight
+transfer authorized before a concurrent visibility change cannot be recalled.
+Added 67 real AppModule E2E cases covering GET/HEAD policy, invalid authentication,
+credential replay, conditional/range requests, URL variants, lookup failures,
+missing metadata/files, JPEG/PNG bytes and all three public upload kinds. Changed
+only the shared GEN-08 public fixture's target kind from synthetic unattached post
+to hotel, preserving its existing assertions. Updated only the allowed upload
+README and Blog images documentation; this entry is append-only.
+Verification:
+Focused E2E 148/148 (6 suites); focused Jest 111/111 (8 suites).
+Full Jest --runInBand: 1,141/1,141, 78 suites.
+Standard full E2E --runInBand: 1,496/1,496, 58 suites.
+Shared uploads: 37/37 Jest and 7/7 E2E; BLG-10 E2E 12/12; auth E2E 24/24;
+activity images Jest 13/13; hotel E2E 18/18; airline E2E 20/20;
+itinerary E2E 149/149. Privacy E2E 67/67 includes 14 dedicated authentication/
+spoofing tests and 3 public-kind regressions. Build passed. Full ESLint passed
+after fixing three computed-property line-break lint errors in the new test;
+privacy E2E rerun after that test-helper-only cleanup passed 67/67. Full E2E
+emitted listener-count warnings during existing suites; no test failures.
+All databases, users and uploaded fixtures were disposable/synthetic. No real
+.env contents were read, shared Atlas used, or dependencies installed. Contracts,
+auth/common/users/Blog production files, other modules, schemas, AppModule,
+setup-app, UploadService/storage and dependency files were unchanged by this fix.
+GH-116 was open with no issue comments when independently checked; no Ahmed/Yusuf
+policy approval was verified. Implementation is local for independent review;
+team approval remains pending. No commit, push, feature merge, PR or Jira change.
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: GitHub issue #119 (parallel Jest runs time out)
+Prompt:
+Take issue #119 (default npx jest and npm run test:e2e fail with hook timeouts because every worker starts its own in-memory mongod) and propose a fix.
+How the output was used:
+The assistant reproduced the failure, measured that mongod starts queue behind each other (about 2.4 s each, 4 concurrent already hit the 10 s launch limit) and that other sessions running tests at the same time make it worse, then added one Jest setup file (test/helpers/mongo-launch-timeout.ts) that raises the library launch timeout to 60 s for MongoMemoryServer and MongoMemoryReplSet, plus testTimeout 60000 in both Jest configs. Under the same machine load the control run without it failed on 1530 launch timeouts, with it 57 e2e suites (1429 tests) and 78 unit suites (1141 tests) passed with default workers. I read every file and ran lint, build and both suites.
+
+Date: 2026-11-18
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: SCRUM-110 / ACC-02 (bonus) Email verification before booking
+Prompt:
+Implement only SCRUM-110 / ACC-02 following contracts.md, in the auth module plus the smallest additions to the User schema, UserResponseDto and users.service: a verification link emailed after registration (background, failure never fails registration), GET /api/auth/verify-email (public, single-use token stored only as a SHA-256 hash, 24 hour expiry, one generic field-level 400 for bad tokens), an emailVerified flag where only an explicit false blocks, and an exported RequireVerifiedEmail() decorator for the booking owners, without touching any booking controller, the email module or common/. Add unit and e2e tests (using a test-only controller) and docs/api/email-verification.md.
+How the output was used:
+The assistant added the emailVerificationTokens schema (userId unique, TTL index on expiresAt), EmailVerificationService (issue, issueAndSend, sendInBackground, verify using one atomic findOneAndDelete so only one of several parallel requests wins), the verify-email route with a VerifyEmailQueryDto, UsersService helpers (markEmailVerified, isEmailUnverified, isEmailVerifiedActive), and RequireVerifiedEmailGuard. The guard reads emailVerified through ModuleRef because the principal built by the global JwtAuthGuard (common/) does not carry it. Registration now saves emailVerified: false and starts the send in the background. I reviewed the design, ran lint, build, unit and e2e tests, and will open the PR myself.
+
+Date: 2026-11-18
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: SCRUM-110 / ACC-02 review follow-up (resend verification link, PUBLIC_API_URL in configuration)
+Prompt:
+Sanad asked for two changes on PR #130. (1) POST /api/auth/resend-verification for the logged-in user, no body, not public: already verified (flag true or missing) gives 200 and no email; otherwise a new token (the one-row-per-user upsert invalidates the old link) is emailed in the background, a failed send never changes the response; a 60 second cooldown gives 429 with Retry-After, and the cooldown check plus token write are one atomic conditional upsert so parallel resends send one email; no IP limiter. (2) Read PUBLIC_API_URL through the shared configuration.ts and ConfigService, optional with default http://localhost:3001. Add unit and e2e tests, Swagger and docs.
+How the output was used:
+The assistant added requestedAt to the email verification token row and changed issue() into one conditional upsert that matches only a row older than the cooldown (or without requestedAt); a row inside the cooldown makes the upsert hit the unique userId index (11000), which resend() turns into ResendCooldownException (429, the controller sets Retry-After). Registration reuses the same issue(). A publicApiUrl setting was added to config/configuration.ts and the service reads it via ConfigService. I reviewed the code, ran lint, build, unit and e2e tests.
+
+Date: 2026-11-19
+Student: Abdulrahman Mohamad Hosny
+Tool: OpenCode (DeepSeek V4.1 Flash Free)
+Related Requirement: FLT-26 (follow-up: retry a failed cancellation refund)
+Prompt:
+Fix the blocking refund-retry issue on the FLT-26 branch: if RefundsService.issue fails after the booking is CANCELLED and its seats are released, the traveler cannot complete the refund because a retry is rejected. Adapt the HTL-21 pattern from PR #134: record the confirmed refund amount before the transition and let a retry of an already-CANCELLED booking issue that recorded amount only, without rerunning the tier calculation or rechecking departure.
+How the output was used:
+Added cancellationRefundCents/cancellationRequestedAt to the flight booking schema. FlightBookingsService.cancel() now records the confirmed amount with a conditional update that only matches while the booking is still CONFIRMED, then transitions to CANCELLED through BookingLifecycle and issues the positive recorded refund; a zero amount is recorded and never sent to PAY-03. A transient issue failure is logged and answered 503. A confirmation for an already-CANCELLED booking takes a recovery path: owner-only, preview still 409, the recorded amount must match expectedRefundAmountCents, and the stored amount is issued without reading tiers or checking departure. A further retry, a zero recorded amount, and a legacy cancellation with no recorded amount answer 409; the refund-exists and concurrent-duplicate cases return/report the existing refund per PAY-03 idempotency. Response DTO/Swagger and docs/contracts.md document the persisted amount and recovery. Seven new E2E tests cover the reviewer regression: first Stripe createRefund rejection leaves CANCELLED with the recorded amount and seats released once, the retry refunds exactly that amount without a second transition, a changed policy or passed departure does not change it, a further retry creates no duplicate, zero refunds never call Stripe, owner/role/amount/legacy guards, and two concurrent retries produce one refund. No Payments, Refunds, Airlines, Hotels or common/ production code changed.
+Verification: npm run build passed; npm run lint passed; focused unit npx jest --runInBand "src/flights" "src/refunds" "src/payments/refund-calculator" 64/64 passed; npx jest --config ./test/jest-e2e.json flight-bookings-hold --runInBand 86/86 passed (19 FLT-26); refunds-concurrency 1/1 passed.

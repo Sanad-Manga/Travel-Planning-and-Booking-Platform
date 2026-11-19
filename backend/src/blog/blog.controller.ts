@@ -57,7 +57,7 @@ export class BlogController {
   @ApiBadRequestResponse({
     type: ErrorResponseDto,
     description:
-      'Missing title/body, invalid field, more than 5 tags or images',
+      'Missing title/body, invalid or unknown field (images are attached through POST /posts/:id/images), more than 5 tags',
   })
   @ApiUnauthorizedResponse({
     type: ErrorResponseDto,
@@ -96,12 +96,14 @@ export class BlogController {
   @Public()
   @ApiOperation({
     summary:
-      'Browse published posts, newest first, optionally filtered by tag (BLG-02, public)',
+      'Browse or search published posts (BLG-02, BLG-09, public)',
+    description:
+      'Without q: newest published first, optionally filtered by tag. With q: every word must appear in the title, a tag or the author name (case-insensitive); results are ordered by likes + comments descending, then newest first. Each row has title, author, date and an excerpt. No match returns an empty list, not an error. Drafts and hidden posts never appear. page and limit paginate (default 10).',
   })
   @ApiPaginatedResponse(PostListRowDto)
   @ApiBadRequestResponse({
     type: ErrorResponseDto,
-    description: 'Invalid page, limit or tag',
+    description: 'Invalid page, limit, tag or q (longer than 100 characters)',
   })
   list(
     @Query() query: BrowsePostsQueryDto,
@@ -176,12 +178,12 @@ export class BlogController {
   @Patch(':id')
   @ApiOperation({
     summary:
-      'Edit my own post (partial update of title, body, tags, images, status)',
+      'Edit my own post (partial update of title, body, tags, status; images use /posts/:id/images)',
   })
   @ApiOkResponse({ type: PostResponseDto })
   @ApiBadRequestResponse({
     type: ErrorResponseDto,
-    description: 'Empty body, invalid field, more than 5 tags or images',
+    description: 'Empty body, invalid or unknown field (e.g. images), more than 5 tags',
   })
   @ApiUnauthorizedResponse({
     type: ErrorResponseDto,
@@ -202,7 +204,7 @@ export class BlogController {
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
-    summary: 'Delete my own post together with its comments and likes',
+    summary: 'Delete my own post together with its comments, likes and images',
   })
   @ApiNoContentResponse({ description: 'Deleted' })
   @ApiUnauthorizedResponse({

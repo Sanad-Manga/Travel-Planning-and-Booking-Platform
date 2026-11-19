@@ -13,6 +13,10 @@ import request from 'supertest';
 import { AuthModule } from '../src/auth/auth.module';
 import { Role } from '../src/common';
 import configuration from '../src/config/configuration';
+import {
+  EXCHANGE_RATE_PROVIDER,
+  FetchedRates,
+} from '../src/fx/exchange-rate-provider';
 import { ItinerariesModule } from '../src/itineraries';
 import { setupApp, setupSwagger } from '../src/setup-app';
 import { UPLOAD_OPTIONS } from '../src/uploads/upload-options';
@@ -96,6 +100,16 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
         ItinerariesModule,
       ],
     })
+      // The budget summary converts totals through FxService; stub the live FXRatesAPI call so this suite never needs the network.
+      .overrideProvider(EXCHANGE_RATE_PROVIDER)
+      .useValue({
+        fetchLatest: (base: string): Promise<FetchedRates> =>
+          Promise.resolve({
+            base,
+            rateDate: new Date().toISOString().slice(0, 10),
+            rates: { EGP: 48, AED: 3.67, GBP: 0.75, EUR: 0.85 },
+          }),
+      })
       .overrideProvider(UPLOAD_OPTIONS)
       .useValue({
         root: uploadRoot,
@@ -2828,6 +2842,261 @@ describe('itineraries (ITN-01) over HTTP (e2e)', () => {
     });
   });
 
+  describe('flights from an itinerary (ITN-26)', () => {
+    /** Dates relative to today (UTC): the flight search only shows flights that have not left yet. */
+    const day = (offset: number): string =>
+      new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+    const flights = (
+      id: string,
+      cookie?: string,
+      query = 'departureAirport=DXB&passengers=1',
+    ) => {
+      const req = http().get(`/api/itineraries/${id}/flights?${query}`);
+      return cookie ? req.set('Cookie', cookie) : req;
+    };
+    const airportDoc = (iata: string, cityId: string, countryCode: string) => ({
+      iata_code: iata,
+      name: `${iata} airport`,
+      city_id: cityId,
+      country_code: countryCode,
+      time_zone: 'UTC',
+    });
+    const flightDoc = (
+      airlineId: Types.ObjectId,
+      flightNumber: string,
+      from: string,
+      to: string,
+      departureDay: string,
+    ) => {
+      const departureAt = new Date(`${departureDay}T12:00:00.000Z`);
+      return {
+        _id: new Types.ObjectId(),
+        airlineId,
+        flightNumber,
+        departureAirport: from,
+        arrivalAirport: to,
+        departureAt,
+        arrivalAt: new Date(departureAt.getTime() + 3 * 3_600_000),
+        departureTimeZone: 'UTC',
+        arrivalTimeZone: 'UTC',
+        departureLocalDate: departureDay,
+        status: 'SCHEDULED',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+    };
+    /** Starts on day(10): two days in Cairo (airports CAI and HBE), one in Dubai. The last day is day(12). */
+    const planned = async () => {
+      const { id } = await createAs(alice, { ...valid, startDate: day(10) });
+      for (const cityId of ['cairo', 'cairo', 'dubai']) {
+        await http()
+          .post(`/api/itineraries/${id}/days`)
+          .set('Cookie', alice)
+          .send({ cityId })
+          .expect(201);
+      }
+      return id;
+    };
+
+    beforeAll(async () => {
+      await connection
+        .collection('airports')
+        .insertMany([
+          airportDoc('CAI', 'cairo', 'EG'),
+          airportDoc('HBE', 'cairo', 'EG'),
+          airportDoc('DXB', 'dubai', 'AE'),
+        ]);
+      const airlineId = new Types.ObjectId();
+      await connection.collection('airlines').insertOne({
+        _id: airlineId,
+        name: 'Itn26 Air',
+        code: 'IA',
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      const rows = [
+        flightDoc(airlineId, 'IA1', 'DXB', 'CAI', day(10)),
+        flightDoc(airlineId, 'IA2', 'CAI', 'DXB', day(12)),
+        flightDoc(airlineId, 'IA3', 'DXB', 'CAI', day(14)),
+      ];
+      await connection.collection('flights').insertMany(rows);
+      await connection.collection('cabins').insertMany(
+        rows.map((row) => ({
+          flightId: row._id,
+          cabinClass: 'ECONOMY',
+          totalSeats: 10,
+          bookedSeats: 0,
+          heldSeats: 0,
+          priceCents: 20_000,
+          freeBags: 1,
+          maxBagWeightKg: 23,
+        })),
+      );
+    });
+
+    it('401 for a guest, 403 for an admin and for a moderator', async () => {
+      const id = await planned();
+      await flights(id).expect(401);
+      await flights(id, admin).expect(403);
+      await flights(id, airlineMod).expect(403);
+    });
+
+    it('a round trip is the default: every airport of the first-day city, the start date out and the last-day date back', async () => {
+      const id = await planned();
+
+      const res = await flights(id, alice).expect(200);
+
+      expect(res.body).toMatchObject({
+        tripType: 'ROUND_TRIP',
+        departureAirport: 'DXB',
+        destinationCityId: 'cairo',
+        departureDate: day(10),
+        returnDate: day(12),
+      });
+      expect(
+        res.body.destinations.map(
+          (d: { airport: { iataCode: string } }) => d.airport.iataCode,
+        ),
+      ).toEqual(['CAI', 'HBE']);
+      const cai = res.body.destinations[0].results;
+      expect(
+        cai.outbound.items.map((f: { flightNumber: string }) => f.flightNumber),
+      ).toEqual(['IA1']);
+      expect(
+        cai.return.items.map((f: { flightNumber: string }) => f.flightNumber),
+      ).toEqual(['IA2']);
+      expect(res.body.destinations[1].results.outbound.total).toBe(0);
+    });
+
+    it('ONE_WAY answers one page per airport and no return date', async () => {
+      const id = await planned();
+
+      const res = await flights(
+        id,
+        alice,
+        'departureAirport=DXB&passengers=1&tripType=ONE_WAY',
+      ).expect(200);
+
+      expect(res.body.returnDate).toBeNull();
+      const cai = res.body.destinations[0].results;
+      expect(cai).toMatchObject({ page: 1, limit: 10, total: 1 });
+      expect(cai.items[0]).toMatchObject({
+        flightNumber: 'IA1',
+        departureAirport: 'DXB',
+        arrivalAirport: 'CAI',
+      });
+      expect(cai).not.toHaveProperty('return');
+    });
+
+    it('both dates can be overridden in the query', async () => {
+      const id = await planned();
+
+      const res = await flights(
+        id,
+        alice,
+        `departureAirport=DXB&passengers=1&departureDate=${day(14)}&returnDate=${day(15)}`,
+      ).expect(200);
+
+      expect(res.body).toMatchObject({
+        departureDate: day(14),
+        returnDate: day(15),
+      });
+      expect(
+        res.body.destinations[0].results.outbound.items.map(
+          (f: { flightNumber: string }) => f.flightNumber,
+        ),
+      ).toEqual(['IA3']);
+    });
+
+    it("someone else's or an unknown itinerary is a 404, a malformed id a 400", async () => {
+      const id = await planned();
+      await flights(id, bob).expect(404);
+      await flights('674a1b2c3d4e5f6a7b8c9d0e', alice).expect(404);
+      await flights('not-an-id', alice).expect(400);
+    });
+
+    it('a bad query is a 400 with one details entry per field', async () => {
+      const id = await planned();
+      for (const [query, field] of [
+        ['passengers=1', 'departureAirport'],
+        ['departureAirport=DXB', 'passengers'],
+        ['departureAirport=DXB&passengers=0', 'passengers'],
+        ['departureAirport=DUBAI&passengers=1', 'departureAirport'],
+        ['departureAirport=ZZZ&passengers=1', 'departureAirport'],
+        ['departureAirport=DXB&passengers=1&tripType=SIDEWAYS', 'tripType'],
+        [
+          'departureAirport=DXB&passengers=1&departureDate=soon',
+          'departureDate',
+        ],
+        [
+          'departureAirport=DXB&passengers=1&returnDate=2030-13-45',
+          'returnDate',
+        ],
+        ['departureAirport=DXB&passengers=1&limit=51', 'limit'],
+        // the destination comes from the itinerary, never from the request
+        [
+          'departureAirport=DXB&passengers=1&arrivalAirport=CAI',
+          'arrivalAirport',
+        ],
+      ]) {
+        const res = await flights(id, alice, query).expect(400);
+        expect(
+          (res.body.details as { field: string }[]).map((d) => d.field),
+        ).toContain(field);
+      }
+    });
+
+    it('a returnDate on a ONE_WAY search, or before the outbound date, is a 400 on returnDate', async () => {
+      const id = await planned();
+      for (const query of [
+        `departureAirport=DXB&passengers=1&tripType=ONE_WAY&returnDate=${day(12)}`,
+        `departureAirport=DXB&passengers=1&departureDate=${day(12)}&returnDate=${day(11)}`,
+      ]) {
+        const res = await flights(id, alice, query).expect(400);
+        expect(res.body.details).toEqual([
+          { field: 'returnDate', message: expect.any(String) },
+        ]);
+      }
+    });
+
+    it('an itinerary without days is a 400 on id', async () => {
+      const { id } = await createAs(alice, { ...valid, startDate: day(10) });
+      const res = await flights(id, alice).expect(400);
+      expect(res.body.details).toEqual([
+        { field: 'id', message: expect.any(String) },
+      ]);
+    });
+
+    it('Swagger documents the route, its query and its answers', async () => {
+      const res = await http().get('/api/docs-json').expect(200);
+      const get = res.body.paths['/api/itineraries/{id}/flights'].get;
+      expect(get.tags).toContain('itineraries');
+      const names = (get.parameters as { name: string }[]).map((p) => p.name);
+      expect(names).toEqual(
+        expect.arrayContaining([
+          'id',
+          'departureAirport',
+          'passengers',
+          'tripType',
+          'departureDate',
+          'returnDate',
+          'cabinClass',
+          'minPrice',
+          'maxPrice',
+          'sort',
+          'order',
+          'page',
+          'limit',
+        ]),
+      );
+      // the destination comes from the itinerary, so it is not a parameter
+      expect(names).not.toContain('arrivalAirport');
+      expect(Object.keys(get.responses)).toEqual(
+        expect.arrayContaining(['200', '400', '401', '403', '404']),
+      );
+    });
+  });
 
   describe('Swagger', () => {
     it('documents the ITN-01, ITN-03 and ITN-05 endpoints under the itineraries tag', async () => {

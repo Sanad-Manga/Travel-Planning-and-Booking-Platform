@@ -12,6 +12,22 @@ export interface EnvVars {
   PLATFORM_CURRENCY: string;
   /** ITN-18: FXRatesAPI has a usable free tier, so this is optional — no fail-fast check below. */
   FX_API_KEY?: string;
+  /**
+   * PAY-01: required for real payments, but validated lazily inside the Stripe gateway itself
+   * (not here) — like FX_API_KEY, so building AppModule in isolation (most e2e specs do) never
+   * needs a real key. A payment attempt without one fails clearly at that point instead.
+   */
+  STRIPE_SECRET_KEY?: string;
+  STRIPE_WEBHOOK_SECRET?: string;
+  /**
+   * GEN-01-B: like STRIPE_SECRET_KEY, validated lazily inside SmtpEmailSender, not here. Left
+   * unset entirely in development — the sender then falls back to a throwaway Ethereal test inbox.
+   */
+  SMTP_HOST?: string;
+  SMTP_PORT?: string;
+  SMTP_USER?: string;
+  SMTP_PASSWORD?: string;
+  SMTP_FROM?: string;
 }
 
 export function validateEnv(raw: Record<string, unknown>): Record<string, unknown> & EnvVars {

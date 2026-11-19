@@ -104,13 +104,24 @@ export class UploadService {
   }
 
   async remove(id: string): Promise<void> {
+    return this.removeMatching(id);
+  }
+
+  /** Consumer-scoped cleanup: foreign/unmanaged IDs are a no-op, never deleted.
+   * Consumers still authorize the parent and establish attachment membership.
+   */
+  async removeForTarget(id: string, target: UploadTarget): Promise<void> {
+    return this.removeMatching(id, validateTarget(target));
+  }
+
+  private async removeMatching(id: string, target?: UploadTarget): Promise<void> {
     if (typeof id !== 'string' || !/^[a-f0-9]{24}$/i.test(id))
       throw new BadRequestException('Invalid upload identifier');
     try {
       // Pending attempts have not returned an ID and cannot be removed by a consumer.
       const record = await this.files
         .findOneAndUpdate(
-          { _id: id, state: { $in: ['ready', 'deleting', 'cleanup'] } },
+          { _id: id, ...(target ? { kind: target.kind, ownerId: target.ownerId } : {}), state: { $in: ['ready', 'deleting', 'cleanup'] } },
           { $set: { state: 'deleting' } },
           { new: true },
         )

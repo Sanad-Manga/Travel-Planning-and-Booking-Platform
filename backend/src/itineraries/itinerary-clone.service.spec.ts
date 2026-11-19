@@ -7,14 +7,35 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { Collection, Connection, Model, Types } from 'mongoose';
 import { AuthenticatedUser, Role, Visibility } from '../common';
+import {
+  EXCHANGE_RATE_PROVIDER,
+  ExchangeRateProvider,
+  FetchedRates,
+} from '../fx/exchange-rate-provider';
 import { ActivitiesService } from './activities.service';
 import { BudgetsService } from './budgets.service';
 import { ItinerariesModule } from './itineraries.module';
+import { ItinerariesPublicService } from './itineraries-public.service';
 import { ItinerariesService } from './itineraries.service';
+import { ItineraryCloneService } from './itinerary-clone.service';
 import { BudgetCategory } from './schemas/budget.schema';
 import { Itinerary } from './schemas/itinerary.schema';
 import { TransportMode } from './schemas/transport-cost.schema';
 import { TransportCostsService } from './transport-costs.service';
+
+/**
+ * Deterministic stand-in for the real FXRatesAPI call, so this suite never touches the network
+ * (the budget summary converts totals through FxService). Same pattern as budgets.service.spec.ts.
+ */
+class FixedExchangeRateProvider implements ExchangeRateProvider {
+  async fetchLatest(base: string): Promise<FetchedRates> {
+    return {
+      base,
+      rateDate: new Date().toISOString().slice(0, 10),
+      rates: { EGP: 48, AED: 3.67, EUR: 0.85 },
+    };
+  }
+}
 
 jest.setTimeout(60000);
 
@@ -24,6 +45,8 @@ describe('Clone a public itinerary (ITN-21) with an isolated MongoDB', () => {
   let connection: Connection;
   let model: Model<Itinerary>;
   let service: ItinerariesService;
+  let cloning: ItineraryCloneService;
+  let publicView: ItinerariesPublicService;
   let activities: ActivitiesService;
   let budgets: BudgetsService;
   let transportCosts: TransportCostsService;
@@ -97,10 +120,15 @@ describe('Clone a public itinerary (ITN-21) with an isolated MongoDB', () => {
     });
     moduleRef = await Test.createTestingModule({
       imports: [MongooseModule.forRoot(server.getUri()), ItinerariesModule],
-    }).compile();
+    })
+      .overrideProvider(EXCHANGE_RATE_PROVIDER)
+      .useValue(new FixedExchangeRateProvider())
+      .compile();
     await moduleRef.init();
     model = moduleRef.get<Model<Itinerary>>(getModelToken(Itinerary.name));
     service = moduleRef.get(ItinerariesService);
+    cloning = moduleRef.get(ItineraryCloneService);
+    publicView = moduleRef.get(ItinerariesPublicService);
     activities = moduleRef.get(ActivitiesService);
     budgets = moduleRef.get(BudgetsService);
     transportCosts = moduleRef.get(TransportCostsService);
@@ -144,7 +172,7 @@ describe('Clone a public itinerary (ITN-21) with an isolated MongoDB', () => {
     it('is a new private itinerary owned by the caller, with the same title, countries and start date', async () => {
       const { id } = await publicWithPlan();
 
-      const clone = await service.clone(reader, id);
+      const clone = await cloning.clone(reader, id);
 
       expect(clone.id).not.toBe(id);
       expect(clone).toMatchObject({
@@ -167,7 +195,7 @@ describe('Clone a public itinerary (ITN-21) with an isolated MongoDB', () => {
     it('credits the original author and the itinerary it came from', async () => {
       const { id } = await publicWithPlan();
 
-      const clone = await service.clone(reader, id);
+      const clone = await cloning.clone(reader, id);
 
       expect(clone.clonedFrom).toEqual({
         itineraryId: id,
@@ -187,10 +215,10 @@ describe('Clone a public itinerary (ITN-21) with an isolated MongoDB', () => {
 
     it('keeps the credit when the clone is made public: readers see who made the original', async () => {
       const { id } = await publicWithPlan();
-      const clone = await service.clone(reader, id);
+      const clone = await cloning.clone(reader, id);
       await service.update(reader, clone.id, { visibility: Visibility.PUBLIC });
 
-      const view = await service.findPublic(clone.id);
+      const view = await publicView.findPublic(clone.id);
 
       expect(view.author).toEqual({ id: reader.userId, name: 'Bob Reader' });
       expect(view.clonedFrom).toEqual({
@@ -203,7 +231,7 @@ describe('Clone a public itinerary (ITN-21) with an isolated MongoDB', () => {
     it('copies every day with its city and notes, in order, with new ids', async () => {
       const { id, days } = await publicWithPlan();
 
-      const clone = await service.clone(reader, id);
+      const clone = await cloning.clone(reader, id);
 
       expect(clone.days.map((d) => [d.cityId, d.notes, d.dayNumber])).toEqual([
         ['cairo', 'Arrive', 1],
@@ -227,7 +255,7 @@ describe('Clone a public itinerary (ITN-21) with an isolated MongoDB', () => {
           { $set: { images: [{ id: 'img-1', url: '/uploads/img-1.png' }] } },
         );
 
-      const clone = await service.clone(reader, id);
+      const clone = await cloning.clone(reader, id);
 
       const [first, second] = clone.days;
       expect(first.activities).toEqual([
@@ -261,7 +289,7 @@ describe('Clone a public itinerary (ITN-21) with an isolated MongoDB', () => {
     it('copies every budget entry and transport cost onto the matching new day', async () => {
       const { id } = await publicWithPlan();
 
-      const clone = await service.clone(reader, id);
+      const clone = await cloning.clone(reader, id);
 
       expect(clone.budgets).toEqual([
         expect.objectContaining({
@@ -287,7 +315,7 @@ describe('Clone a public itinerary (ITN-21) with an isolated MongoDB', () => {
 
     it('has the same budget totals as the original', async () => {
       const { id } = await publicWithPlan();
-      const clone = await service.clone(reader, id);
+      const clone = await cloning.clone(reader, id);
 
       const totalsOf = async (user: AuthenticatedUser, itineraryId: string) =>
         (await budgets.summary(user, itineraryId)).totals.map((block) => ({
@@ -315,7 +343,7 @@ describe('Clone a public itinerary (ITN-21) with an isolated MongoDB', () => {
         images: [],
       });
 
-      const clone = await service.clone(reader, id);
+      const clone = await cloning.clone(reader, id);
 
       const names = clone.days.flatMap((d) => d.activities.map((a) => a.name));
       expect(names.sort()).toEqual(['Karnak', 'Pyramids']);
@@ -329,7 +357,7 @@ describe('Clone a public itinerary (ITN-21) with an isolated MongoDB', () => {
       });
       await service.update(author, id, { visibility: Visibility.PUBLIC });
 
-      const clone = await service.clone(reader, id);
+      const clone = await cloning.clone(reader, id);
 
       expect(clone).toMatchObject({
         title: 'Empty',
@@ -341,7 +369,7 @@ describe('Clone a public itinerary (ITN-21) with an isolated MongoDB', () => {
 
     it('lets the author copy their own public itinerary', async () => {
       const { id } = await publicWithPlan();
-      const clone = await service.clone(author, id);
+      const clone = await cloning.clone(author, id);
       expect(clone.id).not.toBe(id);
       expect(clone.authorId).toBe(author.userId);
       expect(clone.visibility).toBe(Visibility.PRIVATE);
@@ -349,8 +377,8 @@ describe('Clone a public itinerary (ITN-21) with an isolated MongoDB', () => {
 
     it('makes two independent copies when cloned twice', async () => {
       const { id } = await publicWithPlan();
-      const first = await service.clone(reader, id);
-      const second = await service.clone(reader, id);
+      const first = await cloning.clone(reader, id);
+      const second = await cloning.clone(reader, id);
       expect(first.id).not.toBe(second.id);
       expect(first.days[0].id).not.toBe(second.days[0].id);
     });
@@ -359,7 +387,7 @@ describe('Clone a public itinerary (ITN-21) with an isolated MongoDB', () => {
   describe('independent of the original', () => {
     it('editing the clone changes nothing in the original', async () => {
       const { id, days } = await publicWithPlan();
-      const clone = await service.clone(reader, id);
+      const clone = await cloning.clone(reader, id);
       const before = await service.findMine(author, id);
 
       await service.update(reader, clone.id, {
@@ -390,7 +418,7 @@ describe('Clone a public itinerary (ITN-21) with an isolated MongoDB', () => {
 
     it('editing the original changes nothing in the clone', async () => {
       const { id, days } = await publicWithPlan();
-      const clone = await service.clone(reader, id);
+      const clone = await cloning.clone(reader, id);
       const before = await service.findMine(reader, clone.id);
       const original = await service.findMine(author, id);
 
@@ -406,7 +434,7 @@ describe('Clone a public itinerary (ITN-21) with an isolated MongoDB', () => {
 
     it('deleting the original keeps the clone with all its days, activities and budgets', async () => {
       const { id } = await publicWithPlan();
-      const clone = await service.clone(reader, id);
+      const clone = await cloning.clone(reader, id);
       const before = await service.findMine(reader, clone.id);
 
       await service.remove(author, id);
@@ -420,7 +448,7 @@ describe('Clone a public itinerary (ITN-21) with an isolated MongoDB', () => {
     it('deleting the clone keeps the original with all of its rows', async () => {
       const { id } = await publicWithPlan();
       const before = await service.findMine(author, id);
-      const clone = await service.clone(reader, id);
+      const clone = await cloning.clone(reader, id);
 
       await service.remove(reader, clone.id);
 
@@ -455,7 +483,7 @@ describe('Clone a public itinerary (ITN-21) with an isolated MongoDB', () => {
         suspendedId,
         new Types.ObjectId().toString(),
       ]) {
-        await expect(service.clone(reader, id)).rejects.toMatchObject({
+        await expect(cloning.clone(reader, id)).rejects.toMatchObject({
           status: 404,
         });
       }
@@ -469,7 +497,7 @@ describe('Clone a public itinerary (ITN-21) with an isolated MongoDB', () => {
       const { id } = await publicWithPlan();
 
       const copies = await Promise.all(
-        [reader, reader, author, reader].map((user) => service.clone(user, id)),
+        [reader, reader, author, reader].map((user) => cloning.clone(user, id)),
       );
 
       expect(new Set(copies.map((copy) => copy.id)).size).toBe(4);
@@ -495,13 +523,13 @@ describe('Clone a public itinerary (ITN-21) with an isolated MongoDB', () => {
         .spyOn(budgets, 'copyForClone')
         .mockRejectedValueOnce(new Error('disk full'));
 
-      await expect(service.clone(reader, id)).rejects.toThrow('disk full');
+      await expect(cloning.clone(reader, id)).rejects.toThrow('disk full');
 
       failing.mockRestore();
       expect(await countRows()).toEqual(before);
       expect(await service.findMine(author, id)).toEqual(original);
       // and the same clone works once the failure is gone
-      await expect(service.clone(reader, id)).resolves.toMatchObject({
+      await expect(cloning.clone(reader, id)).resolves.toMatchObject({
         title: 'Nile cruise',
       });
     });
@@ -511,7 +539,7 @@ describe('Clone a public itinerary (ITN-21) with an isolated MongoDB', () => {
     it('shows the budget totals of the itinerary: platform currency first, other currencies as their own blocks', async () => {
       const { id } = await publicWithPlan();
 
-      const view = await service.findPublic(id);
+      const view = await publicView.findPublic(id);
 
       expect(view.budget.itineraryId).toBe(id);
       expect(view.budget.platformCurrency).toMatch(/^[A-Z]{3}$/);
@@ -532,7 +560,7 @@ describe('Clone a public itinerary (ITN-21) with an isolated MongoDB', () => {
         startDate: '2026-12-20',
       });
       await service.update(author, id, { visibility: Visibility.PUBLIC });
-      expect((await service.findPublic(id)).budget.totals).toEqual([]);
+      expect((await publicView.findPublic(id)).budget.totals).toEqual([]);
     });
   });
 });

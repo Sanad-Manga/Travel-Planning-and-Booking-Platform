@@ -48,10 +48,36 @@ export class BookingPassenger {
 }
 const BookingPassengerSchema = SchemaFactory.createForClass(BookingPassenger);
 
+@Schema({ _id: false })
+export class FlightBookingSegment {
+  @Prop({ type: Types.ObjectId, ref: 'Flight', required: true })
+  flightId: Types.ObjectId;
+
+  @Prop({ type: Types.ObjectId, ref: 'Airline', required: true })
+  airlineId: Types.ObjectId;
+
+  @Prop({ type: String, enum: Object.values(CabinClass), required: true })
+  cabinClass: CabinClass;
+
+  @Prop({ type: Number, required: true, min: 1 })
+  seats: number;
+
+  @Prop({ type: Number, required: true, min: 0 })
+  farePerPassengerCents: number;
+
+  @Prop({ type: Number, required: true, min: 0 })
+  infantFareCents: number;
+
+  @Prop({ type: Number, required: true, min: 0, default: 0 })
+  baggageFeeCents: number;
+}
+const FlightBookingSegmentSchema =
+  SchemaFactory.createForClass(FlightBookingSegment);
+
 /**
  * A flight booking (collection `flightBookings`). FLT-22 creates it as PENDING_PAYMENT with the seats held;
  * the status only ever changes through BookingLifecycle (docs/contracts.md section 5).
- * Passenger details, baggage and the return flight are added by later tickets (FLT-19, FLT-12).
+ * A round trip is one booking with one or two independently priced, inventory-backed segments (FLT-12).
  */
 @Schema({ timestamps: true, collection: 'flightBookings' })
 export class FlightBooking {
@@ -64,6 +90,10 @@ export class FlightBooking {
 
   @Prop({ type: Types.ObjectId, ref: 'Flight', required: true })
   flightId: Types.ObjectId;
+
+  /** Outbound first; the return leg, when present, is second. */
+  @Prop({ type: [FlightBookingSegmentSchema], default: undefined })
+  segments?: FlightBookingSegment[];
 
   @Prop({ type: String, enum: Object.values(CabinClass), required: true })
   cabinClass: CabinClass;
@@ -111,6 +141,26 @@ export class FlightBooking {
   /** Set when the payment is confirmed (PAY-01). */
   @Prop({ type: String })
   paymentRef?: string;
+
+  /**
+   * FLT-23: assigned exactly once, in the same atomic confirmation that stores `paymentRef`.
+   * A confirmed booking keeps this reference for life; historical bookings confirmed before
+   * FLT-23 keep none (the sparse unique index tolerates the missing field).
+   */
+  @Prop({ type: String })
+  bookingReference?: string;
+
+  /**
+   * FLT-26: what this cancellation refunds, recorded just before the status becomes CANCELLED
+   * (0 when no tier applies). If issuing the refund then fails, cancelling again issues exactly
+   * this amount instead of recalculating it from a policy that may have changed.
+   */
+  @Prop({ type: Number, min: 0 })
+  cancellationRefundCents?: number;
+
+  /** FLT-26: when the traveler asked to cancel; written with the amount above. */
+  @Prop({ type: Date })
+  cancellationRequestedAt?: Date;
 }
 
 export type FlightBookingDocument = HydratedDocument<FlightBooking>;
@@ -122,9 +172,41 @@ export type FlightBookingLean = FlightBooking & {
   updatedAt: Date;
 };
 
+export function getFlightBookingSegments(
+  booking: Pick<
+    FlightBooking,
+    | 'segments'
+    | 'flightId'
+    | 'airlineId'
+    | 'cabinClass'
+    | 'seats'
+    | 'farePerPassengerCents'
+    | 'infantFareCents'
+    | 'baggageFeeCents'
+  >,
+): FlightBookingSegment[] {
+  if (booking.segments?.length) return booking.segments;
+  return [
+    {
+      flightId: booking.flightId,
+      airlineId: booking.airlineId,
+      cabinClass: booking.cabinClass,
+      seats: booking.seats,
+      farePerPassengerCents: booking.farePerPassengerCents,
+      infantFareCents: booking.infantFareCents,
+      baggageFeeCents: booking.baggageFeeCents,
+    },
+  ];
+}
+
 export const FlightBookingSchema = SchemaFactory.createForClass(FlightBooking);
 
 // "My bookings" lists (FLT-25), newest first.
 FlightBookingSchema.index({ userId: 1, createdAt: -1 });
 // The hold-expiry sweep: PENDING_PAYMENT bookings whose hold ran out, in _id order (cursor).
 FlightBookingSchema.index({ status: 1, holdExpiresAt: 1, _id: 1 });
+// FLT-23: two confirmed bookings can never share a reference; unconfirmed/legacy bookings are excluded.
+FlightBookingSchema.index(
+  { bookingReference: 1 },
+  { unique: true, sparse: true },
+);
