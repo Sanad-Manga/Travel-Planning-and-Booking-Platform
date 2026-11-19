@@ -2,6 +2,8 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Post,
   Query,
@@ -18,6 +20,7 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiProduces,
+  ApiServiceUnavailableResponse,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
@@ -32,6 +35,8 @@ import {
 } from '../common';
 import { FlightBookingResponseDto } from './dto/flight-booking-response.dto';
 import { CreateFlightBookingDto } from './dto/create-flight-booking.dto';
+import { CancelFlightBookingDto } from './dto/cancel-flight-booking.dto';
+import { FlightBookingCancelResponseDto } from './dto/flight-booking-cancel-response.dto';
 import { FlightBookingListRowDto } from './dto/flight-booking-list-row.dto';
 import { FlightBookingSummaryResponseDto } from './dto/flight-booking-summary-response.dto';
 import { HoldFlightBookingDto } from './dto/hold-flight-booking.dto';
@@ -151,6 +156,52 @@ export class FlightBookingsController {
   })
   getSummary(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
     return this.bookings.getSummary(user, id);
+  }
+
+  @Post(':id/cancel')
+  @Roles(Role.USER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Preview or cancel a confirmed flight booking with a tier-based refund - FLT-26',
+    description:
+      "Two steps on the same owner-only endpoint. First send `{ confirm: false }`: it validates ownership and eligibility, computes the refund from the outbound segment's airline cancellation tiers (Payments' RefundCalculator, full booking total, fractional days before departure) and returns the amount, currency and applied tier without changing anything. " +
+      'Then send `{ confirm: true, expectedRefundAmountCents: <the previewed amount> }`: the amount is recomputed and must still match, otherwise the request answers 409 with the current amount and nothing is cancelled or refunded (a fresh preview and confirmation are required). `confirm` is required and must be a boolean; a missing value is a validation error, never consent. ' +
+      'On a match the confirmed amount is recorded on the booking (only while it is still CONFIRMED), then the booking goes through BookingLifecycle to CANCELLED, every segment\'s booked seats return to inventory in the same transaction, and the positive recorded refund is issued through PAY-03\'s RefundsService.issue. A zero refund (no applicable tier or a 0% tier) is recorded as 0, cancels and releases the seats without calling issue and returns `refund: null`. ' +
+      'If issuing the refund fails after the cancellation (for example the payment provider is unavailable), the answer is 503 and the booking stays CANCELLED with its recorded amount. Sending the same confirmation again completes the refund with exactly the amount recorded at the first cancellation (no tier is re-read, the departure is not rechecked) and answers 200; it never returns the seats twice. A further retry after the refund was issued, a legacy cancellation with no recorded amount, or a cancellation that had nothing to refund answers 409. ' +
+      'Only a CONFIRMED booking may be cancelled and only before the outbound departure; a round trip is cancelled as a whole using the outbound segment\'s airline and tier. Another traveler and an unknown id answer 404. A preview of a cancelled booking answers 409.',
+  })
+  @ApiOkResponse({ type: FlightBookingCancelResponseDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description:
+      'Missing or non-boolean confirm, a missing/invalid expectedRefundAmountCents when confirm is true, or an unknown body field',
+  })
+  @ApiForbiddenResponse({
+    type: ErrorResponseDto,
+    description: 'Only travelers (role USER) can cancel their flight booking',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description:
+      'The booking is unknown or belongs to another traveler, or a booked flight segment is missing',
+  })
+  @ApiConflictResponse({
+    type: ErrorResponseDto,
+    description:
+      'The booking is not CONFIRMED (pending, expired, completed, or a preview of an already cancelled one), the outbound flight has departed, the expected refund amount no longer matches (the current amount is in the message/details), another request cancelled it first, or a refund retry has nothing left to issue (already refunded, zero refund, or no recorded amount)',
+  })
+  @ApiServiceUnavailableResponse({
+    type: ErrorResponseDto,
+    description:
+      'The booking is cancelled and its seats are released, but the refund could not be issued yet (the payment provider is unavailable). Send the same confirmation again to complete the refund with the recorded amount.',
+  })
+  cancel(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: CancelFlightBookingDto,
+  ) {
+    return this.bookings.cancel(user, id, dto);
   }
 
   @Post()

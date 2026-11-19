@@ -149,6 +149,18 @@ export class FlightBooking {
    */
   @Prop({ type: String })
   bookingReference?: string;
+
+  /**
+   * FLT-26: what this cancellation refunds, recorded just before the status becomes CANCELLED
+   * (0 when no tier applies). If issuing the refund then fails, cancelling again issues exactly
+   * this amount instead of recalculating it from a policy that may have changed.
+   */
+  @Prop({ type: Number, min: 0 })
+  cancellationRefundCents?: number;
+
+  /** FLT-26: when the traveler asked to cancel; written with the amount above. */
+  @Prop({ type: Date })
+  cancellationRequestedAt?: Date;
 }
 
 export type FlightBookingDocument = HydratedDocument<FlightBooking>;
