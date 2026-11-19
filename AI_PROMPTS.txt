@@ -2134,3 +2134,50 @@ Prompt:
 Sanad asked for two changes on PR #130. (1) POST /api/auth/resend-verification for the logged-in user, no body, not public: already verified (flag true or missing) gives 200 and no email; otherwise a new token (the one-row-per-user upsert invalidates the old link) is emailed in the background, a failed send never changes the response; a 60 second cooldown gives 429 with Retry-After, and the cooldown check plus token write are one atomic conditional upsert so parallel resends send one email; no IP limiter. (2) Read PUBLIC_API_URL through the shared configuration.ts and ConfigService, optional with default http://localhost:3001. Add unit and e2e tests, Swagger and docs.
 How the output was used:
 The assistant added requestedAt to the email verification token row and changed issue() into one conditional upsert that matches only a row older than the cooldown (or without requestedAt); a row inside the cooldown makes the upsert hit the unique userId index (11000), which resend() turns into ResendCooldownException (429, the controller sets Retry-After). Registration reuses the same issue(). A publicApiUrl setting was added to config/configuration.ts and the service reads it via ConfigService. I reviewed the code, ran lint, build, unit and e2e tests.
+
+Date: 2026-11-19
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: SCRUM-99 / ACC-17
+Prompt:
+Synchronize the dedicated ACC-17 worktree and implement an admin-only,
+read-only unified Flight and Hotel booking list. Add filters, global pagination,
+Swagger, unit and real AppModule tests, and documentation. Publish only after
+verification. Leave the PR for independent review and preserve GH-116.
+How the output was used:
+Verified the Jira description and checklist. Reused the local
+feature/ACC-17-admin-bookings branch, which had no matching remote. Fetched and
+fast-forwarded local develop in a separate clean worktree, then fast-forwarded
+ACC-17 from 1316126 to da2fd31998dadef0f49afc5560a21edb5fce8faf.
+Added GET /api/admin/bookings through AdminModule and the existing role and
+authentication guards. MongoDB filters, unions, sorts and paginates booking
+projections, then the service fetches related names and flight dates for that
+page. Date filters use inclusive UTC creation dates for both collections since
+Jira did not define the date field. Flight dates preserve round-trip and legacy
+behavior, hotel dates remain calendar strings, and missing references and
+associated display values are nullable. Responses exclude passenger and payment
+details. The endpoint performs no booking, inventory or payment writes.
+Verification:
+Focused unit 6/6 and E2E 36/36 (one suite each). Full Jest 1,194/1,194 (83 suites).
+Full E2E 1,585/1,586 (62 passing suites, 1 failing suite, no skipped tests).
+The single failure is the GEN-05 Swagger completeness assertion because its
+existing shared pagination table has no ACC-17 row. Requested authorization for
+one fixture-table entry. Build, ESLint and whitespace checks passed.
+Protected production modules, dependencies, shared contracts and GH-116 were
+untouched. The work remains uncommitted and unpushed with the shared verification
+pending. No PR or Jira changes.
+
+Date: 2026-11-19
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: SCRUM-99 / ACC-17
+Prompt:
+Register ACC-17 in the shared pagination suite with the existing 25 synthetic
+flight bookings. Rerun verification, then commit and push the feature branch.
+How the output was used:
+Added a single admin route entry to the shared pagination table. The existing
+assertions verified 25 bookings on pages of 10, 10 and 5 with no duplicates or
+omissions. Shared pagination passed 251/251, focused ACC-17 passed 6/6 unit and
+36/36 E2E, full Jest passed 1,194/1,194 across 83 suites, and full E2E passed
+1,600/1,600 across 63 suites. No tests were skipped. Build, ESLint and whitespace
+checks passed. Updated the Admin README with final verification results.
