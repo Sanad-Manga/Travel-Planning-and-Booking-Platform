@@ -23,7 +23,7 @@ export class CancelFlightBookingDto {
     example: 22500,
     minimum: 0,
     description:
-      'Required when confirm is true: the exact refundAmountCents returned by the preview. A different current amount answers 409 and changes nothing.',
+      'Required when confirm is true: the exact refundAmountCents returned by the preview. A different current amount answers 409 and changes nothing. When completing a refund that failed after the booking was cancelled, it must equal the amount recorded at that cancellation (the retry never recalculates or replaces it).',
   })
   @ValidateIf((dto: CancelFlightBookingDto) => dto.confirm === true)
   @IsInt({

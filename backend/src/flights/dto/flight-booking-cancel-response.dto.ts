@@ -78,7 +78,7 @@ export class FlightBookingCancelResponseDto {
   @ApiProperty({
     example: 30.5,
     description:
-      'Fractional days between now and the outbound departure (the refund uses this value, not a whole-day count)',
+      'Fractional days between now and the outbound departure (the refund uses this value, not a whole-day count). Negative only when completing a refund for a booking that was already cancelled before its departure.',
   })
   daysBefore: number;
 
@@ -95,7 +95,7 @@ export class FlightBookingCancelResponseDto {
     minimum: 0,
     maximum: 100,
     description:
-      'Refund percentage of the applied tier; 0 when no tier applies',
+      'Refund percentage of the applied tier; 0 when no tier applies. When completing a previously failed refund it is derived from the recorded amount because the tier is not re-read.',
   })
   refundPercent: number;
 
@@ -103,7 +103,7 @@ export class FlightBookingCancelResponseDto {
     type: FlightCancellationTierDto,
     nullable: true,
     description:
-      'The airline tier used for the calculation; null when no tier applies (zero refund)',
+      'The airline tier used for the calculation; null when no tier applies (zero refund) or when completing a refund that failed earlier (only the recorded amount is used, never a freshly selected tier).',
   })
   appliedTier: FlightCancellationTierDto | null;
 

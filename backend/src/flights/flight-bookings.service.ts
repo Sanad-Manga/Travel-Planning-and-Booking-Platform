@@ -1,9 +1,12 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   InternalServerErrorException,
   Injectable,
+  Logger,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { Connection, Model, PipelineStage, Types } from 'mongoose';
@@ -154,6 +157,8 @@ const CANCELLATION_REFUND_REASON = 'Flight booking cancelled by traveler';
 
 @Injectable()
 export class FlightBookingsService {
+  private readonly logger = new Logger(FlightBookingsService.name);
+
   constructor(
     @InjectModel(FlightBooking.name)
     private readonly model: Model<FlightBooking>,
@@ -626,13 +631,15 @@ export class FlightBookingsService {
    * transition, so a policy or clock change cannot cancel for an amount the traveler did not see.
    * A changed amount is a 409 that carries the current amount and changes nothing.
    *
-   * Cancellation itself goes through `BookingLifecycle.transition`, whose conditional status update
-   * releases every segment's seats once, in the same transaction. Only after it commits is a
-   * positive refund issued through PAY-03. A zero refund cancels and releases without calling
-   * `issue` (PAY-03 only accepts a positive integer amount). A repeated or concurrent cancellation
-   * finds the booking no longer CONFIRMED and answers 409, so seats are never returned twice and
-   * no second refund is issued. MongoDB cannot make the Stripe refund and the booking transaction
-   * atomic; a refund failure after the commit is surfaced, never swallowed.
+   * The confirmed amount is then recorded on the booking — with a conditional write that only
+   * matches while it is still CONFIRMED — before `BookingLifecycle.transition` releases every
+   * segment's seats once, in the same transaction. Only after the transition commits is the
+   * positive recorded refund issued through PAY-03; 0 is never sent to `issue` (it only accepts a
+   * positive integer). If issuing fails, the booking stays CANCELLED with the amount it recorded
+   * and the answer is 503; cancelling again completes the refund from that recorded amount (see
+   * `completeRecordedRefund`) instead of recalculating it or returning the seats twice. MongoDB
+   * cannot make the Stripe refund and the booking transaction atomic; a refund failure after the
+   * commit is surfaced, never swallowed.
    */
   async cancel(
     user: AuthenticatedUser,
@@ -640,7 +647,15 @@ export class FlightBookingsService {
     dto: CancelFlightBookingDto,
     now: Date = new Date(),
   ): Promise<FlightBookingCancelResponseDto> {
-    const preview = await this.cancellationContext(user, id, now);
+    const booking = await this.loadOwnedBooking(user, id);
+
+    // Already cancelled: only a confirmation can complete a refund that failed the first time.
+    // A preview of a cancelled booking stays a 409, like every other non-CONFIRMED booking.
+    if (booking.status === BookingStatus.CANCELLED) {
+      return this.completeRecordedRefund(booking, dto, now);
+    }
+
+    const preview = await this.cancellationContext(booking, now);
     if (!dto.confirm) {
       return this.toCancellationResponse(preview, false, null);
     }
@@ -650,9 +665,39 @@ export class FlightBookingsService {
 
     // Recheck status, departure and the amount immediately before the only status write. The
     // transition's own conditional update is the final guard against another request winning.
-    const fresh = await this.cancellationContext(user, id, now);
+    const freshBooking = await this.loadOwnedBooking(user, id);
+    const fresh = await this.cancellationContext(freshBooking, now);
     if (fresh.refundAmountCents !== dto.expectedRefundAmountCents) {
       throw this.refundAmountChanged(fresh.refundAmountCents);
+    }
+
+    // Record what this cancellation refunds while the booking is still CONFIRMED. A concurrent
+    // request that already changed the booking makes this write match nothing, and an amount
+    // recorded by another request is never replaced with a different one, so exactly one caller
+    // reaches the transition (and therefore the refund).
+    const recorded = await this.model
+      .updateOne(
+        {
+          _id: fresh.booking._id,
+          userId: fresh.booking.userId,
+          status: BookingStatus.CONFIRMED,
+          $or: [
+            { cancellationRefundCents: { $exists: false } },
+            { cancellationRefundCents: fresh.refundAmountCents },
+          ],
+        },
+        {
+          $set: {
+            cancellationRefundCents: fresh.refundAmountCents,
+            cancellationRequestedAt: now,
+          },
+        },
+      )
+      .exec();
+    if (recorded.matchedCount !== 1) {
+      throw new ConflictException(
+        'The flight booking was changed by another request; nothing was cancelled',
+      );
     }
 
     await this.bookingLifecycle.transition(
@@ -661,30 +706,70 @@ export class FlightBookingsService {
       BookingStatus.CANCELLED,
     );
 
-    let refund: FlightBookingRefundDto | null = null;
-    if (fresh.refundAmountCents > 0) {
-      const issued = await this.refunds.issue({
-        bookingType: BookingType.FLIGHT,
-        bookingId: id,
-        amountCents: fresh.refundAmountCents,
-        reason: CANCELLATION_REFUND_REASON,
-      });
-      refund = this.toRefundResponse(issued);
-    }
-
+    const refund = await this.issueRecordedRefund(
+      id,
+      fresh.refundAmountCents,
+    );
     return this.toCancellationResponse(fresh, true, refund);
   }
 
   /**
-   * Loads the booking, enforces owner-only access (another traveler and an unknown id are both
-   * 404), checks the cancellation window and calculates the current tier refund. Pure of writes:
-   * used by the preview, by the confirmation and by the pre-transition recheck.
+   * The booking is already CANCELLED. When its cancellation recorded a positive refund that was
+   * not issued (for example Stripe was down), this retry issues exactly that recorded amount: no
+   * tier is read, no amount is recomputed or replaced, and the departure is not rechecked because
+   * the cancellation itself was already valid. A preview stays a 409. A cancellation with nothing
+   * to refund, a legacy cancellation with no recorded amount, and an already-issued refund are 409
+   * (the hotel-cancellation precedent); none of them calls PAY-03.
    */
-  private async cancellationContext(
+  private async completeRecordedRefund(
+    booking: FlightBookingLean,
+    dto: CancelFlightBookingDto,
+    now: Date,
+  ): Promise<FlightBookingCancelResponseDto> {
+    if (!dto.confirm) {
+      throw new ConflictException(
+        'Only a confirmed flight booking can be cancelled',
+      );
+    }
+
+    const recorded = booking.cancellationRefundCents;
+    if (recorded === undefined) {
+      throw new ConflictException(
+        'This flight booking was cancelled without a recorded refund amount, so no refund can be issued from it',
+      );
+    }
+    if (dto.expectedRefundAmountCents !== recorded) {
+      throw this.refundAmountChanged(recorded);
+    }
+    if (recorded === 0) {
+      throw new ConflictException(
+        'This flight booking was cancelled without a refund; there is nothing left to refund',
+      );
+    }
+    if (
+      await this.refunds.getLatestForBooking(
+        BookingType.FLIGHT,
+        booking._id.toString(),
+      )
+    ) {
+      throw new ConflictException(
+        'This flight booking is already cancelled and its refund was issued',
+      );
+    }
+
+    const context = await this.cancelledContext(booking, now);
+    const refund = await this.issueRecordedRefund(
+      booking._id.toString(),
+      recorded,
+    );
+    return this.toCancellationResponse(context, true, refund);
+  }
+
+  /** The caller's own booking; another traveler and an unknown id are both 404. */
+  private async loadOwnedBooking(
     user: AuthenticatedUser,
     id: string,
-    now: Date,
-  ): Promise<CancellationContext> {
+  ): Promise<FlightBookingLean> {
     if (!Types.ObjectId.isValid(id)) {
       throw new NotFoundException('Flight booking not found');
     }
@@ -694,7 +779,18 @@ export class FlightBookingsService {
       .exec();
     if (!booking) throw new NotFoundException('Flight booking not found');
     assertOwner(user, { ownerId: booking.userId }, 'Flight booking not found');
+    return booking;
+  }
 
+  /**
+   * Checks that the booking is still CONFIRMED and inside the cancellation window and calculates
+   * the current tier refund. Pure of writes: used by the preview, the confirmation and the
+   * pre-transition recheck.
+   */
+  private async cancellationContext(
+    booking: FlightBookingLean,
+    now: Date,
+  ): Promise<CancellationContext> {
     if (booking.status !== BookingStatus.CONFIRMED) {
       throw new ConflictException(
         'Only a confirmed flight booking can be cancelled',
@@ -740,6 +836,76 @@ export class FlightBookingsService {
     };
   }
 
+  /**
+   * Loads the outbound flight of an already-cancelled booking for the recovery response. The
+   * departure may have passed by now; `daysBefore` is then negative and the tier is not re-read.
+   */
+  private async cancelledContext(
+    booking: FlightBookingLean,
+    now: Date,
+  ): Promise<CancellationContext> {
+    const [outbound] = getFlightBookingSegments(booking);
+    if (!outbound) {
+      throw new InternalServerErrorException(
+        'The flight booking has no outbound segment',
+      );
+    }
+    const flight = await this.flights
+      .findById(outbound.flightId)
+      .lean<FlightLean>()
+      .exec();
+    if (!flight) {
+      throw new NotFoundException('A booked flight segment was not found');
+    }
+    return {
+      booking,
+      outbound,
+      flight,
+      daysBefore: daysBeforeDeparture(flight.departureAt, now),
+      refundAmountCents: booking.cancellationRefundCents ?? 0,
+      appliedTier: null,
+    };
+  }
+
+  /**
+   * Issues the recorded refund (nothing for 0) and maps the PAY-03 summary. A transient failure
+   * becomes a 503 asking the traveler to send the request again: the booking is already CANCELLED,
+   * so the retry finishes the refund with the same amount and PAY-03's per-payment idempotency key.
+   * If a concurrent request created the refund first, that known duplicate is returned instead of
+   * an error; any other refusal from the refund rules is rethrown untouched.
+   */
+  private async issueRecordedRefund(
+    id: string,
+    amountCents: number,
+  ): Promise<FlightBookingRefundDto | null> {
+    if (amountCents <= 0) return null;
+    try {
+      const issued = await this.refunds.issue({
+        bookingType: BookingType.FLIGHT,
+        bookingId: id,
+        amountCents,
+        reason: CANCELLATION_REFUND_REASON,
+      });
+      return this.toRefundResponse(issued);
+    } catch (error) {
+      if (error instanceof ConflictException) {
+        const existing = await this.refunds.getLatestForBooking(
+          BookingType.FLIGHT,
+          id,
+        );
+        if (existing) return this.toRefundResponse(existing);
+      }
+      if (error instanceof HttpException) throw error;
+      this.logger.error(
+        `Flight booking ${id} was cancelled but its refund of ${amountCents} cents could not be issued`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      throw new ServiceUnavailableException(
+        'The flight booking is cancelled and its seats are released, but the refund could not be issued yet. Send the cancel request again to retry the refund.',
+      );
+    }
+  }
+
   private refundAmountChanged(currentAmountCents: number): ConflictException {
     return new ConflictException({
       message: `The refund amount is now ${currentAmountCents} cents; preview again and confirm the new amount`,
@@ -763,6 +929,15 @@ export class FlightBookingsService {
           refundPercent: context.appliedTier.refundPercent,
         }
       : null;
+    // On a refund-recovery retry the tier is not re-read (only the stored amount is used), so the
+    // percentage is derived from that amount instead of pretending a tier was selected now.
+    const refundPercent = appliedTier
+      ? appliedTier.refundPercent
+      : context.booking.totalCents > 0
+        ? Math.round(
+            (context.refundAmountCents / context.booking.totalCents) * 100,
+          )
+        : 0;
     return {
       id: context.booking._id.toString(),
       status: cancelled ? BookingStatus.CANCELLED : context.booking.status,
@@ -777,7 +952,7 @@ export class FlightBookingsService {
       outboundDepartureAt: context.flight.departureAt.toISOString(),
       daysBefore: context.daysBefore,
       refundAmountCents: context.refundAmountCents,
-      refundPercent: appliedTier?.refundPercent ?? 0,
+      refundPercent,
       appliedTier,
       refund,
     };

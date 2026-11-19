@@ -2653,6 +2653,8 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       expect(operation.description).toMatch(/confirm: false/i);
       expect(operation.description).toMatch(/zero refund/i);
       expect(operation.description).toMatch(/409/);
+      expect(operation.description).toMatch(/503/);
+      expect(operation.description).toMatch(/recorded amount/i);
       const requestRef =
         operation.requestBody.content['application/json'].schema.$ref;
       const requestSchema =
@@ -2668,6 +2670,275 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       expect(operation.responses['403']).toBeDefined();
       expect(operation.responses['404']).toBeDefined();
       expect(operation.responses['409']).toBeDefined();
+      expect(operation.responses['503']).toBeDefined();
+    });
+
+    describe('a refund that failed is completed by cancelling again', () => {
+      const storedBooking = async (id: string) =>
+        connection
+          .collection('flightBookings')
+          .findOne({ _id: new Types.ObjectId(id) });
+
+      /**
+       * A confirmed booking whose first refund attempt fails at Stripe. It is left CANCELLED with
+       * the amount its cancellation recorded and the seats already returned.
+       */
+      async function cancelledAfterFailedRefund(flightNumber: string) {
+        const flightId = await createFlight({ flightNumber });
+        await addCabin(flightId, 'ECONOMY', 10);
+        await setCancellationPolicy([
+          { daysBeforeThreshold: 30, refundPercent: 50 },
+        ]);
+        const bookingId = await confirmedBooking(flightId);
+        await seedSucceededPayment(bookingId, 45000, uniquePaymentRef());
+        const preview = await cancelRequest(bookingId, {
+          confirm: false,
+        }).expect(200);
+        const refundAmountCents = preview.body.refundAmountCents as number;
+        jest
+          .spyOn(stripeGateway, 'createRefund')
+          .mockRejectedValueOnce(new Error('Stripe is down'));
+        const failed = await cancelRequest(bookingId, {
+          confirm: true,
+          expectedRefundAmountCents: refundAmountCents,
+        }).expect(503);
+        return { flightId, bookingId, refundAmountCents, failed };
+      }
+
+      it('answers 503, keeps the booking CANCELLED with the recorded amount and releases the seats once', async () => {
+        const flightId = await createFlight({ flightNumber: 'MS921' });
+        await addCabin(flightId, 'ECONOMY', 10);
+        await setCancellationPolicy([
+          { daysBeforeThreshold: 30, refundPercent: 50 },
+        ]);
+        const bookingId = await confirmedBooking(flightId);
+        await seedSucceededPayment(bookingId, 45000, uniquePaymentRef());
+        jest
+          .spyOn(stripeGateway, 'createRefund')
+          .mockRejectedValueOnce(new Error('Stripe is down'));
+        const transition = jest.spyOn(lifecycle, 'transition');
+
+        const failed = await cancelRequest(bookingId, {
+          confirm: true,
+          expectedRefundAmountCents: 22500,
+        }).expect(503);
+        expect(failed.body.message).toMatch(/cancelled/i);
+        expect(failed.body.message).toMatch(/again/i);
+        expect(failed.body).not.toHaveProperty('refundAmountCents');
+
+        const stored = await storedBooking(bookingId);
+        expect(stored?.status).toBe(BookingStatus.CANCELLED);
+        expect(stored?.cancellationRefundCents).toBe(22500);
+        expect(stored?.cancellationRequestedAt).toBeInstanceOf(Date);
+        expect(transition).toHaveBeenCalledTimes(1);
+        expect(await cabinOf(flightId)).toMatchObject({
+          heldSeats: 0,
+          bookedSeats: 0,
+          totalSeats: 10,
+        });
+        expect(await connection.collection('refunds').countDocuments()).toBe(0);
+        expect(stripeGateway.refunds.size).toBe(0);
+      });
+
+      it('completes the refund with the confirmed amount and never releases the seats again', async () => {
+        const { flightId, bookingId, refundAmountCents } =
+          await cancelledAfterFailedRefund('MS922');
+        const transition = jest.spyOn(lifecycle, 'transition');
+
+        const retry = await cancelRequest(bookingId, {
+          confirm: true,
+          expectedRefundAmountCents: refundAmountCents,
+        }).expect(200);
+
+        expect(retry.body).toMatchObject({
+          id: bookingId,
+          status: 'CANCELLED',
+          cancelled: true,
+          totalCents: 45000,
+          refundAmountCents,
+          refundPercent: 50,
+          appliedTier: null,
+        });
+        expect(retry.body.refund).toMatchObject({
+          bookingType: 'FLIGHT',
+          bookingId,
+          status: 'REFUNDED',
+          amountCents: refundAmountCents,
+          currency: 'USD',
+          reason: 'Flight booking cancelled by traveler',
+        });
+        expect(retry.body.refund).not.toHaveProperty('stripePaymentIntentId');
+        expect(retry.body.refund).not.toHaveProperty('stripeRefundId');
+
+        // The retry only finishes the refund: the seats were released by the first request.
+        expect(transition).not.toHaveBeenCalled();
+        expect(await cabinOf(flightId)).toMatchObject({
+          heldSeats: 0,
+          bookedSeats: 0,
+          totalSeats: 10,
+        });
+        const refunds = await connection.collection('refunds').find({}).toArray();
+        expect(refunds).toHaveLength(1);
+        expect(refunds[0]).toMatchObject({
+          bookingType: 'FLIGHT',
+          amountCents: refundAmountCents,
+          reason: 'Flight booking cancelled by traveler',
+        });
+        expect(stripeGateway.refunds.size).toBe(1);
+      });
+
+      it('uses the recorded amount, not a changed policy or the departure window of the retry', async () => {
+        const { flightId, bookingId, refundAmountCents } =
+          await cancelledAfterFailedRefund('MS923');
+
+        // The airline raises the tier and the departure moves into the past after the failure.
+        await setCancellationPolicy([
+          { daysBeforeThreshold: 30, refundPercent: 100 },
+        ]);
+        await connection.collection('flights').updateOne(
+          { _id: new Types.ObjectId(flightId) },
+          {
+            $set: {
+              departureAt: new Date('2020-01-01T00:00:00.000Z'),
+              arrivalAt: new Date('2020-01-01T05:00:00.000Z'),
+            },
+          },
+        );
+
+        const retry = await cancelRequest(bookingId, {
+          confirm: true,
+          expectedRefundAmountCents: refundAmountCents,
+        }).expect(200);
+
+        expect(retry.body.refundAmountCents).toBe(refundAmountCents);
+        expect(retry.body.daysBefore).toBeLessThan(0);
+        expect(
+          (await connection.collection('refunds').findOne({}))?.amountCents,
+        ).toBe(refundAmountCents);
+        expect(await storedBooking(bookingId)).toMatchObject({
+          cancellationRefundCents: refundAmountCents,
+        });
+      });
+
+      it('does not issue a duplicate refund and reports the issued refund on a further retry', async () => {
+        const { bookingId, refundAmountCents } =
+          await cancelledAfterFailedRefund('MS924');
+
+        await cancelRequest(bookingId, {
+          confirm: true,
+          expectedRefundAmountCents: refundAmountCents,
+        }).expect(200);
+
+        const again = await cancelRequest(bookingId, {
+          confirm: true,
+          expectedRefundAmountCents: refundAmountCents,
+        }).expect(409);
+        expect(again.body.message).toMatch(/refund was issued/i);
+        expect(await connection.collection('refunds').countDocuments()).toBe(1);
+        expect(stripeGateway.refunds.size).toBe(1);
+      });
+
+      it('handles a zero-refund cancellation without Stripe and refuses a pointless retry', async () => {
+        const flightId = await createFlight({ flightNumber: 'MS925' });
+        await addCabin(flightId, 'ECONOMY', 10);
+        await setCancellationPolicy([]);
+        const bookingId = await confirmedBooking(flightId);
+        const stripe = jest.spyOn(stripeGateway, 'createRefund');
+
+        await cancelRequest(bookingId, {
+          confirm: true,
+          expectedRefundAmountCents: 0,
+        }).expect(200);
+        expect(stripe).not.toHaveBeenCalled();
+        expect(await storedBooking(bookingId)).toMatchObject({
+          cancellationRefundCents: 0,
+        });
+
+        const retry = await cancelRequest(bookingId, {
+          confirm: true,
+          expectedRefundAmountCents: 0,
+        }).expect(409);
+        expect(retry.body.message).toMatch(/nothing left to refund/i);
+        expect(await connection.collection('refunds').countDocuments()).toBe(0);
+        expect(stripeGateway.refunds.size).toBe(0);
+        expect(await cabinOf(flightId)).toMatchObject({
+          heldSeats: 0,
+          bookedSeats: 0,
+        });
+      });
+
+      it('keeps recovery owner-only, refuses a different amount and never invents one for a legacy cancellation', async () => {
+        const { bookingId, refundAmountCents } =
+          await cancelledAfterFailedRefund('MS926');
+
+        await http()
+          .post(CANCEL(bookingId))
+          .set('Cookie', otherTraveler)
+          .send({ confirm: true, expectedRefundAmountCents: refundAmountCents })
+          .expect(404);
+        await http()
+          .post(CANCEL(bookingId))
+          .set('Cookie', admin)
+          .send({ confirm: true, expectedRefundAmountCents: refundAmountCents })
+          .expect(403);
+        const mismatch = await cancelRequest(bookingId, {
+          confirm: true,
+          expectedRefundAmountCents: refundAmountCents + 1,
+        }).expect(409);
+        expect(mismatch.body.message).toContain(String(refundAmountCents));
+        // A preview of a cancelled booking is still a 409.
+        await cancelRequest(bookingId, { confirm: false }).expect(409);
+        expect(await connection.collection('refunds').countDocuments()).toBe(0);
+        expect(stripeGateway.refunds.size).toBe(0);
+
+        // Cancelled outside this route (no recorded amount): no amount is invented.
+        const legacyFlightId = await createFlight({ flightNumber: 'MS927' });
+        await addCabin(legacyFlightId, 'ECONOMY', 10);
+        await setCancellationPolicy([
+          { daysBeforeThreshold: 30, refundPercent: 50 },
+        ]);
+        const legacyBookingId = await confirmedBooking(legacyFlightId);
+        await lifecycle.transition(
+          BookingType.FLIGHT,
+          legacyBookingId,
+          BookingStatus.CANCELLED,
+        );
+
+        const legacyRetry = await cancelRequest(legacyBookingId, {
+          confirm: true,
+          expectedRefundAmountCents: 22500,
+        }).expect(409);
+        expect(legacyRetry.body.message).toMatch(/recorded refund amount/i);
+        expect(await storedBooking(legacyBookingId)).not.toHaveProperty(
+          'cancellationRefundCents',
+        );
+        expect(await connection.collection('refunds').countDocuments()).toBe(0);
+        expect(stripeGateway.refunds.size).toBe(0);
+      });
+
+      it('lets exactly one of two simultaneous retries issue the refund', async () => {
+        const { bookingId, refundAmountCents } =
+          await cancelledAfterFailedRefund('MS928');
+        const payload = {
+          confirm: true,
+          expectedRefundAmountCents: refundAmountCents,
+        };
+
+        const results = await Promise.all([
+          cancelRequest(bookingId, payload),
+          cancelRequest(bookingId, payload),
+        ]);
+
+        // A concurrent loser either completes it too (same refund) or sees it already issued.
+        expect(
+          results.every((res) => res.status === 200 || res.status === 409),
+        ).toBe(true);
+        expect(results.some((res) => res.status === 200)).toBe(true);
+        expect(await connection.collection('refunds').countDocuments()).toBe(1);
+        expect(stripeGateway.refunds.size).toBe(1);
+        const winner = results.find((res) => res.status === 200)!;
+        expect(winner.body.refund.amountCents).toBe(refundAmountCents);
+      });
     });
   });
 });
