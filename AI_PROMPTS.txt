@@ -2197,6 +2197,39 @@ Verification of the follow-up: lint and build pass; 1214 unit (84 suites) and 14
 rendered pages were viewed (joined letters, right-to-left order, mixed lines, mirrored brackets, a page break inside a paragraph, totals add up). Not done: a manual Swagger click-through against Atlas.
 
 Date: 2026-11-19
+Student: Hessain Elrefaey
+Tool: OpenCode (DeepSeek V4.1 Flash Free)
+Related Requirement: HTL-22 (hotel moderator views reservations for their hotel)
+Prompt:
+Implement HTL-22 in the Hotels module: add the read-only GET /api/hotels/:id/reservations for a HOTEL_MODERATOR, restricted to their own hotel (another hotel gets 403), returning paginated rows with guest, dates and status (shared PaginationDto, default page size 10); update Swagger, tests and directly related docs. Keep ownership checks in the service, do not add write endpoints, and do not modify Yusuf's hotel profile/rooms controllers (register the route in a new Hotels B controller instead).
+How the output was used:
+Added HotelReservationsController (@Controller('hotels')) so hotels.controller.ts is untouched, and HotelBookingsService.listForHotel, which re-checks the role and own-hotel id in the service (another, unknown or malformed id is 403, matching HTL-01/HTL-08) and queries the hotelBookings collection newest-first with the shared envelope via toPaginated. Guest display names are resolved through the exported UsersService.findById, never by reading the users collection; bookingReference is null for a pending hold and payment references are never selected. Added HotelReservationRowDto/HotelReservationsPageDto with Swagger, registered the controller in hotels.module.ts, added hotel-moderator-reservations.e2e-spec.ts (success, ownership/role 403s, 401, pagination validation, Swagger), and registered the new list in pagination.e2e-spec.ts with 25 seeded rows. Documented the endpoint in docs/api/hotel-moderator-reservations.md. Verification: npm.cmd run build, npm.cmd run lint, the new e2e suite (15/15), pagination.e2e-spec.ts (251/251) and the existing hotel-bookings/hotel-reviews e2e suites passed. E2E runs used MONGOMS_SYSTEM_BINARY because the cached mongod zip was corrupt on this machine.
+Student: Yassin Yahya
+Tool: Claude (Claude Code)
+Related Requirement: ITN-27 (SCRUM-119) Link confirmed bookings to itinerary days (bonus)
+Prompt:
+Implement ITN-27 (asked together with HTL-21, which is a separate branch and PR): POST /api/itineraries/:id/bookings links one of the
+user's own CONFIRMED flight or hotel bookings to a day of their own itinerary, and the linked amounts feed the budget without double counting.
+How the output was used:
+Read the ticket, the budget code (BudgetsService, buildBudgetSummary, city-group subtotals) and the booking provider contract (BookingProviderRegistry,
+getPayable, getStatus). Tests first (19 HTTP tests on an in-memory replica set with real Flights and Hotels booking providers), watched them fail, then
+wrote a new itineraryBookings collection (unique on itinerary + booking type + booking id, so a booking is linked once and cannot be counted twice, atomically),
+ItineraryBookingsService and its controller. The booking is read through the owner-scoped getPayable of its provider, never from the Flights or Hotels
+collections: unknown and someone else's bookings are 404, a booking that is not CONFIRMED is 409. The amount is a snapshot taken when linking; whether it still
+counts is read from getStatus each time the budget is added up (confirmed or completed counts, cancelled does not). A hotel booking counts under ACCOMMODATION,
+a flight booking under INTERCITY_TRANSPORT, in the budget summary, the day totals and the city-group subtotals (buildBudgetSummary got one optional parameter).
+Links are removed with their day or itinerary (through BudgetsService.removeForDay and removeForItinerary). The public view and clones leave the links out because
+a booking is private to its owner. ItinerariesModule imports PaymentsModule for the registry.
+Mutation checks: removing the owner filter failed the ownership test, and disabling the CONFIRMED guard failed four tests.
+Verification: lint and build pass; 1188 unit (82 suites) and 1502 e2e (62 suites, 3 workers) pass. Not done: a manual Swagger click-through against Atlas.
+Follow-up in the same PR (user: "fix them", about the missing list and unlink): GET /api/itineraries/:id/bookings lists the links of an itinerary, oldest first and paginated (the shared GEN-05 test
+failed my first, unpaginated version: no GET route may answer with a bare array), each with the status of its booking and "counted" (only a confirmed or completed booking counts in the budget);
+DELETE /api/itineraries/:id/bookings/:linkId removes a link in ONE delete whose filter holds the link id, the itinerary and the owner, so the booking can be linked again and its amount leaves the budget.
+Tests first (8 new HTTP tests), watched failing; mutation checks: dropping the owner filter and dropping the itinerary filter of the unlink each failed a test. One entry (25 seeded links) was added to
+ROUTES in test/pagination.e2e-spec.ts (the GEN-05 test), a teammate's file, flagged in the PR.
+Verification of the follow-up: lint and build pass; 1188 unit (82 suites) and 1524 e2e (62 suites, 3 workers) pass. Not done: a manual Swagger click-through against Atlas.
+
+Date: 2026-11-19
 Student: Abdulrahman Mohamad Hosny
 Tool: OpenCode (DeepSeek V4.1 Flash Free)
 Related Requirement: FLT-26 (follow-up: retry a failed cancellation refund)
