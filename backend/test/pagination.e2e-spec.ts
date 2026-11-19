@@ -149,6 +149,9 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
     },
     // 25 seeded + the two the flight search test needs (CAI, JFK)
     { swagger: '/api/airports', url: '/api/airports', auth: 'none', total: 27 },
+    { swagger: '/api/countries', url: '/api/countries', auth: 'none', total: 1 },
+    { swagger: '/api/cities', url: '/api/cities', auth: 'none' },
+    { swagger: '/api/currencies', url: '/api/currencies', auth: 'none', total: 1 },
     {
       swagger: '/api/notifications',
       url: '/api/notifications',
@@ -509,6 +512,7 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
       createdAt: now,
       updatedAt: now,
     });
+    await db.collection('currencies').insertOne({ code: 'EGP' });
     await db.collection('cities').insertMany(
       Array.from({ length: 100 }, (_v, i) => ({
         city_id: `city-${i}`,

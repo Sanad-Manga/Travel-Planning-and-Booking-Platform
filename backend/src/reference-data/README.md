@@ -401,3 +401,33 @@ changes only this README and appends entries to `AI_PROMPTS.txt`; it does not
 change implementation or dependency files, install packages, stage changes,
 commit, push, or create a PR. No credentials or `.env` contents were inspected
 or exposed.
+
+## Public reference lookups (GEN-12 / GitHub #162)
+
+These read-only endpoints use the records already stored by the reference-data
+seeder. They are public and use the shared pagination envelope
+`{ items, page, limit, total, totalPages }`. The default is page 1 and 10 items
+per page. The maximum limit is 50.
+
+| Endpoint | Item fields | Order |
+| --- | --- | --- |
+| `GET /api/countries` | `code`, `name`, `currency` | Country code ascending |
+| `GET /api/cities` | `city_id`, `name`, `country_code` | Official city ID ascending |
+| `GET /api/currencies` | `code` | Currency code ascending |
+
+Use `GET /api/cities?countryCode=EG` to filter cities before counting and
+paging. The filter accepts two letters, trims spaces, and uppercases the code.
+A valid code with no matches returns an empty page. A page beyond the last page
+has empty `items` and retains the filtered total. Invalid pagination, malformed
+country codes, and unsupported query fields return a field-level 400.
+
+The endpoints project only the response fields listed above. They preserve
+official identifiers and omit MongoDB metadata. Swagger at `/api/docs`
+documents the query parameters, response DTOs, and errors. Airports and the
+existing internal lookup methods retain their existing behavior.
+
+Verification on 2026-11-20 used Node 22.23.5 and disposable MongoDB 8.2.6.
+The exact backend CI commands passed: `npm ci`, build, lint, Jest
+(1,267 tests in 90 suites), and E2E (1,891 tests in 72 suites). The focused
+lookup suite passed 23 tests, and the shared pagination suite passed 357.
+The additional TypeScript and Git whitespace checks passed.

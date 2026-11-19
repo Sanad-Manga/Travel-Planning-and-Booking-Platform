@@ -2371,3 +2371,30 @@ Prompt:
 Fix the GEN-10 bug found in review: PATCH /api/admin/reports/:id marks the report resolved first and then hides or deletes the content, so if the content step fails the report stays resolved with the content still live and a retry answers 409. Prove it with a failing test first. Also remove the stale "REVIEW answers 501" Swagger text, since hotel reviews are handled.
 How the output was used:
 Added unit tests for the failure cases, then changed ReportsAdminService.resolve so a failed hide or delete puts the report back to OPEN and rethrows, while content that is already gone (404) keeps the report resolved. Updated the two controllers' Swagger text. I reviewed the code and ran build, lint, the admin unit tests and the GEN-10 e2e spec.
+
+Date: 2026-11-20
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: GEN-12 / GitHub issue #162
+Prompt:
+Verify the public lookup gap on develop, add country, city and currency
+endpoints within the file allowlist, and run the exact backend CI sequence.
+Publish the feature branch only after all checks pass. Leave the PR for review.
+How the output was used:
+Checked issue #162 and its comment, searched existing branches and PRs, and
+started fix/GEN-12-reference-lookups at 912b9073f98b60e04e6212166027e26d4f69c6d2.
+Added three public read-only routes through ReferenceDataService and the shared
+PaginationDto and paginate utility. Cities support an optional normalized
+two-letter country code. Explicit projections preserve official fields and
+omit MongoDB metadata. Documented public Swagger routes, queries and errors.
+Added real AppModule E2E coverage with disposable MongoDB and registered the
+routes in the shared pagination suite, including one synthetic currency.
+Airport behavior, internal service methods, seeding and protected files were
+preserved. The reference-data README was the sole Markdown change.
+Verification:
+Node 22.23.5 with npm 10.9.9. A stalled MongoDB binary postinstall was retried
+using the existing cached MongoDB 8.2.6 binary. Exact npm ci, build, lint,
+npm test (1,267/1,267, 90 suites) and npm run test:e2e (1,891/1,891, 72 suites)
+passed. No failed or skipped tests. The extra TypeScript check passed.
+Focused lookups passed 23/23 and shared pagination passed 357/357. The
+E2E run emitted a Jest worker teardown warning and exited successfully.

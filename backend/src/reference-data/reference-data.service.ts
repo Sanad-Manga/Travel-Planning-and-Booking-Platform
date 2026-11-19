@@ -3,13 +3,18 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { paginate, PaginatedResponse, PaginationDto } from '../common';
 import { AirportResponseDto } from './dto/airport-response.dto';
+import {
+  CityResponseDto,
+  CountryResponseDto,
+  CurrencyResponseDto,
+} from './dto/reference-lookups.dto';
 import { Country } from './schemas/country.schema';
 import { City } from './schemas/city.schema';
 import { Airport } from './schemas/airport.schema';
 import { Attraction } from './schemas/attraction.schema';
 import { Currency } from './schemas/currency.schema';
 
-/** Official-ID lookups and paginated airport response mapping. */
+/** Official-ID lookups and paginated public lists. */
 @Injectable()
 export class ReferenceDataService {
   constructor(
@@ -107,6 +112,52 @@ export class ReferenceDataService {
       .exec();
   }
 
+  listCountryPage(
+    pagination: PaginationDto,
+  ): Promise<PaginatedResponse<CountryResponseDto>> {
+    return lookupPage(
+      paginate(this.countries, {}, pagination, {
+        sort: { code: 1 },
+        projection: 'code name currency -_id',
+        map: ({ code, name, currency }: Country) => ({ code, name, currency }),
+      }),
+    );
+  }
+
+  listCityPage(
+    pagination: PaginationDto,
+    countryCode?: string,
+  ): Promise<PaginatedResponse<CityResponseDto>> {
+    return lookupPage(
+      paginate(
+        this.cities,
+        countryCode === undefined ? {} : { country_code: countryCode },
+        pagination,
+        {
+          sort: { city_id: 1 },
+          projection: 'city_id name country_code -_id',
+          map: ({ city_id, name, country_code }: City) => ({
+            city_id,
+            name,
+            country_code,
+          }),
+        },
+      ),
+    );
+  }
+
+  listCurrencyPage(
+    pagination: PaginationDto,
+  ): Promise<PaginatedResponse<CurrencyResponseDto>> {
+    return lookupPage(
+      paginate(this.currencies, {}, pagination, {
+        sort: { code: 1 },
+        projection: 'code -_id',
+        map: ({ code }: Currency) => ({ code }),
+      }),
+    );
+  }
+
   async listAirports(
     pagination: PaginationDto,
   ): Promise<PaginatedResponse<AirportResponseDto>> {
@@ -167,5 +218,17 @@ export class ReferenceDataService {
       };
     });
     return { ...page, items };
+  }
+}
+
+async function lookupPage<T>(
+  page: Promise<PaginatedResponse<T>>,
+): Promise<PaginatedResponse<T>> {
+  try {
+    return await page;
+  } catch {
+    throw new InternalServerErrorException(
+      'Reference data could not be retrieved',
+    );
   }
 }
