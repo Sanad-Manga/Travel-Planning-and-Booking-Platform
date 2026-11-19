@@ -72,9 +72,14 @@ condition above (flights: `departureAt >= now` of the flight, for a round trip a
 date `>= now` as `YYYY-MM-DD`). On a database error it must throw, not return `false`: the deactivation then fails and
 nothing changes.
 
-State today: the flight booking schema exists on develop (`flightBookings`: `userId`, `status`, `flightId`) but nothing is
-registered yet, and hotel bookings do not exist yet. **Until a type registers, it blocks nothing.** The blocking rule is
-proven end to end with a test double of the checker; the real flight and hotel checks are to be written by their owners.
+State today: both owners are registered, so both block. Hotels: `HotelBookingsService.hasUpcomingConfirmedBookings`
+(`checkIn >= today`). Flights: `FlightBookingProvider.hasUpcomingConfirmedBookings` (`flights/flight-booking.provider.ts`).
+The flight check is one aggregation, stopped at the first match: it starts from the `{ userId }` index of `flightBookings`, keeps
+`CONFIRMED` bookings, reads the flight ids of every leg (`segments.flightId`; a legacy booking without `segments` uses its top-level
+`flightId`), joins them to `flights` by `_id` (primary key) and answers true when any leg has `departureAt >= now`. A round trip therefore blocks
+while any leg is still ahead. Several bookings or passengers make no difference (one match is enough, passengers live inside the booking).
+A database error is thrown, never turned into `false`, so the deactivation fails and nothing changes.
+Proven by `flight-booking.upcoming.spec.ts` (unit) and `test/flight-deactivation-block.e2e-spec.ts` (real checkers through `DELETE /api/users/me`).
 
 Known limit: the booking check and the status change are two steps in two collections, so a booking confirmed in the
 instant between them is not caught. A concurrent double deactivation is safe (one atomic `ACTIVE -> DEACTIVATED` update; one call wins, the other gets 401).
