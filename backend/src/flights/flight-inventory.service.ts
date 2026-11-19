@@ -75,6 +75,27 @@ export class FlightInventoryService {
       .exec();
   }
 
+  /**
+   * FLT-27: reserve seats that are already booked (a confirmed booking moving to another flight),
+   * with the same one-update availability guard as `holdSeats`. Returns the cabin after the update,
+   * or null when it does not exist or has too few seats left.
+   */
+  reserveBookedSeats(
+    flightId: Types.ObjectId | string,
+    cabinClass: CabinClass,
+    seats: number,
+    session: ClientSession,
+  ): Promise<CabinLean | null> {
+    return this.cabins
+      .findOneAndUpdate(
+        { flightId, cabinClass, ...hasAtLeastSeats(seats) },
+        { $inc: { bookedSeats: seats } },
+        { new: true, session },
+      )
+      .lean<CabinLean>()
+      .exec();
+  }
+
   /** Tells "this flight has no such cabin" (404) apart from "no seats left" (409) after holdSeats returned null. */
   async cabinExists(
     flightId: Types.ObjectId | string,
