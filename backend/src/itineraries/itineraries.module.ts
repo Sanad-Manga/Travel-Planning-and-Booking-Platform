@@ -29,6 +29,9 @@ import { ItineraryFlightsService } from './itinerary-flights.service';
 import { ItineraryHotelsController } from './itinerary-hotels.controller';
 import { ItineraryHotelsService } from './itinerary-hotels.service';
 import { ItineraryItemsController } from './itinerary-items.controller';
+import { ItineraryPdfController } from './itinerary-pdf.controller';
+import { ItineraryPdfService } from './itinerary-pdf.service';
+import { ItineraryPublicPdfController } from './itinerary-public-pdf.controller';
 import { Activity, ActivitySchema } from './schemas/activity.schema';
 import { Budget, BudgetSchema } from './schemas/budget.schema';
 import {
@@ -73,7 +76,9 @@ import { TransportCostsService } from './transport-costs.service';
   // The public controller comes first so its static paths win over ItinerariesController's /:id.
   controllers: [
     ItinerariesPublicController,
+    ItineraryPublicPdfController,
     ItinerariesController,
+    ItineraryPdfController,
     ItineraryItemsController,
     ItineraryHotelsController,
     ItineraryFlightsController,
@@ -89,6 +94,7 @@ import { TransportCostsService } from './transport-costs.service';
     ItineraryCloneService,
     ItineraryHotelsService,
     ItineraryFlightsService,
+    ItineraryPdfService,
     ItineraryBookingsService,
     ActivitiesService,
     TransportCostsService,

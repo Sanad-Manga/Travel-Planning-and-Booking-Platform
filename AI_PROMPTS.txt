@@ -2168,6 +2168,33 @@ Prompt:
 Sanad asked for two changes on PR #130. (1) POST /api/auth/resend-verification for the logged-in user, no body, not public: already verified (flag true or missing) gives 200 and no email; otherwise a new token (the one-row-per-user upsert invalidates the old link) is emailed in the background, a failed send never changes the response; a 60 second cooldown gives 429 with Retry-After, and the cooldown check plus token write are one atomic conditional upsert so parallel resends send one email; no IP limiter. (2) Read PUBLIC_API_URL through the shared configuration.ts and ConfigService, optional with default http://localhost:3001. Add unit and e2e tests, Swagger and docs.
 How the output was used:
 The assistant added requestedAt to the email verification token row and changed issue() into one conditional upsert that matches only a row older than the cooldown (or without requestedAt); a row inside the cooldown makes the upsert hit the unique userId index (11000), which resend() turns into ResendCooldownException (429, the controller sets Retry-After). Registration reuses the same issue(). A publicApiUrl setting was added to config/configuration.ts and the service reads it via ConfigService. I reviewed the code, ran lint, build, unit and e2e tests.
+Student: Yassin Yahya
+Tool: Claude (Claude Code)
+Related Requirement: ITN-28 (SCRUM-120) Export / print an itinerary as PDF (bonus)
+Prompt:
+Implement ITN-28 after the Swagger check of the mandatory itinerary tickets (74 HTTP checks on a local sandbox database; the Atlas pass is still pending):
+GET /api/itineraries/:id/pdf exports an itinerary as a PDF with its days, cities, activities and budget; the owner, or anyone for a public itinerary;
+application/pdf that opens correctly; Swagger updated.
+How the output was used:
+Read the ticket, the existing pdfkit e-ticket service (FLT-23, so no new dependency) and the itinerary read paths. Tests first (9 unit tests for the
+document, 11 HTTP tests), watched them fail, then wrote itinerary-pdf.document.ts (pure toPdfData, pdfLines and pdfFilename, plus renderPdf with pdfkit,
+in memory, never stored), ItineraryPdfService and two controllers. There is no optional-login mechanism and common/ is not mine, so the ticket's "owner or
+anyone for a public itinerary" is two routes: GET /api/itineraries/:id/pdf (role USER: the owner always, even when an admin hid it; another traveler only
+while the itinerary is public) and GET /api/itineraries/public/:id/pdf (guests, public only). The public rules are the public view's (ITN-21), reused through
+ItinerariesPublicService.findPublic, so private, hidden, unknown and inactive-author itineraries are 404. The owner's budget is BudgetsService.summaryOf,
+so linked bookings (ITN-27) show up once that is merged; the public budget is the public view's. The filename is ASCII only (documented in Swagger). A test helper (test/helpers/pdf-text.ts)
+reads the text back out of the PDF so tests check what a reader sees. Mutation checks: removing the owner filter failed three tests, and disabling the character
+replacement failed its test. A sample PDF was fetched from a running sandbox and its text, totals and structure checked.
+Follow-up in the same PR (user: "install the pdf renderer / fix all the limits you had"): the first version used the standard PDF fonts, which draw Latin-1 only, so Arabic and emoji came out as "?",
+and no PDF renderer was installed to look at the pages. A renderer (the npm package mupdf, WebAssembly, in my scratch folder outside the repo) now turns the PDF into images, so the pages were actually looked at.
+Fonts: the PDF now embeds DejaVu Sans and Bold (npm package dejavu-fonts-ttf, free to embed; covers Latin with accents, Cyrillic, Greek, Arabic, symbols); characters with no glyph (Chinese,
+Japanese, Korean, emoji) still show as "?", one for each, and the Swagger text says so. Arabic needs more than a font: pdfkit joins the letters but does not order mixed text, so
+itinerary-pdf.bidi.ts (new, pure, with its own tests) uses bidi-js (MIT) to apply the Unicode bidirectional algorithm: lines with right-to-left text are wrapped by words, put in visual order and drawn
+word by word, right-aligned when the paragraph is right to left; brackets are mirrored. The app's own lines (time, name, cost) stay left to right, and a left-to-right mark (U+200E) after an Arabic activity name
+keeps the cost out of the Arabic run (the algorithm otherwise splits a hyphenated number after Arabic letters). The test helper now decodes embedded fonts through their ToUnicode maps. package.json and the lockfile
+got the two packages (the lockfile was rebuilt from the committed one plus only those entries, so it has no unrelated changes).
+Verification of the follow-up: lint and build pass; 1214 unit (84 suites) and 1494 e2e (62 suites, 3 workers) pass; an Arabic and English itinerary of 9 days was fetched from a running sandbox and its two
+rendered pages were viewed (joined letters, right-to-left order, mixed lines, mirrored brackets, a page break inside a paragraph, totals add up). Not done: a manual Swagger click-through against Atlas.
 
 Date: 2026-11-19
 Student: Hessain Elrefaey
