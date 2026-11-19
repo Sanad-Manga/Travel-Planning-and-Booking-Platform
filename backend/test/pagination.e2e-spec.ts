@@ -22,7 +22,7 @@ import {
  * answers with a bare array. So a new list endpoint cannot ship without being added here.
  */
 
-type Auth = 'none' | 'user' | 'admin' | 'hotelModerator';
+type Auth = 'none' | 'user' | 'admin' | 'hotelModerator' | 'airlineModerator';
 interface OpenApiSchema {
   $ref?: string;
   properties?: Record<string, OpenApiSchema>;
@@ -47,7 +47,12 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
   let mongo: MongoMemoryServer;
   let db: Connection;
   const jwt = new JwtService({ secret: TEST_ACCESS_SECRET });
-  const cookies: Record<'user' | 'admin' | 'hotelModerator', string> = { user: '', admin: '', hotelModerator: '' };
+  const cookies: Record<'user' | 'admin' | 'hotelModerator' | 'airlineModerator', string> = {
+    user: '',
+    admin: '',
+    hotelModerator: '',
+    airlineModerator: '',
+  };
   let userId: Types.ObjectId;
 
   async function account(
@@ -81,6 +86,10 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
   /** The post whose comments the /api/posts/{id}/comments row pages through. */
   const commentedPostId = new Types.ObjectId();
 
+  /** FLT-29: the airline and flight whose 25 bookings the /api/flights/{id}/bookings row pages through. */
+  const pagingAirlineId = new Types.ObjectId();
+  const pagingFlightId = new Types.ObjectId();
+
   /** The active hotel whose free rooms the /api/hotels/{id}/rooms/available row pages through. */
   const roomsHotelId = new Types.ObjectId();
 
@@ -109,8 +118,8 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
   ];
 
   const ROUTES: ListRoute[] = [
-    // user + admin + hotel moderator (the moderator pages the HTL-08 row below)
-    { swagger: '/api/admin/accounts', url: '/api/admin/accounts', auth: 'admin', total: 3 },
+    // user + admin + hotel moderator + airline moderator (the hotel moderator pages the HTL-08 row below)
+    { swagger: '/api/admin/accounts', url: '/api/admin/accounts', auth: 'admin', total: 4 },
     // ACC-17 lists flight and hotel bookings together: the 25 flight bookings plus the 25 hotel reservations seeded below
     {
       swagger: '/api/admin/bookings',
@@ -196,6 +205,13 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
       // flights need airlines + cabins; their paging is proven with data in flights-search.e2e-spec.ts
     },
     {
+      // FLT-29: the moderator's own flight (25 bookings seeded below)
+      swagger: '/api/flights/{id}/bookings',
+      url: `/api/flights/${pagingFlightId.toHexString()}/bookings`,
+      auth: 'airlineModerator',
+      total: 25,
+    },
+    {
       swagger: '/api/hotels/search',
       url: '/api/hotels/search',
       auth: 'none',
@@ -264,6 +280,9 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
     cookies.user = user.cookie;
     cookies.admin = admin.cookie;
     cookies.hotelModerator = (await account(Role.HOTEL_MODERATOR, { hotelId: roomsHotelId.toHexString() })).cookie;
+    cookies.airlineModerator = (
+      await account(Role.AIRLINE_MODERATOR, { airlineId: pagingAirlineId.toHexString() })
+    ).cookie;
     userId = user.id;
 
     await db.collection('posts').insertMany(
@@ -420,10 +439,9 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
     );
     // FLT-25: 25 of the user's own flight bookings. The list joins the outbound flight to group them,
     // so the flight must exist; the bookings are legacy confirmed rows (no segments, no reference).
-    const pagingFlightId = new Types.ObjectId();
     await db.collection('flights').insertOne({
       _id: pagingFlightId,
-      airlineId: new Types.ObjectId(),
+      airlineId: pagingAirlineId,
       flightNumber: 'PG100',
       departureAirport: 'CAI',
       arrivalAirport: 'JFK',

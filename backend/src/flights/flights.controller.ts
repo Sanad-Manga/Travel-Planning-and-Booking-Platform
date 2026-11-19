@@ -6,7 +6,10 @@ import {
   Param,
   Patch,
   Post,
+  Query,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
@@ -16,10 +19,12 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiProduces,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import {
+  ApiPaginatedResponse,
   AuthenticatedUser,
   CurrentUser,
   ErrorResponseDto,
@@ -35,9 +40,14 @@ import {
   CancelFlightDto,
   FlightCancellationResponseDto,
 } from './dto/cancel-flight.dto';
+import {
+  FlightRosterBookingDto,
+  FlightRosterQueryDto,
+} from './dto/flight-roster.dto';
 import { UpdateFlightDto } from './dto/update-flight.dto';
 import { FlightCancellationService } from './flight-cancellation.service';
 import { FlightEditService } from './flight-edit.service';
+import { FlightRosterService } from './flight-roster.service';
 import { FlightsService } from './flights.service';
 
 @ApiTags('flights')
@@ -46,6 +56,7 @@ export class FlightsController {
   constructor(
     private readonly flights: FlightsService,
     private readonly edit: FlightEditService,
+    private readonly roster: FlightRosterService,
     private readonly cancellation: FlightCancellationService,
   ) {}
 
@@ -136,6 +147,84 @@ export class FlightsController {
     @Body() dto: UpdateFlightDto,
   ) {
     return this.edit.update(user, params.id, dto);
+  }
+
+  @Get(':id/bookings')
+  @Roles(Role.AIRLINE_MODERATOR)
+  @ApiCookieAuth()
+  @ApiUnauthorizedResponse({
+    type: ErrorResponseDto,
+    description: 'Not logged in',
+  })
+  @ApiOperation({
+    summary:
+      'List the bookings of your own flight with seats remaining - FLT-29',
+    description:
+      'Paginated bookings (newest first) with booking reference, passenger names, cabin and seats on this flight, and status (CONFIRMED, CANCELLED or COMPLETED; unpaid holds are not listed). `status` filters. Each row carries `cabinSeatsRemaining`, the seats still free in its cabin. A round-trip booking appears under both of its flights. Passport/ID numbers are never returned.',
+  })
+  @ApiPaginatedResponse(FlightRosterBookingDto)
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: 'Invalid id, page, limit or status',
+  })
+  @ApiForbiddenResponse({
+    type: ErrorResponseDto,
+    description:
+      'Caller is not an airline moderator, or the flight belongs to another airline',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'Flight not found',
+  })
+  bookings(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: FlightIdParamDto,
+    @Query() query: FlightRosterQueryDto,
+  ) {
+    return this.roster.list(user, params.id, query);
+  }
+
+  @Get(':id/passengers/export')
+  @Roles(Role.AIRLINE_MODERATOR)
+  @ApiCookieAuth()
+  @ApiProduces('text/csv')
+  @ApiUnauthorizedResponse({
+    type: ErrorResponseDto,
+    description: 'Not logged in',
+  })
+  @ApiOperation({
+    summary: 'Download the passenger list of your own flight as CSV - FLT-29',
+    description:
+      'text/csv with a header row (bookingReference, bookingStatus, passengerName, passengerType, cabinClass, seats), one row per passenger of every CONFIRMED or COMPLETED booking. Values are quoted where needed, and a value starting with = + - or @ is prefixed so a spreadsheet cannot run it as a formula. Passport/ID numbers and dates of birth are not exported.',
+  })
+  @ApiOkResponse({
+    description: 'The CSV file',
+    content: { 'text/csv': { schema: { type: 'string' } } },
+  })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: 'Invalid id',
+  })
+  @ApiForbiddenResponse({
+    type: ErrorResponseDto,
+    description:
+      'Caller is not an airline moderator, or the flight belongs to another airline',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'Flight not found',
+  })
+  async exportPassengers(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: FlightIdParamDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<string> {
+    const file = await this.roster.exportPassengers(user, params.id);
+    res.set({
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${file.filename}"`,
+    });
+    return file.content;
   }
 
   @Post(':id/cancel')
