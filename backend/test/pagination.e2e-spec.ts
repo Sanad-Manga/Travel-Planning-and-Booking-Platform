@@ -173,6 +173,13 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
       // the city group of day 1 is city-0 from 2099-01-01 (the user's own itinerary, seeded below); paging with hotel data is proven in itineraries-hotels.service.spec.ts and itineraries.e2e-spec.ts
       query: 'fromDayNumber=1&guests=1',
     },
+    // ITN-27: the bookings linked to the user's first itinerary (25 links seeded below; their bookings do not exist, so each is listed with a null status)
+    {
+      swagger: '/api/itineraries/{id}/bookings',
+      url: `/api/itineraries/${groupHotelsItineraryId.toHexString()}/bookings`,
+      auth: 'user',
+      total: 25,
+    },
     {
       swagger: '/api/admin/audit-logs',
       url: '/api/admin/audit-logs',
@@ -207,6 +214,13 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
       url: `/api/hotels/${roomsHotelId.toHexString()}/availability`,
       auth: 'hotelModerator',
       query: 'from=2099-01-05&to=2099-01-07',
+      total: 25,
+    },
+    {
+      // HTL-22: the moderator's own hotel reservations (25 seeded below)
+      swagger: '/api/hotels/{id}/reservations',
+      url: `/api/hotels/${roomsHotelId.toHexString()}/reservations`,
+      auth: 'hotelModerator',
       total: 25,
     },
   ];
@@ -317,6 +331,34 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
         updatedAt: now,
       })),
     );
+    // HTL-22: 25 reservations for the hotel whose moderator pages them above.
+    await db.collection('hotelBookings').insertMany(
+      rows(25, (i) => ({
+        userId,
+        hotelId: roomsHotelId,
+        checkIn: '2099-01-05',
+        checkOut: '2099-01-07',
+        rooms: [
+          {
+            roomId: new Types.ObjectId(),
+            adults: 1,
+            children: 0,
+            name: 'Room',
+            type: 'Double',
+            maxOccupancy: 2,
+            pricePerNightCents: 10_000,
+            totalCents: 20_000,
+          },
+        ],
+        nights: 2,
+        totalCents: 20_000,
+        currency: 'USD',
+        status: 'CONFIRMED',
+        bookingReference: `HTL-${i.toString(16).padStart(16, '0')}`,
+        createdAt: new Date(now.getTime() - i * 1000),
+        updatedAt: now,
+      })),
+    );
     await db.collection('itineraries').insertMany(
       rows(25, (i) => ({
         authorId: userId,
@@ -332,6 +374,20 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
           startDate: '2099-01-01',
           days: [{ _id: new Types.ObjectId(), cityId: 'city-0', notes: '' }],
         }),
+      })),
+    );
+    // ITN-27: 25 bookings linked to the user's first itinerary (the bookings themselves are not seeded: the list shows a null status for each).
+    await db.collection('itineraryBookings').insertMany(
+      rows(25, (i) => ({
+        itineraryId: groupHotelsItineraryId,
+        dayId: new Types.ObjectId(),
+        ownerId: userId,
+        bookingType: 'HOTEL',
+        bookingId: new Types.ObjectId(),
+        amountCents: 10_000 + i,
+        currency: 'USD',
+        createdAt: now,
+        updatedAt: now,
       })),
     );
     // BON-02: 25 saved hotels (ids only; a missing hotel is simply listed as not available).
