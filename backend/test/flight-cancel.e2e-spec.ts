@@ -626,15 +626,19 @@ describe('airline cancels a flight (FLT-06) over HTTP (e2e)', () => {
           await realTransition(type, id, to);
           if (injected) return;
           injected = true;
-          const { _id, ...rest } = source;
-          void _id;
+          // Leave the cancellation fields out entirely: the driver would store `undefined` as null.
+          const {
+            _id,
+            cancellationRefundCents,
+            cancellationRequestedAt,
+            ...rest
+          } = source;
+          void [_id, cancellationRefundCents, cancellationRequestedAt];
           await db.collection('flightBookings').insertOne({
             ...rest,
             _id: lateId,
             status: BookingStatus.CONFIRMED,
             bookingReference: 'FLT-LATE00000000',
-            cancellationRefundCents: undefined,
-            cancellationRequestedAt: undefined,
           });
           await db
             .collection('cabins')
