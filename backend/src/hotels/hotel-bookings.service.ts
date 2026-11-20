@@ -4,6 +4,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
   OnModuleInit,
 } from '@nestjs/common';
@@ -56,6 +57,8 @@ const HOTEL_COMPLETION_BATCH_SIZE = 100;
 
 @Injectable()
 export class HotelBookingsService implements RoomReservations, BookingProvider, UpcomingBookingsChecker, OnModuleInit {
+  private readonly logger = new Logger(HotelBookingsService.name);
+
   constructor(
     @InjectModel(HotelBooking.name) private readonly bookings: Model<HotelBooking>,
     @InjectModel(Hotel.name) private readonly hotels: Model<Hotel>,
@@ -478,7 +481,12 @@ export class HotelBookingsService implements RoomReservations, BookingProvider, 
             !(error instanceof ConflictException) &&
             !(error instanceof NotFoundException)
           ) {
-            throw error;
+            // One unexpected failure must not leave every later stay CONFIRMED until tomorrow night;
+            // the cursor moves past this id below, so it cannot block the page behind it either.
+            this.logger.error(
+              `Could not complete hotel booking ${_id.toString()}`,
+              error instanceof Error ? error.stack : String(error),
+            );
           }
         }
         afterId = _id;
