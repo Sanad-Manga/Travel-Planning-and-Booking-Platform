@@ -159,7 +159,25 @@ export class FlightSeatSelectionService {
     try {
       updated = await this.bookings
         .findOneAndUpdate(
-          { _id: bookingId, status: BookingStatus.CONFIRMED },
+          {
+            _id: bookingId,
+            status: BookingStatus.CONFIRMED,
+            // Compare and set: the passenger's seat must still be the one read above. Two parallel
+            // requests for the same passenger cannot both win, so no claim is left behind unowned.
+            seatSelections: previous
+              ? {
+                  $elemMatch: {
+                    flightId: segment.flightId,
+                    passengerIndex,
+                    seat: previous.seat,
+                  },
+                }
+              : {
+                  $not: {
+                    $elemMatch: { flightId: segment.flightId, passengerIndex },
+                  },
+                },
+          },
           [
             {
               $set: {
@@ -196,10 +214,17 @@ export class FlightSeatSelectionService {
       throw error;
     }
     if (!updated) {
-      // Cancelled in the meantime: the seat must not stay blocked.
+      // Either cancelled in the meantime or this passenger's seat changed at the same moment: the new claim
+      // must not stay blocked.
       await this.claims.deleteOne({ _id: claim._id }).exec();
+      const stillConfirmed = await this.bookings.exists({
+        _id: bookingId,
+        status: BookingStatus.CONFIRMED,
+      });
       throw new ConflictException(
-        'Seats can be chosen only on a confirmed booking',
+        stillConfirmed
+          ? "This passenger's seat was changed at the same moment, please try again"
+          : 'Seats can be chosen only on a confirmed booking',
       );
     }
 

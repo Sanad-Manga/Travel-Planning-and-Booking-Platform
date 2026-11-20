@@ -2755,3 +2755,12 @@ Prompt:
 Final audit of develop found the README does not explain npm run seed, the demo setup order, or how to get a booking CONFIRMED from Swagger (the Stripe webhook is hidden and only a signed payment_intent.succeeded confirms). Add a Demo setup section and a Demo a payment section using the Stripe CLI, and fix the contracts sentence saying flights complete when DEPARTED (the code completes on arrival in a nightly sweep).
 How the output was used:
 Added the seed script row, the setup order, the stripe listen and payment_intents confirm steps and a note that reviews need pre-prepared past stays to README.md; corrected the GEN-11 flight completion sentence in docs/contracts.md. Checked each step against the controllers and cookie settings. Docs only.
+
+Date: 2026-11-20
+Student: Ahmed Sanad
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: FLT-28 (final audit L1)
+Prompt:
+Final audit: if one passenger asks for two different seats at the same moment on a confirmed booking, both seat claims are inserted, the booking keeps only one, and the other claim blocks that seat for every other traveler. Fix it without a unique index that would break normal seat changes.
+How the output was used:
+Made the booking update in FlightSeatSelectionService a compare-and-set: its filter requires the passenger's seat to still be the one read at the start (or still absent). The loser deletes its own new claim and answers 409 asking to retry, so no claim is orphaned. Added an e2e case with two parallel PATCHes for one passenger; it fails on the old code (verified by running the new spec against the old service) and passes now.

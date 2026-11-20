@@ -265,6 +265,25 @@ describe('Flight seat selection (FLT-28) over HTTP (e2e)', () => {
     await pick(other, { seat: '1E' }, userB).expect(200);
   });
 
+  it('one passenger asking for two different seats at the same moment leaves exactly one claim, matching the booking', async () => {
+    const mine = await booking(idA);
+    const results = await Promise.all([
+      pick(mine, { seat: '10A' }),
+      pick(mine, { seat: '10B' }),
+    ]);
+    expect(results.filter((r) => r.status === 200).length).toBeGreaterThanOrEqual(1);
+    expect(results.every((r) => r.status === 200 || r.status === 409)).toBe(true);
+
+    const seats = (await stored(mine)) ?? [];
+    expect(seats).toHaveLength(1);
+    const claimed = await db
+      .collection('flightSeatClaims')
+      .find({ bookingId: new Types.ObjectId(mine) })
+      .toArray();
+    expect(claimed).toHaveLength(1);
+    expect(claimed[0].seat).toBe(seats[0].seat);
+  });
+
   it('two passengers of one booking cannot share a seat', async () => {
     const id = await booking(idA);
     await pick(id, { seat: '3A', passengerIndex: 0 }).expect(200);
