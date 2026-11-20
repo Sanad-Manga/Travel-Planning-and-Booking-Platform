@@ -2380,6 +2380,24 @@ Prompt:
 Scaffold the Next.js app in frontend/ so the Milestone 2 tickets (starting with GEN-03 confirm before destructive actions and GEN-04 friendly empty states) have somewhere to go: App Router and TypeScript, exact pinned versions like the backend, lint and typecheck scripts, and the backend API reachable from the same origin so the httpOnly auth cookies work.
 How the output was used:
 Created frontend/ with Next.js 16, React 19 and TypeScript 5.9 (pinned), a root layout and home page, a flat ESLint config, an /api/* rewrite to the backend (BACKEND_URL, default http://localhost:3001), .env.example and a README. I ran npm install, lint, typecheck and build myself; no ticket features are in this PR.
+
+Date: 2026-11-19
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: GEN-03 (confirm before destructive actions)
+Prompt:
+Start GEN-03 on the new Next.js app: one reusable confirmation step that every destructive action (delete, cancel, deactivate) goes through before anything is sent to the backend.
+How the output was used:
+Added ConfirmDialog (accessible modal alertdialog: focus starts on the safe Cancel button, Tab stays inside, Escape or a click outside means cancel, focus returns to the opener, page scroll locked) and ConfirmProvider with a useConfirm() hook that returns a promise (true/false). An optional onConfirm keeps the dialog open and both buttons disabled while the action runs and rejects with the error if it fails. The provider is mounted in app/layout. I also added Vitest with Testing Library (8 tests) because the frontend had no test setup. I ran lint, typecheck, the tests and the build before accepting it.
+
+Date: 2026-11-19
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: GEN-04 (friendly empty states)
+Prompt:
+Start GEN-04 on the Next.js app: when a list has nothing in it (no bookings, no search results, no posts, no notifications) show a friendly message with a next step instead of a blank gap, using one shared component so the tone is the same everywhere.
+How the output was used:
+Added an EmptyState component (role=status, a title that says what is empty, a sentence about what to do, an optional decorative icon, and at most one action as a link or a button) and emptyMessages, a single place that holds the wording for every list that can be empty (flight and hotel bookings, searches, posts, comments, favourites, itineraries, notifications, reviews). Seven tests were added to the existing Vitest setup (15 pass in total). The preset links point at pages that do not exist yet; I noted that for the page owners. I ran lint, typecheck, the tests and the build before accepting it.
 Date: 2026-11-20
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
@@ -2405,3 +2423,16 @@ Prompt:
 Fix issue #161: ContentLookupService.isReportable only accepts POST and ITINERARY, so reporting a COMMENT or a REVIEW answers 400 "cannot be reported yet". Make a visible comment (not hidden, on a published and not hidden post) and a non-hidden hotel review reportable, once per user per item, with 404 for unknown or hidden targets, and write the tests first.
 How the output was used:
 Rewrote the old test that expected 400 for COMMENT/REVIEW and added the new cases to reports.e2e-spec.ts first (10 failed on the old code). Then added COMMENT and REVIEW branches to ContentLookupService (read-only lookups through the Comment and HotelReview models, registered in ReportsModule). The spec passes 32/32; build and lint pass. Nothing was written to the comments or reviews collections.
+
+Date: 2026-11-20
+Student: Ahmed Sanad
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GEN-12 (GitHub issue #162)
+Prompt:
+Add the public, paginated reference-data lookups from the GEN-12 issue: GET /api/countries (code, name, currency), GET /api/cities
+with an optional countryCode filter, and GET /api/currencies, using the shared pagination envelope and Swagger docs, readable by guests.
+Tests first; do not change the seed or schemas.
+How the output was used:
+Added three read-only controllers in the reference-data module, ordered by the official code, mapping to small response DTOs so no
+MongoDB fields leak. countryCode is trimmed and upper-cased and must be two letters (field-level 400 otherwise); a well-formed code
+nobody uses gives an empty page. Added the three routes to the GEN-05 pagination table and a new e2e spec (11 tests).
