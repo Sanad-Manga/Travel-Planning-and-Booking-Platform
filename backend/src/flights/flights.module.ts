@@ -15,7 +15,9 @@ import { FlightCabinsController } from './flight-cabins.controller';
 import { FlightCabinsService } from './flight-cabins.service';
 import { FlightSearchController } from './flight-search.controller';
 import { FlightSearchService } from './flight-search.service';
+import { FlightCancellationService } from './flight-cancellation.service';
 import { FlightEditService } from './flight-edit.service';
+import { FlightRosterService } from './flight-roster.service';
 import { FlightStatusJob } from './flight-status.job';
 import { FlightsController } from './flights.controller';
 import { FlightsService } from './flights.service';
@@ -25,6 +27,7 @@ import {
   FlightBookingSchema,
 } from './schemas/flight-booking.schema';
 import { Flight, FlightSchema } from './schemas/flight.schema';
+import { UsersModule } from '../users/users.module';
 
 @Module({
   imports: [
@@ -38,6 +41,7 @@ import { Flight, FlightSchema } from './schemas/flight.schema';
     PaymentsModule, // BookingLifecycle + BookingProviderRegistry (FLT-22 registers the flight booking provider)
     RefundsModule, // PAY-03's getLatestForBooking, shown on the confirmed booking readback
     NotificationsModule,
+    UsersModule, // ACC-12: UpcomingBookingsRegistry, where the flight bookings register their checker
   ],
   // FlightSearchController is listed first so GET /flights/search can never be captured by a future GET /flights/:id.
   controllers: [
@@ -57,6 +61,8 @@ import { Flight, FlightSchema } from './schemas/flight.schema';
     FlightCabinsService,
     FlightStatusJob,
     FlightEditService,
+    FlightRosterService,
+    FlightCancellationService,
   ],
   exports: [FlightsService],
 })

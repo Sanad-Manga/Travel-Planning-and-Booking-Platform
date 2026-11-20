@@ -109,6 +109,18 @@ PR-template preparation, for the student's later review:
 - Tests/build/lint: new actual-app tests and broader regressions pass as recorded above.
 - Hygiene/AI usage: no credential files, console logs, dead code, commits, pushes or PR updates were introduced; the AI log records the implementation and verification.
 
+## Countries, cities and currencies lookups — GEN-12
+
+Public, read-only, paginated (shared envelope, `page`/`limit` up to 50), no cookie needed:
+
+- `GET /api/countries` — `{ code, name, currency }`, ordered by country code.
+- `GET /api/cities?countryCode=EG` — `{ cityId, name, countryCode }`, ordered by city id. `countryCode` is
+  optional, any letter case, two letters (otherwise a field-level 400); a well-formed code nobody uses is an empty page.
+- `GET /api/currencies` — `{ code }`, ordered by currency code.
+
+Tests: `backend/test/reference-lookups.e2e-spec.ts` (rows, order, filter, errors, Swagger) and the GEN-05 table in
+`backend/test/pagination.e2e-spec.ts` (envelope and limits).
+
 ## Setup and explicit execution
 
 The runtime dependency `csv-parse` is pinned to `7.0.3` in

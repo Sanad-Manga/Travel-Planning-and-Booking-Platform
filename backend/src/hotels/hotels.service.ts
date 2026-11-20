@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { AuthenticatedUser, MAX_IMAGES_PER_ENTITY, Role } from '../common';
+import { AuthenticatedUser, Role } from '../common';
 import type { CancellationTier } from '../payments';
 import { ReferenceDataService } from '../reference-data/reference-data.service';
 import { CreateHotelDto } from './dto/create-hotel.dto';
@@ -24,7 +24,6 @@ export class HotelsService {
   /** HTL-01: admin creates a hotel. The route is @Roles(ADMIN); the role is re-checked here too. */
   async create(dto: CreateHotelDto, actor: AuthenticatedUser): Promise<HotelResponseDto> {
     if (actor.role !== Role.ADMIN) throw new ForbiddenException('Only an admin can create a hotel');
-    this.assertPhotoLimit(dto.photos);
     const countryCode = await this.countryOfCity(dto.cityId);
 
     try {
@@ -35,7 +34,6 @@ export class HotelsService {
         cityId: dto.cityId,
         countryCode,
         description: dto.description,
-        photos: dto.photos ?? [],
         starRating: dto.starRating,
         amenities: dto.amenities ?? [],
       });
@@ -53,7 +51,6 @@ export class HotelsService {
     if (actor.role !== Role.HOTEL_MODERATOR) throw new ForbiddenException('Only a hotel moderator can edit a hotel');
     if (actor.hotelId !== id) throw new ForbiddenException('You can only edit your own hotel');
 
-    this.assertPhotoLimit(dto.photos);
     const changes: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(dto)) {
       if (value !== undefined) changes[key] = value;
@@ -170,15 +167,6 @@ export class HotelsService {
       });
     }
     return city.country_code;
-  }
-
-  private assertPhotoLimit(photos?: unknown[]): void {
-    if (photos && photos.length > MAX_IMAGES_PER_ENTITY) {
-      throw new BadRequestException({
-        message: 'Validation failed',
-        details: [{ field: 'photos', message: `A hotel can have at most ${MAX_IMAGES_PER_ENTITY} photos` }],
-      });
-    }
   }
 
   private rethrowDuplicate(err: unknown): never {

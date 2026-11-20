@@ -44,9 +44,12 @@ export class Airline {
   code: string;
 
   /**
-   * One logo per airline. STUB until the upload service (GEN-08) merges: for now this is a plain
-   * http(s) URL the moderator supplies. It will be replaced by the id/url returned by `UploadService.save`.
+   * One logo per airline (GEN-08), stored by the shared upload service. `logoId` is the upload id (needed to delete
+   * the file), `logoUrl` its backend-relative url. Both are set and cleared together, only by AirlineLogoService.
    */
+  @Prop({ type: String })
+  logoId?: string;
+
   @Prop({ type: String, trim: true })
   logoUrl?: string;
 

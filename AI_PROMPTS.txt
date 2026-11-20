@@ -2329,3 +2329,134 @@ Implement only the Flights-owned part of FLT-27 on PATCH /api/flight-bookings/:i
 How the output was used:
 Added ChangeFlightBookingDto ({ flightId }, Mongo id) and PATCH /api/flight-bookings/:id/change-flight with role USER, ownership through the existing service-side assertOwner/404 convention, and Swagger for 200/400/401/403/404/409. FlightBookingsService.changeFlight rejects any non-CONFIRMED booking, round trips, the same flight, a departed booked flight, and a replacement that is not bookable, changes route or airline, lacks the booked cabin, cannot carry the booked baggage or lacks seats. It recomputes the replacement total from the stored passenger counts, stored segment baggage fee and current replacement cabin fare; only an unchanged total is accepted, and higher/lower differences are 409 with the difference. No payment or refund is created. One MongoDB transaction conditionally reserves the replacement's booked seats with the shared availability filter, updates the booking only while it is still CONFIRMED on the old flight, writes the new segment/top-level pricing, then returns the old booked seats; a failure or concurrent winner aborts the transaction, so old seats are never released early or twice and the replacement cannot be oversold. The booking id, reference, passengers, payment reference and status are preserved and the shared summary response returns the updated confirmed booking. Added a pure replacementTotalCents/fareDifferenceCents helper with unit tests. Documented the equal-fare Flights contract and the deferred Payments createBookingCharge/getBookingCharge and multi-refund/issueAdjustment contracts (explicitly not implemented). Added 10 E2E tests: equal-fare change with baggage and preserved reference, wrong route/airline/same flight/missing cabin, higher and lower fare 409, ineligible statuses and round trip, cancelled/departed replacement, seat shortage, two concurrent changes, owner/role isolation, field validation and Swagger. No Payments, Refunds, common/, Airlines or other production code changed.
 Verification: npm run build passed; npm run lint passed; npx jest --runInBand "src/flights" "src/refunds" "src/payments/refund-calculator" 67/67 passed; npx jest --config ./test/jest-e2e.json flight-bookings-hold --runInBand 96/96 passed (10 FLT-27); npx jest --config ./test/jest-e2e.json payments-webhook payments-concurrency refunds-concurrency pagination --runInBand 243/243 passed.
+Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code)
+Related Requirement: GEN-10 (SCRUM-100) Admin resolves reports: dismiss, hide or delete content
+Prompt:
+Implement GEN-10 in the Admin module: GET /api/admin/reports (paginated, open reports only), PATCH /api/admin/reports/:id
+(dismiss/hide/delete, atomic against a second resolution of the same report), and DELETE /api/admin/content/:type/:id for
+direct moderation independent of any report. Every content type the ticket lists (post, comment, review, itinerary) must
+actually hide/delete, audit-logged, without editing Yusuf's/Hessain's/Yassin's own module files.
+How the output was used:
+Added ReportsAdminController/Service (reuses the Report schema class directly, same pattern ReportsModule itself already
+uses for its own read-only Post/Itinerary lookups) and AdminContentController/Service, the shared hide/delete worker used
+by both direct moderation and report resolution so the two paths can't drift. Post deletion reuses
+BlogService.deletePostAndDependents (its own doc comment invites this reuse for GEN-10). Comment hide/delete mirrors
+CommentsService.remove's real Mongo transaction (delete + commentCount decrement). Itinerary is hidden/deleted via direct
+schema access (ItinerariesModule exports only its own ownership-scoped service, not an admin-safe path); its
+activities/transportCosts/budgets cascade is a known gap, flagged for Yassin. Resolving a report claims it atomically
+(findOneAndUpdate filtered on status: OPEN) so a second resolution is rejected with 409 without a read-then-write race.
+First pass wrongly 501'd REVIEW on the assumption no reviews module exists; re-reading the ticket's own "touches
+Hessain's work" line against the actual codebase found HotelReview (backend/src/hotels/schemas/hotel-review.schema.ts)
+already has isHidden and a read-side filter plus a cached Hotel.averageRating/reviewCount that HotelReviewsService keeps
+in sync via a private recalculateHotelRating. Implemented REVIEW hide/delete against the HotelReview/Hotel schemas
+directly (HotelsModule exports MongooseModule, so no file of Hessain's needed editing) and duplicated that exact
+recalculation query, flagged in the PR as a candidate for Hessain to expose publicly instead. A capped e2e run then
+surfaced a second latent bug: my e2e spec used a plain MongoMemoryServer (standalone), which cannot run the
+multi-document transactions this ticket's comment/review paths use ("Transaction numbers are only allowed on a replica
+set member or mongos") — switched to MongoMemoryReplSet.create({ replSet: { count: 1 } }), this repo's own convention
+for any e2e spec touching transactional code (see comments.e2e-spec.ts), which also means the comment-delete path is now
+actually exercised end-to-end for the first time rather than only through a mocked unit test.
+Verification: npx tsc --noEmit -p . and npx eslint src/admin test/admin-content-moderation.e2e-spec.ts clean; npm run
+build passed; npx jest src/admin --silent 151/151 passed; npx jest --config ./test/jest-e2e.json
+test/admin-content-moderation.e2e-spec.ts --maxWorkers=1 --silent 13/13 passed (capped workers per this machine's
+e2e-crash history). Not done: no full local e2e/unit suite run (CI covers that); no manual Swagger click-through against
+Atlas.
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: FLT-06 (airline cancels a flight, bookings cancelled with a 100% refund)
+Prompt:
+Start my sprint 4 tickets, FLT-06 first: POST /api/flights/:id/cancel lets the moderator of the owning airline cancel a SCHEDULED flight after an explicit confirmation. The flight becomes CANCELLED and leaves search, unpaid holds are released, every CONFIRMED booking becomes CANCELLED through BookingLifecycle with a 100% refund through RefundsService.issue (PAY-03), and each passenger is notified. Reuse the FLT-26 pattern of recording the refund amount before the transition so a failed refund can be retried.
+How the output was used:
+Added FlightCancellationService (own file), CancelFlightDto and the controller route with Swagger. The flight is cancelled in one atomic write first; holds go through PaymentActivity then BookingLifecycle (EXPIRED, which releases held seats); confirmed bookings (a round trip is cancelled as a whole when this flight is either leg) record the full amount, transition to CANCELLED, notify the passenger and are refunded. Anything unfinished is returned in `pending` with complete=false and a repeat of the same request retries only that, without refunding twice. The e2e tests are in flight-cancel.e2e-spec.ts; I reviewed the code and ran build, lint and the tests before accepting it.
+Related Requirement: FLT-29 (moderator view of a flight's bookings and CSV export)
+Prompt:
+Work on FLT-29: GET /api/flights/:id/bookings for the moderator of the owning airline, showing booking reference, passenger names, cabin, seats and status (CONFIRMED/CANCELLED) plus seats remaining per cabin, and GET /api/flights/:id/passengers/export returning the passenger list as CSV. Another airline's moderator gets 403. The CSV needs a header row, must escape commas and quotes, and download as text/csv.
+How the output was used:
+Added FlightRosterService (own file, read-only over the bookings), its DTOs and the two controller routes with Swagger. The list uses the shared pagination envelope exactly (the repo-wide pagination test rejects extra keys), so seats remaining per cabin is a field on each row. A round-trip booking shows the leg on the viewed flight. The CSV is built with csv-stringify (quoting, CRLF, formula-escaping), lists only CONFIRMED and COMPLETED bookings, and never includes passport numbers or dates of birth. I reviewed the code, added the route to the GEN-05 pagination test table, and ran build, lint and the tests.
+Related Requirement: GEN-10 (review fix: report resolution order)
+Prompt:
+Fix the GEN-10 bug found in review: PATCH /api/admin/reports/:id marks the report resolved first and then hides or deletes the content, so if the content step fails the report stays resolved with the content still live and a retry answers 409. Prove it with a failing test first. Also remove the stale "REVIEW answers 501" Swagger text, since hotel reviews are handled.
+How the output was used:
+Added unit tests for the failure cases, then changed ReportsAdminService.resolve so a failed hide or delete puts the report back to OPEN and rethrows, while content that is already gone (404) keeps the report resolved. Updated the two controllers' Swagger text. I reviewed the code and ran build, lint, the admin unit tests and the GEN-10 e2e spec.
+
+Date: 2026-11-19
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: FLT-05 (follow-up: round-trip return-leg bookings, issue #154)
+Prompt:
+Fix the FLT-05 gap the reviewer found: a round-trip booking stores only its outbound flight in flightId and its return leg only in segments[].flightId, so for a flight that is the return leg the airports could still be changed while it had paid bookings, and a time change did not notify those passengers. Prove it with failing e2e tests first, then fix both places with the same $or filter that the cancellation and roster services use.
+How the output was used:
+Added two round-trip e2e tests to flight-edit.e2e-spec.ts (airport lock 409 for a CONFIRMED return-leg booking; one notification per passenger for a CONFIRMED return-leg booking, none for a pending one) and ran them to see them fail. Then added an onFlight() filter ($or on flightId and segments.flightId) used by hasActiveBookings and notifyPassengers in flight-edit.service.ts. The spec passes (28/28); build and lint pass. Nothing else changed.
+Related Requirement: Milestone 2 setup (frontend scaffold, groundwork for GEN-03 and GEN-04)
+Prompt:
+Scaffold the Next.js app in frontend/ so the Milestone 2 tickets (starting with GEN-03 confirm before destructive actions and GEN-04 friendly empty states) have somewhere to go: App Router and TypeScript, exact pinned versions like the backend, lint and typecheck scripts, and the backend API reachable from the same origin so the httpOnly auth cookies work.
+How the output was used:
+Created frontend/ with Next.js 16, React 19 and TypeScript 5.9 (pinned), a root layout and home page, a flat ESLint config, an /api/* rewrite to the backend (BACKEND_URL, default http://localhost:3001), .env.example and a README. I ran npm install, lint, typecheck and build myself; no ticket features are in this PR.
+
+Date: 2026-11-19
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: GEN-03 (confirm before destructive actions)
+Prompt:
+Start GEN-03 on the new Next.js app: one reusable confirmation step that every destructive action (delete, cancel, deactivate) goes through before anything is sent to the backend.
+How the output was used:
+Added ConfirmDialog (accessible modal alertdialog: focus starts on the safe Cancel button, Tab stays inside, Escape or a click outside means cancel, focus returns to the opener, page scroll locked) and ConfirmProvider with a useConfirm() hook that returns a promise (true/false). An optional onConfirm keeps the dialog open and both buttons disabled while the action runs and rejects with the error if it fails. The provider is mounted in app/layout. I also added Vitest with Testing Library (8 tests) because the frontend had no test setup. I ran lint, typecheck, the tests and the build before accepting it.
+
+Date: 2026-11-19
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: GEN-04 (friendly empty states)
+Prompt:
+Start GEN-04 on the Next.js app: when a list has nothing in it (no bookings, no search results, no posts, no notifications) show a friendly message with a next step instead of a blank gap, using one shared component so the tone is the same everywhere.
+How the output was used:
+Added an EmptyState component (role=status, a title that says what is empty, a sentence about what to do, an optional decorative icon, and at most one action as a link or a button) and emptyMessages, a single place that holds the wording for every list that can be empty (flight and hotel bookings, searches, posts, comments, favourites, itineraries, notifications, reviews). Seven tests were added to the existing Vitest setup (15 pass in total). The preset links point at pages that do not exist yet; I noted that for the page owners. I ran lint, typecheck, the tests and the build before accepting it.
+Date: 2026-11-20
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-12 (issue #153: posts of a deactivated author must be hidden)
+Prompt:
+Work on GitHub issue #153 (ACC-12) following contracts.md: re-check develop, and hide the published posts of a deactivated author from the public list, the search and the post detail (404 like an unknown post, admins may still open it), deciding from the user's status through UsersService with correct pagination totals; list anything else that serves such an author's posts. Add unit and e2e tests, update docs/api/account-deactivation.md. No PR, no issue comments.
+How the output was used:
+Added UsersService.findDeactivatedIds and isDeactivated; BlogService.listPublished (list, search, tag list) now filters the author id inside the database query, findOne returns 404 for a deactivated author unless the viewer is an admin, and likes, comments (list and create) follow the same rule. The upload visibility middleware serves a deactivated author's published post images like hidden ones (admin only). Wrote unit tests and a new e2e suite plus one upload-visibility case, and updated the account deactivation doc. Found that GET /api/posts/:id is public and never receives the caller, so the admin exception cannot be exercised through that route; reported it instead of changing common/.
+Date: 2026-11-20
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GitHub issue #153 / ACC-12 follow-up (flight bookings must block self-deactivation)
+Prompt:
+Follow-up on issue #153 on the same branch: Sanad pointed out that only the hotel bookings service registers an UpcomingBookingsChecker, so upcoming flight bookings do not block DELETE /api/users/me. Register a flight checker like the hotel one (true for a CONFIRMED booking with any leg departing at or after now, indexed query, throws on database errors), add unit and e2e tests, update docs/api/account-deactivation.md. No PR, no issue comments.
+How the output was used:
+Added hasUpcomingConfirmedBookings to FlightBookingProvider and registered it in UpcomingBookingsRegistry on module init (one aggregation from the userId index, joined to the flights by id, covering round-trip legs and legacy bookings without segments), imported UsersModule in FlightsModule, wrote a unit spec on an in-memory MongoDB and an e2e suite that uses the real checkers through DELETE /api/users/me, and updated the account deactivation doc.
+
+Date: 2026-11-20
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: GEN-09 (report content: comments and reviews, issue #161)
+Prompt:
+Fix issue #161: ContentLookupService.isReportable only accepts POST and ITINERARY, so reporting a COMMENT or a REVIEW answers 400 "cannot be reported yet". Make a visible comment (not hidden, on a published and not hidden post) and a non-hidden hotel review reportable, once per user per item, with 404 for unknown or hidden targets, and write the tests first.
+How the output was used:
+Rewrote the old test that expected 400 for COMMENT/REVIEW and added the new cases to reports.e2e-spec.ts first (10 failed on the old code). Then added COMMENT and REVIEW branches to ContentLookupService (read-only lookups through the Comment and HotelReview models, registered in ReportsModule). The spec passes 32/32; build and lint pass. Nothing was written to the comments or reviews collections.
+
+Date: 2026-11-20
+Student: Ahmed Sanad
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GEN-08 (GitHub issue #160)
+Prompt:
+Check develop for GEN-08 and fix what is still missing: only activities (and, since BLG-10, posts) had an upload route. Add hotel
+photo upload (JPG/PNG, 5 MB, max 5, hotel moderator of that hotel only) and the airline logo upload (1 logo, airline moderator of
+that airline only), reusing UploadService, with tests for the limits and the ownership. Tests first for the limits.
+How the output was used:
+Added POST/DELETE /api/hotels/:id/photos and POST/DELETE /api/airlines/:id/logo following the BLG-10 pattern: ownership check
+(403 for anyone else), UploadService validates and holds the numbered slot, then one conditional update stores the reference, and the
+file is removed again if that fails. A second logo is 409 until the first is removed (no atomic replacement). Followed BLG-10 and removed
+the free-text photos and logoUrl fields from the hotel and airline create/edit bodies, so a client cannot point at an upload it does
+not own; updated the older hotel and airline tests that sent them. 19 new e2e tests (hotel-airline-images).
+Related Requirement: GEN-12 (GitHub issue #162)
+Prompt:
+Add the public, paginated reference-data lookups from the GEN-12 issue: GET /api/countries (code, name, currency), GET /api/cities
+with an optional countryCode filter, and GET /api/currencies, using the shared pagination envelope and Swagger docs, readable by guests.
+Tests first; do not change the seed or schemas.
+How the output was used:
+Added three read-only controllers in the reference-data module, ordered by the official code, mapping to small response DTOs so no
+MongoDB fields leak. countryCode is trimmed and upper-cased and must be two letters (field-level 400 otherwise); a well-formed code
+nobody uses gives an empty page. Added the three routes to the GEN-05 pagination table and a new e2e spec (11 tests).

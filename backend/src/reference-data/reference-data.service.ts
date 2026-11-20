@@ -3,6 +3,11 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { paginate, PaginatedResponse, PaginationDto } from '../common';
 import { AirportResponseDto } from './dto/airport-response.dto';
+import {
+  CityResponseDto,
+  CountryResponseDto,
+  CurrencyResponseDto,
+} from './dto/reference-lookups.dto';
 import { Country } from './schemas/country.schema';
 import { City } from './schemas/city.schema';
 import { Airport } from './schemas/airport.schema';
@@ -105,6 +110,53 @@ export class ReferenceDataService {
       .select('attraction_id name city_id -_id')
       .lean<Attraction[]>()
       .exec();
+  }
+
+  /** GEN-12: paginated public list of countries, ordered by official code. */
+  listCountriesPage(
+    pagination: PaginationDto,
+  ): Promise<PaginatedResponse<CountryResponseDto>> {
+    return paginate(this.countries, {}, pagination, {
+      sort: { code: 1 },
+      projection: 'code name currency',
+      map: (country: Country) => ({
+        code: country.code,
+        name: country.name,
+        currency: country.currency,
+      }),
+    });
+  }
+
+  /** GEN-12: paginated public list of cities (optionally of one country), ordered by official city id. */
+  listCitiesPage(
+    pagination: PaginationDto,
+    countryCode?: string,
+  ): Promise<PaginatedResponse<CityResponseDto>> {
+    return paginate(
+      this.cities,
+      countryCode ? { country_code: countryCode } : {},
+      pagination,
+      {
+        sort: { city_id: 1 },
+        projection: 'city_id name country_code',
+        map: (city: City) => ({
+          cityId: city.city_id,
+          name: city.name,
+          countryCode: city.country_code,
+        }),
+      },
+    );
+  }
+
+  /** GEN-12: paginated public list of currencies, ordered by official code. */
+  listCurrenciesPage(
+    pagination: PaginationDto,
+  ): Promise<PaginatedResponse<CurrencyResponseDto>> {
+    return paginate(this.currencies, {}, pagination, {
+      sort: { code: 1 },
+      projection: 'code',
+      map: (currency: Currency) => ({ code: currency.code }),
+    });
   }
 
   async listAirports(

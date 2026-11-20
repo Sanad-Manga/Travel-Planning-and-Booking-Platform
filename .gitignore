@@ -7,6 +7,7 @@ dist/
 *.log
 .DS_Store
 coverage/
+CLAUDE.local.md
 uploads/
 !backend/src/uploads/
 !backend/src/uploads/**
