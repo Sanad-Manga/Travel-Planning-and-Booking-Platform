@@ -482,3 +482,63 @@ duplicates or omissions. The shared suite uses disposable MongoDB.
 
 Full Jest passed 1,194/1,194 across 83 suites. Full E2E passed 1,600/1,600
 across 63 suites. Build, ESLint and whitespace checks passed.
+
+## Provider booking and revenue analytics (BON-01 / SCRUM-118)
+
+`GET /api/admin/analytics?dateFrom=2026-11-01&dateTo=2026-11-30` gives an
+administrator one read-only report. It uses the existing access cookie and
+role guard. Anonymous, expired or invalid sessions receive 401. Authenticated
+non-admin roles receive 403.
+
+Both bounds are required real calendar dates in `YYYY-MM-DD`. The report
+selects each booking's `createdAt` from UTC midnight at the start of
+`dateFrom` up to UTC midnight after `dateTo`. Missing, reversed, malformed
+or unsupported query fields return the standard field-level 400. The Swagger
+operation describes both bounds, the report DTO, and 400/401/403/500 responses.
+
+- `period` echoes the selected bounds. `summary` includes `totalBookings`,
+  `flightBookings`, `hotelBookings`, and `confirmedBookings`.
+- `providers` lists rows ordered by booking type and provider ID. Each row has
+  `type`, `providerId`, `providerName`, `bookingCount`,
+  `confirmedBookingCount`, and `revenueByCurrency`. Flight bookings use their
+  stored airline ID and hotel bookings use their stored hotel ID. A deleted
+  provider keeps its ID and figures, with `providerName: null`.
+- Counts include all statuses unless the field is labelled confirmed. A
+  round trip or multi-room reservation counts once. An empty result has zero
+  counts and an empty providers array. This response is one period summary.
+
+Revenue uses bookings currently `CONFIRMED`. It excludes `COMPLETED`,
+`CANCELLED`, `EXPIRED`, and `PENDING_PAYMENT` bookings, as required by BON-01.
+For each confirmed booking, subtract settled `REFUNDED` cents using both
+booking type and booking ID. Treat pending and failed refunds as unsettled.
+A fully refunded confirmed booking still counts as confirmed and contributes
+zero cents. Cancelled bookings contribute zero regardless of refund status.
+The booking period uses creation time. Refunds reflect their current settled
+state even if they settled after the period, so this is a current view of
+bookings created in that period rather than a historical cash-flow statement.
+
+Each provider's `revenueByCurrency` has one `{ currency, revenueCents }` entry
+per confirmed booking currency, ordered by code. Legacy lowercase codes are
+normalized to uppercase. Currency units are not converted or combined. A
+provider without confirmed bookings has an empty revenue array. Counts appear
+only on the provider, so currency rows cannot duplicate booking counts.
+
+MongoDB aggregates booking rows and completed refunds before returning
+provider summaries. Payments are not joined, so retries cannot multiply
+bookings or revenue. Integer cents are summed exactly. Invalid confirmed
+amounts, currency mismatches, excessive refunds, unsafe totals, and malformed
+bookings with no valid provider ID produce a sanitized 500. The report does
+not write booking, payment, refund, or inventory data.
+
+### Verification
+
+On 2026-11-20, focused service tests passed 9/9 and the real AppModule
+suite passed 24/24, including 10 adversarial cases. The adversarial run
+caught a missing provider ID that produced an invalid response row.
+The fixed route returns a sanitized 500 for that malformed booking and
+still preserves an existing ID when the referenced provider was deleted.
+
+The exact backend CI commands passed on Node 22.23.5 and npm 10.9.9
+using disposable MongoDB 8.2.6. Jest passed 1,300/1,300 across 93 suites
+and E2E passed 1,938/1,938 across 76 suites. The additional TypeScript
+and Git whitespace checks passed.

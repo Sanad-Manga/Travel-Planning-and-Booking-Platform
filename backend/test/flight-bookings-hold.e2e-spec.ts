@@ -13,9 +13,11 @@ import request from 'supertest';
 import { AirlinesModule } from '../src/airlines';
 import { AuthModule } from '../src/auth/auth.module';
 import { BookingStatus, BookingType, CabinClass, PaymentStatus, Role } from '../src/common';
+import { BookingStatus, BookingType, FlightStatus, PaymentStatus, Role } from '../src/common';
 import configuration from '../src/config/configuration';
 import { FlightsModule } from '../src/flights';
 import { FlightBookingProvider } from '../src/flights/flight-booking.provider';
+import { FlightBookingsService } from '../src/flights/flight-bookings.service';
 import { FlightETicketService } from '../src/flights/flight-eticket.service';
 import { FlightInventoryService } from '../src/flights/flight-inventory.service';
 import { FlightBooking } from '../src/flights/schemas/flight-booking.schema';
@@ -2310,10 +2312,49 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       });
       expect(stripeGateway.refunds.size).toBe(1);
 
+      // GEN-01: a distinct cancellation notice, separate from the refund notification below.
+      expect(
+        await connection.collection('notifications').countDocuments({
+          userId: new Types.ObjectId(travelerId),
+          type: 'BOOKING_CANCELLED',
+          link: `/flight-bookings/${bookingId}`,
+        }),
+      ).toBe(1);
+      expect(
+        await connection.collection('notifications').countDocuments({
+          userId: new Types.ObjectId(travelerId),
+          type: 'REFUND_UPDATE',
+        }),
+      ).toBeGreaterThan(0);
+
+      // Not just a DB write: the traveler can actually see the cancellation through the real
+      // GET /api/notifications endpoint, same as any other notification.
+      const notificationsPage = await http()
+        .get('/api/notifications')
+        .set('Cookie', traveler)
+        .expect(200);
+      expect(notificationsPage.body.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'BOOKING_CANCELLED',
+            title: 'Flight booking cancelled',
+            link: `/flight-bookings/${bookingId}`,
+          }),
+        ]),
+      );
+
       // The booking is no longer CONFIRMED: a repeated cancellation is a 409 and changes nothing.
       await cancelRequest(bookingId, { confirm: false }).expect(409);
       expect(await connection.collection('refunds').countDocuments()).toBe(1);
       expect(stripeGateway.refunds.size).toBe(1);
+      // The retry (409, nothing cancelled) sends no additional cancellation notice.
+      expect(
+        await connection.collection('notifications').countDocuments({
+          userId: new Types.ObjectId(travelerId),
+          type: 'BOOKING_CANCELLED',
+          link: `/flight-bookings/${bookingId}`,
+        }),
+      ).toBe(1);
     });
 
     it('rejects a changed refund amount (409 with the current amount) and changes nothing until a fresh preview', async () => {
@@ -2536,6 +2577,16 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       });
       expect(await connection.collection('refunds').countDocuments()).toBe(0);
       expect(stripeGateway.refunds.size).toBe(0);
+
+      // GEN-01: even with nothing to refund (so RefundsService never fires), the traveler still
+      // gets a cancellation notice.
+      expect(
+        await connection.collection('notifications').countDocuments({
+          userId: new Types.ObjectId(travelerId),
+          type: 'BOOKING_CANCELLED',
+          link: `/flight-bookings/${bookingId}`,
+        }),
+      ).toBe(1);
     });
 
     it('cancels a round trip as a whole with the outbound airline tier and returns both segments', async () => {
@@ -3516,6 +3567,151 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       for (const status of ['200', '400', '401', '403', '404', '409']) {
         expect(operation.responses[status]).toBeDefined();
       }
+  describe('flight booking completion sweep (GEN-11)', () => {
+    /** A Flight whose arrivalAt is already in the past, bypassing FLT-03's "no past departure" rule. */
+    async function arrivedFlight(flightNumber: string, arrivedDaysAgo = 1) {
+      const flightId = await createFlight({ flightNumber });
+      await addCabin(flightId, 'ECONOMY', 10);
+      await connection.collection('flights').updateOne(
+        { _id: new Types.ObjectId(flightId) },
+        {
+          $set: {
+            departureAt: new Date(Date.now() - (arrivedDaysAgo + 1) * 86_400_000),
+            arrivalAt: new Date(Date.now() - arrivedDaysAgo * 86_400_000),
+          },
+        },
+      );
+      return flightId;
+    }
+
+    /** A CONFIRMED booking inserted directly (bypassing FLT-22's hold flow) so its flight(s) can already have arrived. */
+    async function confirmedBookingFor(
+      segments: Array<{ flightId: string; airlineId?: string }>,
+    ) {
+      const id = new Types.ObjectId();
+      const segment = (flightId: string, airlineId: string) => ({
+        flightId: new Types.ObjectId(flightId),
+        airlineId: new Types.ObjectId(airlineId),
+        cabinClass: 'ECONOMY',
+        seats: 1,
+        farePerPassengerCents: 45000,
+        infantFareCents: 4500,
+        baggageFeeCents: 0,
+      });
+      await connection.collection('flightBookings').insertOne({
+        _id: id,
+        userId: new Types.ObjectId(travelerId),
+        airlineId: new Types.ObjectId(segments[0].airlineId ?? airline.id),
+        flightId: new Types.ObjectId(segments[0].flightId),
+        segments: segments.map((s) => segment(s.flightId, s.airlineId ?? airline.id)),
+        cabinClass: 'ECONOMY',
+        passengerCounts: { adults: 1, children: 0, infants: 0 },
+        seats: 1,
+        farePerPassengerCents: 45000,
+        infantFareCents: 4500,
+        totalCents: 45000,
+        currency: 'USD',
+        status: BookingStatus.CONFIRMED,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      return id;
+    }
+
+    const statusOf = async (id: Types.ObjectId) =>
+      (await connection.collection('flightBookings').findOne({ _id: id }))?.status;
+
+    it('completes a one-way booking once its only flight has arrived', async () => {
+      const flightId = await arrivedFlight('MS930');
+      const bookingId = await confirmedBookingFor([{ flightId }]);
+
+      const service = app.get(FlightBookingsService);
+      await expect(service.completePastFlights(new Date())).resolves.toBe(1);
+
+      expect(await statusOf(bookingId)).toBe(BookingStatus.COMPLETED);
+    });
+
+    it('leaves a booking CONFIRMED while its flight has not arrived yet', async () => {
+      const flightId = await createFlight({ flightNumber: 'MS931' });
+      await addCabin(flightId, 'ECONOMY', 10);
+      const bookingId = await confirmedBookingFor([{ flightId }]);
+
+      const service = app.get(FlightBookingsService);
+      await expect(service.completePastFlights(new Date())).resolves.toBe(0);
+
+      expect(await statusOf(bookingId)).toBe(BookingStatus.CONFIRMED);
+    });
+
+    it('completes a round trip only once its return leg (the last segment) has arrived, not the outbound alone', async () => {
+      const outboundId = await arrivedFlight('MS932', 5);
+      const notYetReturnId = await createFlight({ flightNumber: 'MS933' });
+      await addCabin(notYetReturnId, 'ECONOMY', 10);
+      const stillOutbound = await confirmedBookingFor([
+        { flightId: outboundId },
+        { flightId: notYetReturnId },
+      ]);
+
+      const arrivedReturnId = await arrivedFlight('MS934', 1);
+      const completedRoundTrip = await confirmedBookingFor([
+        { flightId: outboundId },
+        { flightId: arrivedReturnId },
+      ]);
+
+      const service = app.get(FlightBookingsService);
+      await expect(service.completePastFlights(new Date())).resolves.toBe(1);
+
+      expect(await statusOf(stillOutbound)).toBe(BookingStatus.CONFIRMED);
+      expect(await statusOf(completedRoundTrip)).toBe(BookingStatus.COMPLETED);
+    });
+
+    it('is idempotent and leaves non-CONFIRMED bookings alone', async () => {
+      const flightId = await arrivedFlight('MS935');
+      const bookingId = await confirmedBookingFor([{ flightId }]);
+
+      const service = app.get(FlightBookingsService);
+      await expect(service.completePastFlights(new Date())).resolves.toBe(1);
+      await expect(service.completePastFlights(new Date())).resolves.toBe(0);
+      expect(await statusOf(bookingId)).toBe(BookingStatus.COMPLETED);
+    });
+
+    it('completes a legacy booking with no segments array, via the top-level flightId fallback', async () => {
+      const flightId = await arrivedFlight('MS936');
+      const id = new Types.ObjectId();
+      await connection.collection('flightBookings').insertOne({
+        _id: id,
+        userId: new Types.ObjectId(travelerId),
+        airlineId: new Types.ObjectId(airline.id),
+        flightId: new Types.ObjectId(flightId),
+        // No `segments` field at all: pre-FLT-12 shape.
+        cabinClass: 'ECONOMY',
+        passengerCounts: { adults: 1, children: 0, infants: 0 },
+        seats: 1,
+        farePerPassengerCents: 45000,
+        infantFareCents: 4500,
+        totalCents: 45000,
+        currency: 'USD',
+        status: BookingStatus.CONFIRMED,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const service = app.get(FlightBookingsService);
+      await expect(service.completePastFlights(new Date())).resolves.toBe(1);
+
+      expect(await statusOf(id)).toBe(BookingStatus.COMPLETED);
+    });
+
+    it('leaves a CONFIRMED booking alone when its last flight was cancelled, even if its arrival has passed', async () => {
+      const flightId = await arrivedFlight('MS937');
+      await connection
+        .collection('flights')
+        .updateOne({ _id: new Types.ObjectId(flightId) }, { $set: { status: FlightStatus.CANCELLED } });
+      const bookingId = await confirmedBookingFor([{ flightId }]);
+
+      const service = app.get(FlightBookingsService);
+      await expect(service.completePastFlights(new Date())).resolves.toBe(0);
+
+      expect(await statusOf(bookingId)).toBe(BookingStatus.CONFIRMED);
     });
   });
 });

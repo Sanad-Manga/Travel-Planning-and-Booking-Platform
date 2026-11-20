@@ -61,14 +61,14 @@ No module imports or providers are needed. An unverified user gets `403`:
 A guest still gets 401 first (global guard). Admins and moderators are not affected (no `emailVerified: false` on their records).
 The decorator also adds the 403 to Swagger.
 
-## Routes that should add `@RequireVerifiedEmail()`
+## Routes that require a verified email (wired)
 
-| Route | Owner |
-|---|---|
-| `POST /api/flight-bookings` | Abdulrahman |
-| `POST /api/flight-bookings/hold` | Abdulrahman |
-| `POST /api/hotel-bookings` | Hessain |
-| `POST /api/payments` | Abdelrahman |
+| Route | Owner | Status |
+|---|---|---|
+| `POST /api/flight-bookings` (one way and round trip) | Abdulrahman | wired, tested in `booking-requires-verified-email.e2e-spec.ts` |
+| `POST /api/flight-bookings/hold` | Abdulrahman | wired, tested |
+| `POST /api/hotel-bookings` | Hessain | wired, tested |
+| `POST /api/payments` | Abdulrahman | not guarded: a booking already needs a verified user, so payment of it is allowed |
 
 Other routes checked, not needing it: `POST /api/payments/:id/retry` (the booking already exists, so it was created by a verified user),
 `POST /api/bookings/:type/:id/accept-policies` (same), itinerary item routes (planning data, not bookings). Cancel and read routes stay open.
