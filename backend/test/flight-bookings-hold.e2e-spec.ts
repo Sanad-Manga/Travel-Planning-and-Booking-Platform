@@ -12,7 +12,7 @@ import { Connection, Model, Types } from 'mongoose';
 import request from 'supertest';
 import { AirlinesModule } from '../src/airlines';
 import { AuthModule } from '../src/auth/auth.module';
-import { BookingStatus, BookingType, PaymentStatus, Role } from '../src/common';
+import { BookingStatus, BookingType, FlightStatus, PaymentStatus, Role } from '../src/common';
 import configuration from '../src/config/configuration';
 import { FlightsModule } from '../src/flights';
 import { FlightBookingProvider } from '../src/flights/flight-booking.provider';
@@ -3075,6 +3075,19 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       await expect(service.completePastFlights(new Date())).resolves.toBe(1);
 
       expect(await statusOf(id)).toBe(BookingStatus.COMPLETED);
+    });
+
+    it('leaves a CONFIRMED booking alone when its last flight was cancelled, even if its arrival has passed', async () => {
+      const flightId = await arrivedFlight('MS937');
+      await connection
+        .collection('flights')
+        .updateOne({ _id: new Types.ObjectId(flightId) }, { $set: { status: FlightStatus.CANCELLED } });
+      const bookingId = await confirmedBookingFor([{ flightId }]);
+
+      const service = app.get(FlightBookingsService);
+      await expect(service.completePastFlights(new Date())).resolves.toBe(0);
+
+      expect(await statusOf(bookingId)).toBe(BookingStatus.CONFIRMED);
     });
   });
 });

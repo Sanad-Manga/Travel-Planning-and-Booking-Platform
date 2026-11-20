@@ -2485,3 +2485,24 @@ Verification: npx tsc --noEmit -p ., npx eslint (changed files), npm run build a
 56/56 passed; npx jest --config ./test/jest-e2e.json test/flight-bookings-hold.e2e-spec.ts --maxWorkers=1 --silent 90/90
 passed. Not done: no full local e2e/unit suite run (CI covers that); no manual Swagger click-through against Atlas (this
 ticket adds no new endpoint, so nothing to document there).
+
+Date: 2026-11-20
+Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code)
+Related Requirement: GEN-11 (SCRUM-33) Booking lifecycle: CONFIRMED to COMPLETED for flights (PR #177 review fix)
+Prompt:
+PR #177 review (Sanad): the completion sweep's dueForCompletion only checks lastFlight.arrivalAt <= now, so it can
+complete a booking whose flight was CANCELLED by the airline (FLT-06) if its arrival time has already passed. If that
+booking's own cancel/refund step previously failed and it is still CONFIRMED pending a moderator retry, the sweep beats
+the retry to it and moves it to COMPLETED, after which the retry can no longer cancel or refund it (requires CONFIRMED).
+Fix: exclude lastFlight.status === CANCELLED from the match, and add a test for exactly this case.
+How the output was used:
+Added 'lastFlight.status': { $ne: FlightStatus.CANCELLED } to the same $match stage as the arrivalAt filter in
+dueForCompletion (flight-bookings.service.ts), imported FlightStatus from ../common, and updated the method's docblock.
+Added one e2e case to the GEN-11 describe block in flight-bookings-hold.e2e-spec.ts: a CONFIRMED booking on a flight
+whose arrival has passed but whose status is set to CANCELLED stays CONFIRMED after completePastFlights, proving the
+sweep no longer races the airline-cancellation retry flow.
+Verification: npx tsc --noEmit -p . and npx eslint on both changed files clean. npx jest --config ./test/jest-e2e.json
+test/flight-bookings-hold.e2e-spec.ts --maxWorkers=2 run twice: scoped to the GEN-11 describe block alone (6/6 passed,
+including the new case) and then the full file (92/92 passed), both green. Not done: no full local unit/e2e suite run
+(CI covers that; this PR touches only the flights module).

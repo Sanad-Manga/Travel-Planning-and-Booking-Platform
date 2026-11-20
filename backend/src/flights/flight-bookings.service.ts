@@ -18,6 +18,7 @@ import {
   CabinClass,
   DEFAULT_PAGE,
   DEFAULT_PAGE_SIZE,
+  FlightStatus,
   HOLD_MINUTES,
   isCalendarDate,
   PaginatedResponse,
@@ -818,10 +819,11 @@ export class FlightBookingsService {
   }
 
   /**
-   * One page of CONFIRMED booking ids whose last flight's arrivalAt is at or before `now`, in
-   * _id order. The last flight is `$arrayElemAt: [segments.flightId, -1]` (the return leg when
-   * present, otherwise the only segment), falling back to the booking's own top-level `flightId`
-   * for a legacy booking with no `segments` at all (pre-FLT-12 data, if any still exists).
+   * One page of CONFIRMED booking ids whose last flight's arrivalAt is at or before `now` and
+   * whose last flight is not CANCELLED, in _id order. The last flight is
+   * `$arrayElemAt: [segments.flightId, -1]` (the return leg when present, otherwise the only
+   * segment), falling back to the booking's own top-level `flightId` for a legacy booking with
+   * no `segments` at all (pre-FLT-12 data, if any still exists).
    */
   private async dueForCompletion(
     now: Date,
@@ -855,7 +857,15 @@ export class FlightBookingsService {
         },
       },
       { $unwind: '$lastFlight' },
-      { $match: { 'lastFlight.arrivalAt': { $lte: now } } },
+      {
+        $match: {
+          'lastFlight.arrivalAt': { $lte: now },
+          // A failed cancel/refund (FLT-06) can leave a booking CONFIRMED on a CANCELLED
+          // flight; completing it here would block the moderator's repeat cancel/refund,
+          // which requires CONFIRMED. Leave it for that flow instead of this sweep.
+          'lastFlight.status': { $ne: FlightStatus.CANCELLED },
+        },
+      },
       { $limit: FLIGHT_COMPLETION_BATCH_SIZE },
       { $project: { _id: 1 } },
     ];
