@@ -182,6 +182,7 @@ describe('cancel a whole hotel reservation with a tier-based refund (HTL-21) ove
     await db.collection('hotelBookings').deleteMany({});
     await db.collection('payments').deleteMany({});
     await db.collection('refunds').deleteMany({});
+    await db.collection('notifications').deleteMany({});
     stripe.refunds.clear();
   });
 
@@ -270,6 +271,34 @@ describe('cancel a whole hotel reservation with a tier-based refund (HTL-21) ove
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({ bookingType: BookingType.HOTEL, bookingId: id, amountCents: TOTAL_CENTS });
       expect([...stripe.refunds.values()].map((r) => r.amountCents)).toEqual([TOTAL_CENTS]);
+
+      // GEN-01: a distinct cancellation notice, separate from the refund notification.
+      expect(
+        await db.collection('notifications').countDocuments({
+          userId: new Types.ObjectId(travelerId),
+          type: 'BOOKING_CANCELLED',
+          link: `/hotel-bookings/${id.toHexString()}`,
+        }),
+      ).toBe(1);
+      expect(
+        await db.collection('notifications').countDocuments({
+          userId: new Types.ObjectId(travelerId),
+          type: 'REFUND_UPDATE',
+        }),
+      ).toBeGreaterThan(0);
+
+      // Not just a DB write: the traveler can actually see the cancellation through the real
+      // GET /api/notifications endpoint, same as any other notification.
+      const notificationsPage = await http().get('/api/notifications').set('Cookie', travelerCookie).expect(200);
+      expect(notificationsPage.body.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'BOOKING_CANCELLED',
+            title: 'Hotel reservation cancelled',
+            link: `/hotel-bookings/${id.toHexString()}`,
+          }),
+        ]),
+      );
     });
 
     it('refunds the percentage of the tier on the full total (50 %)', async () => {
@@ -286,6 +315,16 @@ describe('cancel a whole hotel reservation with a tier-based refund (HTL-21) ove
       expect(response.body.refund).toBeNull();
       expect(await refundRows()).toHaveLength(0);
       expect(stripe.refunds.size).toBe(0);
+
+      // GEN-01: even with nothing to refund (so RefundsService never fires), the traveler still
+      // gets a cancellation notice.
+      expect(
+        await db.collection('notifications').countDocuments({
+          userId: new Types.ObjectId(travelerId),
+          type: 'BOOKING_CANCELLED',
+          link: `/hotel-bookings/${id.toHexString()}`,
+        }),
+      ).toBe(1);
     });
 
     it('is the same refund that the preview showed', async () => {
