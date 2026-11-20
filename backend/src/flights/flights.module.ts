@@ -27,6 +27,7 @@ import {
   FlightBookingSchema,
 } from './schemas/flight-booking.schema';
 import { Flight, FlightSchema } from './schemas/flight.schema';
+import { UsersModule } from '../users/users.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { Flight, FlightSchema } from './schemas/flight.schema';
     PaymentsModule, // BookingLifecycle + BookingProviderRegistry (FLT-22 registers the flight booking provider)
     RefundsModule, // PAY-03's getLatestForBooking, shown on the confirmed booking readback
     NotificationsModule,
+    UsersModule, // ACC-12: UpcomingBookingsRegistry, where the flight bookings register their checker
   ],
   // FlightSearchController is listed first so GET /flights/search can never be captured by a future GET /flights/:id.
   controllers: [

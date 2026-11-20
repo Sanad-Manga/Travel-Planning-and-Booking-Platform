@@ -105,6 +105,9 @@ describe('BLG-05 comments integration', () => {
       .overrideProvider(UsersService)
       .useValue({
         findById: async (id: string) => accounts.get(id) ?? null,
+        findDeactivatedIds: async () =>
+          [...accounts.entries()].filter(([, a]) => a.status === AccountStatus.DEACTIVATED).map(([id]) => new Types.ObjectId(id)),
+        isDeactivated: async (id: string) => accounts.get(id)?.status === AccountStatus.DEACTIVATED,
       })
       .compile();
 

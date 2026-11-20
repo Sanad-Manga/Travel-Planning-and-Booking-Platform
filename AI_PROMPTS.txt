@@ -2380,3 +2380,19 @@ Prompt:
 Scaffold the Next.js app in frontend/ so the Milestone 2 tickets (starting with GEN-03 confirm before destructive actions and GEN-04 friendly empty states) have somewhere to go: App Router and TypeScript, exact pinned versions like the backend, lint and typecheck scripts, and the backend API reachable from the same origin so the httpOnly auth cookies work.
 How the output was used:
 Created frontend/ with Next.js 16, React 19 and TypeScript 5.9 (pinned), a root layout and home page, a flat ESLint config, an /api/* rewrite to the backend (BACKEND_URL, default http://localhost:3001), .env.example and a README. I ran npm install, lint, typecheck and build myself; no ticket features are in this PR.
+Date: 2026-11-20
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-12 (issue #153: posts of a deactivated author must be hidden)
+Prompt:
+Work on GitHub issue #153 (ACC-12) following contracts.md: re-check develop, and hide the published posts of a deactivated author from the public list, the search and the post detail (404 like an unknown post, admins may still open it), deciding from the user's status through UsersService with correct pagination totals; list anything else that serves such an author's posts. Add unit and e2e tests, update docs/api/account-deactivation.md. No PR, no issue comments.
+How the output was used:
+Added UsersService.findDeactivatedIds and isDeactivated; BlogService.listPublished (list, search, tag list) now filters the author id inside the database query, findOne returns 404 for a deactivated author unless the viewer is an admin, and likes, comments (list and create) follow the same rule. The upload visibility middleware serves a deactivated author's published post images like hidden ones (admin only). Wrote unit tests and a new e2e suite plus one upload-visibility case, and updated the account deactivation doc. Found that GET /api/posts/:id is public and never receives the caller, so the admin exception cannot be exercised through that route; reported it instead of changing common/.
+Date: 2026-11-20
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GitHub issue #153 / ACC-12 follow-up (flight bookings must block self-deactivation)
+Prompt:
+Follow-up on issue #153 on the same branch: Sanad pointed out that only the hotel bookings service registers an UpcomingBookingsChecker, so upcoming flight bookings do not block DELETE /api/users/me. Register a flight checker like the hotel one (true for a CONFIRMED booking with any leg departing at or after now, indexed query, throws on database errors), add unit and e2e tests, update docs/api/account-deactivation.md. No PR, no issue comments.
+How the output was used:
+Added hasUpcomingConfirmedBookings to FlightBookingProvider and registered it in UpcomingBookingsRegistry on module init (one aggregation from the userId index, joined to the flights by id, covering round-trip legs and legacy bookings without segments), imported UsersModule in FlightsModule, wrote a unit spec on an in-memory MongoDB and an e2e suite that uses the real checkers through DELETE /api/users/me, and updated the account deactivation doc.
