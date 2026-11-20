@@ -24,6 +24,14 @@ describe('placeholder pages (GEN-14)', () => {
     expect(screen.getByText(/coming soon/i)).toBeInTheDocument();
   });
 
+  it.each(pages)('%s has breadcrumbs ending in the current page, and a description', (name, Page) => {
+    render(<Page />);
+    const trail = screen.getByRole('navigation', { name: 'Breadcrumb' });
+    expect(trail).toHaveTextContent(`Home${name}`);
+    expect(screen.getByText(name, { selector: '[aria-current="page"]' })).toBeInTheDocument();
+    expect(document.querySelector('.page-header-description')).toBeTruthy();
+  });
+
   it('home page has an h1 and no nested main landmark', () => {
     render(<HomePage />);
     expect(screen.getByRole('heading', { level: 1 })).toBeInTheDocument();
