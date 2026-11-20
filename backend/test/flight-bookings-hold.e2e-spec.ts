@@ -3049,5 +3049,32 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       await expect(service.completePastFlights(new Date())).resolves.toBe(0);
       expect(await statusOf(bookingId)).toBe(BookingStatus.COMPLETED);
     });
+
+    it('completes a legacy booking with no segments array, via the top-level flightId fallback', async () => {
+      const flightId = await arrivedFlight('MS936');
+      const id = new Types.ObjectId();
+      await connection.collection('flightBookings').insertOne({
+        _id: id,
+        userId: new Types.ObjectId(travelerId),
+        airlineId: new Types.ObjectId(airline.id),
+        flightId: new Types.ObjectId(flightId),
+        // No `segments` field at all: pre-FLT-12 shape.
+        cabinClass: 'ECONOMY',
+        passengerCounts: { adults: 1, children: 0, infants: 0 },
+        seats: 1,
+        farePerPassengerCents: 45000,
+        infantFareCents: 4500,
+        totalCents: 45000,
+        currency: 'USD',
+        status: BookingStatus.CONFIRMED,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const service = app.get(FlightBookingsService);
+      await expect(service.completePastFlights(new Date())).resolves.toBe(1);
+
+      expect(await statusOf(id)).toBe(BookingStatus.COMPLETED);
+    });
   });
 });
