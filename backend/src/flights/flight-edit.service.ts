@@ -36,6 +36,16 @@ const ACTIVE_BOOKING_STATUSES = [
   BookingStatus.COMPLETED,
 ];
 
+/**
+ * Bookings that include this flight on ANY leg: a round trip stores only its outbound flight in `flightId`,
+ * its return leg exists only in `segments`.
+ */
+function onFlight(flightId: Types.ObjectId) {
+  return {
+    $or: [{ flightId }, { 'segments.flightId': flightId }],
+  };
+}
+
 interface FieldError {
   field: string;
   message: string;
@@ -267,7 +277,10 @@ export class FlightEditService {
 
   private hasActiveBookings(flightId: Types.ObjectId): Promise<boolean> {
     return this.bookings
-      .exists({ flightId, status: { $in: ACTIVE_BOOKING_STATUSES } })
+      .exists({
+        ...onFlight(flightId),
+        status: { $in: ACTIVE_BOOKING_STATUSES },
+      })
       .then(Boolean);
   }
 
@@ -287,7 +300,7 @@ export class FlightEditService {
   /** One notification per passenger (not per booking). Never throws: NotificationsService logs its own failures. */
   private async notifyPassengers(flight: FlightLean): Promise<void> {
     const confirmed = await this.bookings
-      .find({ flightId: flight._id, status: BookingStatus.CONFIRMED })
+      .find({ ...onFlight(flight._id), status: BookingStatus.CONFIRMED })
       .select('userId')
       .sort({ _id: 1 })
       .lean<Pick<FlightBookingLean, '_id' | 'userId'>[]>()

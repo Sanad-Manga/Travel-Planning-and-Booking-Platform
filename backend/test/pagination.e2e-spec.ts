@@ -47,7 +47,10 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
   let mongo: MongoMemoryServer;
   let db: Connection;
   const jwt = new JwtService({ secret: TEST_ACCESS_SECRET });
-  const cookies: Record<'user' | 'admin' | 'hotelModerator' | 'airlineModerator', string> = {
+  const cookies: Record<
+    'user' | 'admin' | 'hotelModerator' | 'airlineModerator',
+    string
+  > = {
     user: '',
     admin: '',
     hotelModerator: '',
@@ -119,7 +122,12 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
 
   const ROUTES: ListRoute[] = [
     // user + admin + hotel moderator + airline moderator (the hotel moderator pages the HTL-08 row below)
-    { swagger: '/api/admin/accounts', url: '/api/admin/accounts', auth: 'admin', total: 4 },
+    {
+      swagger: '/api/admin/accounts',
+      url: '/api/admin/accounts',
+      auth: 'admin',
+      total: 4,
+    },
     // ACC-17 lists flight and hotel bookings together: the 25 flight bookings plus the 25 hotel reservations seeded below
     {
       swagger: '/api/admin/bookings',
@@ -149,6 +157,10 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
     },
     // 25 seeded + the two the flight search test needs (CAI, JFK)
     { swagger: '/api/airports', url: '/api/airports', auth: 'none', total: 27 },
+    // GEN-12: reference-data lookups (only the envelope and the limits are proven here; the rows are proven in reference-lookups.e2e-spec.ts)
+    { swagger: '/api/countries', url: '/api/countries', auth: 'none' },
+    { swagger: '/api/cities', url: '/api/cities', auth: 'none' },
+    { swagger: '/api/currencies', url: '/api/currencies', auth: 'none' },
     {
       swagger: '/api/notifications',
       url: '/api/notifications',
@@ -156,7 +168,12 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
       total: 25,
     },
     // BON-02: the user's own favourites
-    { swagger: '/api/favourites', url: '/api/favourites', auth: 'user', total: 25 },
+    {
+      swagger: '/api/favourites',
+      url: '/api/favourites',
+      auth: 'user',
+      total: 25,
+    },
     // FLT-25: the user's own flight bookings (25 seeded below; the flight is joined for grouping)
     {
       swagger: '/api/flight-bookings',
@@ -285,9 +302,15 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
     const admin = await account(Role.ADMIN);
     cookies.user = user.cookie;
     cookies.admin = admin.cookie;
-    cookies.hotelModerator = (await account(Role.HOTEL_MODERATOR, { hotelId: roomsHotelId.toHexString() })).cookie;
+    cookies.hotelModerator = (
+      await account(Role.HOTEL_MODERATOR, {
+        hotelId: roomsHotelId.toHexString(),
+      })
+    ).cookie;
     cookies.airlineModerator = (
-      await account(Role.AIRLINE_MODERATOR, { airlineId: pagingAirlineId.toHexString() })
+      await account(Role.AIRLINE_MODERATOR, {
+        airlineId: pagingAirlineId.toHexString(),
+      })
     ).cookie;
     userId = user.id;
 
@@ -358,7 +381,13 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
         maxOccupancy: 2,
         pricePerNightCents: 10_000 + i,
         isActive: true,
-        availability: [{ _id: new Types.ObjectId(), startDate: '2099-01-01', endDate: '2099-02-01' }],
+        availability: [
+          {
+            _id: new Types.ObjectId(),
+            startDate: '2099-01-01',
+            endDate: '2099-02-01',
+          },
+        ],
         createdAt: now,
         updatedAt: now,
       })),
