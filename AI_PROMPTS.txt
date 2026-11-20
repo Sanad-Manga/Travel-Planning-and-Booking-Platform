@@ -2506,3 +2506,10 @@ Verification: npx tsc --noEmit -p . and npx eslint on both changed files clean. 
 test/flight-bookings-hold.e2e-spec.ts --maxWorkers=2 run twice: scoped to the GEN-11 describe block alone (6/6 passed,
 including the new case) and then the full file (92/92 passed), both green. Not done: no full local unit/e2e suite run
 (CI covers that; this PR touches only the flights module).
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-02 (reopened by the scrum master: unverified user could still book)
+Prompt:
+ACC-02 is back to To Do: RequireVerifiedEmail is used on no booking route. Add @RequireVerifiedEmail() to flight-bookings (create, hold, round trip) and hotel-bookings create, fix the docs that say booking is blocked, and add a test showing an unverified user gets 403 on booking.
+How the output was used:
+Added the decorator to POST /api/flight-bookings (a round trip is the same route with two segments), POST /api/flight-bookings/hold and POST /api/hotel-bookings. Added booking-requires-verified-email.e2e-spec.ts, which runs the real AppModule and checks 403 "Verify your email before booking" for emailVerified=false, no 403 for verified and field-less users, and 401 for guests. Updated the route table in docs/api/email-verification.md and the Swagger text in auth.controller.ts. Payments are left unguarded on purpose (a booking already needs a verified user).
