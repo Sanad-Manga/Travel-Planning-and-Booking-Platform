@@ -633,6 +633,15 @@ export class FlightBookingsService {
       ...(booking.bookingReference
         ? { bookingReference: booking.bookingReference }
         : {}),
+      ...(booking.seatSelections?.length
+        ? {
+            seatSelections: booking.seatSelections.map((s) => ({
+              flightId: s.flightId.toString(),
+              passengerIndex: s.passengerIndex,
+              seat: s.seat,
+            })),
+          }
+        : {}),
       ...(status === BookingStatus.CONFIRMED
         ? { refund: refund ? this.toRefundResponse(refund) : null }
         : {}),
