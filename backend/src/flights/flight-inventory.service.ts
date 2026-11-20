@@ -54,6 +54,33 @@ export class FlightInventoryService {
   }
 
   /**
+   * FLT-27: the same bookable-flight rule as {@link loadBookableFlight}, read inside the caller's
+   * transaction with its session. `loadBookableFlight` runs before the change transaction, so an
+   * airline cancellation (FLT-06) could otherwise land between that check and the booking update and
+   * move the booking onto a cancelled flight. Re-reading with the session closes that gap: a flight
+   * that is no longer SCHEDULED (or has effectively departed) aborts the whole transaction.
+   */
+  async loadBookableFlightInSession(
+    flightId: Types.ObjectId | string,
+    now: Date,
+    session: ClientSession,
+  ): Promise<FlightLean> {
+    const flight = await this.flights
+      .findById(flightId)
+      .session(session)
+      .lean<FlightLean>()
+      .exec();
+    if (!flight) throw new NotFoundException('Flight not found');
+    const status = effectiveFlightStatus(flight, now);
+    if (status !== FlightStatus.SCHEDULED) {
+      throw new ConflictException(
+        `This flight is not open for booking (it is ${status})`,
+      );
+    }
+    return flight;
+  }
+
+  /**
    * Reserve `seats` in one cabin: ONE conditional update ("only if total - booked - held >= seats"),
    * never read-then-write, so parallel requests can never hold more seats than exist.
    * Returns the cabin as it is after the update (the fare in it is the one the booking must use),
@@ -69,6 +96,27 @@ export class FlightInventoryService {
       .findOneAndUpdate(
         { flightId, cabinClass, ...hasAtLeastSeats(seats) },
         { $inc: { heldSeats: seats } },
+        { new: true, session },
+      )
+      .lean<CabinLean>()
+      .exec();
+  }
+
+  /**
+   * FLT-27: reserve seats that are already booked (a confirmed booking moving to another flight),
+   * with the same one-update availability guard as `holdSeats`. Returns the cabin after the update,
+   * or null when it does not exist or has too few seats left.
+   */
+  reserveBookedSeats(
+    flightId: Types.ObjectId | string,
+    cabinClass: CabinClass,
+    seats: number,
+    session: ClientSession,
+  ): Promise<CabinLean | null> {
+    return this.cabins
+      .findOneAndUpdate(
+        { flightId, cabinClass, ...hasAtLeastSeats(seats) },
+        { $inc: { bookedSeats: seats } },
         { new: true, session },
       )
       .lean<CabinLean>()
