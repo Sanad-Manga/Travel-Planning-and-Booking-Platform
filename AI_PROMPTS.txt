@@ -2470,3 +2470,12 @@ Prompt:
 Build clear feedback for user actions (Spinner, Skeleton, Alert with optional Try again action, a toast provider with useToast) and a helper that turns the API error shape and network/401/403/404/409/429 (Retry-After)/5xx failures into a friendly message, recovery hint and field-error map; add mobile-first responsive CSS (about 40rem and 64rem breakpoints, scrolling tables, 44px touch targets). Tests first, frontend only, no new dependencies, extend globals.css without changing existing rules.
 How the output was used:
 Added Spinner, Skeleton, Alert, ToastProvider/useToast and lib/apiError (toFriendlyError, failureFromResponse) with tests written first, appended a GEN-16 section to globals.css, and mounted ToastProvider inside ConfirmProvider in layout.tsx.
+
+Date: 2026-11-20
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GEN-14
+Prompt:
+Build the app shell with clear information architecture in the frontend: a skip link as the first focusable element, a Header with the site name and primary nav (Home, Flights, Hotels, Itineraries, Blog, Login, Register) with aria-current on the current page, a mobile menu button with aria-expanded and aria-controls that closes on route change and Escape, a main landmark with id main-content and tabIndex -1, a Footer, and coming-soon placeholder pages so no link 404s. Tests first, no new dependencies, extend globals.css only.
+How the output was used:
+Added SkipLink, Header, Footer, AppShell and ComingSoon components plus placeholder pages for flights, hotels, itineraries, blog, login and register, with tests written first. Appended a GEN-14 section to globals.css, wrapped the layout children in AppShell, and removed the page-level main from the home page so there is a single main landmark.
