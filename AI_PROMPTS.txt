@@ -2454,6 +2454,13 @@ MongoDB fields leak. countryCode is trimmed and upper-cased and must be two lett
 nobody uses gives an empty page. Added the three routes to the GEN-05 pagination table and a new e2e spec (11 tests).
 
 Date: 2026-11-20
+Student: Hessain Elrefaey
+Tool: OpenCode (DeepSeek V4.1 Flash Free)
+Related Requirement: HTL-12 (hotel search price and rating filters, sorting)
+Prompt:
+Extend the existing GET /api/hotels/search with the HTL-12 filters and sorting: inclusive minPrice/maxPrice per night using the cheapest qualifying room, a minimum average rating 1-5 that excludes unrated hotels, and sort by price or rating in both directions, keeping the existing HTL-11 behaviour when the new parameters are absent. Use the shared validation and pagination rules, mirror the flight search (FLT-15) minPrice/maxPrice and sort/order conventions, and add Swagger, docs and e2e tests.
+How the output was used:
+Added minPrice/maxPrice (integer cents, >= 0), minRating (decimal 1-5) and sort=price|rating plus order=asc|desc to HotelSearchQueryDto, with a service-side minPrice <= maxPrice rule reported as a field-level 400. HotelSearchService now filters each match on the cheapest qualifying nightly price (cheapestNightlyCombination, so rooms > 1 uses the combination rather than the cheapest single room) and on averageRating, excluding unrated hotels only when minRating is set. Sorting keeps the old HTL-11 cheapest-first order as the default and puts unrated hotels last in both rating directions, with name then id tie-breakers. Updated the Swagger operation and docs/api/hotel-search.md and extended hotel-search.e2e-spec.ts (inclusive bounds, combination price, rating filter with an unrated hotel, both sort directions, pagination, field-level 400s). sort/order are optional with service defaults so the ITN-25 reuse keeps compiling. Verification: build, lint and the hotel-search e2e suite.
 Student: Abdelrahman ElGabarty
 Tool: Claude (Claude Code)
 Related Requirement: GEN-11 (SCRUM-33) Booking lifecycle: CONFIRMED to COMPLETED for flights
