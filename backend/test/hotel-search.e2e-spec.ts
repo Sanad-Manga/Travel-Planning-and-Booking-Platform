@@ -9,7 +9,7 @@ import { AuthModule } from '../src/auth/auth.module';
 import configuration from '../src/config/configuration';
 import { HotelsModule } from '../src/hotels/hotels.module';
 import { RoomReservations } from '../src/hotels/room-reservations';
-import { setupApp } from '../src/setup-app';
+import { buildSwaggerDocument, setupApp } from '../src/setup-app';
 import { TEST_ACCESS_SECRET, TEST_REFRESH_SECRET } from './helpers/auth-test-app';
 
 /** Dates relative to today (UTC), so the "not in the past" rule never makes the test data stale. */
@@ -43,7 +43,14 @@ describe('HTL-11 hotel search (e2e, real MongoDB)', () => {
   };
   const rooms: Record<string, Types.ObjectId> = {};
 
-  const hotel = (_id: Types.ObjectId, name: string, cityId: string, countryCode: string, isActive = true) => ({
+  const hotel = (
+    _id: Types.ObjectId,
+    name: string,
+    cityId: string,
+    countryCode: string,
+    isActive = true,
+    averageRating: number | null = null,
+  ) => ({
     _id,
     name,
     nameKey: name.toLowerCase(),
@@ -56,6 +63,8 @@ describe('HTL-11 hotel search (e2e, real MongoDB)', () => {
     amenities: [],
     cancellationTiers: [],
     isActive,
+    averageRating,
+    reviewCount: averageRating === null ? 0 : 1,
     createdAt: new Date(),
     updatedAt: new Date(),
   });
@@ -117,11 +126,11 @@ describe('HTL-11 hotel search (e2e, real MongoDB)', () => {
     await db
       .collection('hotels')
       .insertMany([
-        hotel(ids.alpha, 'Alpha', 'CAI', 'EG'),
-        hotel(ids.beta, 'Beta', 'CAI', 'EG'),
+        hotel(ids.alpha, 'Alpha', 'CAI', 'EG', true, 4.5),
+        hotel(ids.beta, 'Beta', 'CAI', 'EG', true, 3.2),
         hotel(ids.gamma, 'Gamma', 'CAI', 'EG', false), // deactivated by an admin
-        hotel(ids.delta, 'Delta', 'ALY', 'EG'),
-        hotel(ids.epsilon, 'Epsilon', 'LON', 'GB'),
+        hotel(ids.delta, 'Delta', 'ALY', 'EG'), // deliberately unrated (HTL-12)
+        hotel(ids.epsilon, 'Epsilon', 'LON', 'GB', true, 4),
       ]);
     await db.collection('rooms').insertMany([
       // Alpha: two free rooms (2 guests each) + one big room that is free only for part of the stay
@@ -253,6 +262,130 @@ describe('HTL-11 hotel search (e2e, real MongoDB)', () => {
     });
   });
 
+  describe('price and rating filters (HTL-12)', () => {
+    const names = (body: { items: Array<{ name: string }> }) => body.items.map((h) => h.name);
+
+    it('applies the price bounds inclusively to the cheapest qualifying room', async () => {
+      // Beta's cheapest room is 8 000/night, Alpha's 10 000/night (guests=2, rooms=1).
+      const wholeRange = await search({ cityId: 'CAI', ...stay, guests: 2, minPrice: 8_000, maxPrice: 10_000 }).expect(200);
+      expect(names(wholeRange.body)).toEqual(['Beta', 'Alpha']);
+
+      expect(names((await search({ cityId: 'CAI', ...stay, guests: 2, minPrice: 8_000 }).expect(200)).body)).toEqual([
+        'Beta',
+        'Alpha',
+      ]);
+      expect(names((await search({ cityId: 'CAI', ...stay, guests: 2, maxPrice: 8_000 }).expect(200)).body)).toEqual([
+        'Beta',
+      ]);
+      expect(names((await search({ cityId: 'CAI', ...stay, guests: 2, minPrice: 10_000 }).expect(200)).body)).toEqual([
+        'Alpha',
+      ]);
+      expect(
+        (await search({ cityId: 'CAI', ...stay, guests: 2, minPrice: 8_001, maxPrice: 9_999 }).expect(200)).body.items,
+      ).toEqual([]);
+    });
+
+    it('uses the cheapest combination for the requested rooms, not the cheapest single room', async () => {
+      // rooms=2 + guests=4: Alpha's qualifying nightly price is 10 000 + 12 000 = 22 000 (Beta has only one free room).
+      const inRange = await search({
+        cityId: 'CAI',
+        ...stay,
+        guests: 4,
+        rooms: 2,
+        minPrice: 22_000,
+        maxPrice: 22_000,
+      }).expect(200);
+      expect(names(inRange.body)).toEqual(['Alpha']);
+
+      // Alpha's cheapest single room is 10 000, so a filter that used it would still include the hotel here.
+      const tooLow = await search({ cityId: 'CAI', ...stay, guests: 4, rooms: 2, maxPrice: 21_999 }).expect(200);
+      expect(tooLow.body.items).toEqual([]);
+    });
+
+    it('keeps only hotels at or above minRating, decimals included', async () => {
+      // Alpha 4.5, Beta 3.2.
+      expect(names((await search({ cityId: 'CAI', ...stay, guests: 2, minRating: 4 }).expect(200)).body)).toEqual([
+        'Alpha',
+      ]);
+      expect(names((await search({ cityId: 'CAI', ...stay, guests: 2, minRating: 4.5 }).expect(200)).body)).toEqual([
+        'Alpha',
+      ]);
+      expect(names((await search({ cityId: 'CAI', ...stay, guests: 2, minRating: 3 }).expect(200)).body)).toEqual([
+        'Beta',
+        'Alpha',
+      ]);
+    });
+
+    it('excludes a hotel with no rating as soon as minRating is set', async () => {
+      reserved.clear(); // Delta's only room is free for this test
+      expect(names((await search({ cityId: 'ALY', ...stay, guests: 2 }).expect(200)).body)).toEqual(['Delta']);
+      expect(names((await search({ cityId: 'ALY', ...stay, guests: 2, minRating: 1 }).expect(200)).body)).toEqual([]);
+    });
+
+    it('combines the price and rating filters with the requested sort', async () => {
+      reserved.clear(); // Delta (7 000, unrated) must be dropped by minRating even though it is inside the price range
+      const res = await search({
+        countryCode: 'EG',
+        ...stay,
+        guests: 2,
+        maxPrice: 10_000,
+        minRating: 1,
+        sort: 'rating',
+        order: 'desc',
+      }).expect(200);
+      expect(names(res.body)).toEqual(['Alpha', 'Beta']); // 4.5 then 3.2
+      expect(res.body).toMatchObject({ total: 2, totalPages: 1 });
+    });
+  });
+
+  describe('sorting (HTL-12)', () => {
+    const names = (body: { items: Array<{ name: string }> }) => body.items.map((h) => h.name);
+
+    it('sorts by price per night in both directions', async () => {
+      const asc = await search({ cityId: 'CAI', ...stay, guests: 2, sort: 'price', order: 'asc' }).expect(200);
+      expect(names(asc.body)).toEqual(['Beta', 'Alpha']);
+      const desc = await search({ cityId: 'CAI', ...stay, guests: 2, sort: 'price', order: 'desc' }).expect(200);
+      expect(names(desc.body)).toEqual(['Alpha', 'Beta']);
+    });
+
+    it('sorts by rating in both directions and always puts unrated hotels last', async () => {
+      reserved.clear(); // Delta (unrated) is part of the country results
+      const desc = await search({ countryCode: 'EG', ...stay, guests: 2, sort: 'rating', order: 'desc' }).expect(200);
+      expect(names(desc.body)).toEqual(['Alpha', 'Beta', 'Delta']); // 4.5, 3.2, no rating
+      const asc = await search({ countryCode: 'EG', ...stay, guests: 2, sort: 'rating', order: 'asc' }).expect(200);
+      expect(names(asc.body)).toEqual(['Beta', 'Alpha', 'Delta']); // 3.2, 4.5, no rating last
+    });
+
+    it('defaults to the old HTL-11 cheapest-first order', async () => {
+      const plain = await search({ cityId: 'CAI', ...stay, guests: 2 }).expect(200);
+      const explicit = await search({ cityId: 'CAI', ...stay, guests: 2, sort: 'price', order: 'asc' }).expect(200);
+      expect(explicit.body).toEqual(plain.body);
+    });
+
+    it('paginates the sorted matches', async () => {
+      const first = await search({
+        cityId: 'CAI',
+        ...stay,
+        guests: 2,
+        sort: 'price',
+        order: 'desc',
+        page: 1,
+        limit: 1,
+      }).expect(200);
+      expect(names(first.body)).toEqual(['Alpha']);
+      const second = await search({
+        cityId: 'CAI',
+        ...stay,
+        guests: 2,
+        sort: 'price',
+        order: 'desc',
+        page: 2,
+        limit: 1,
+      }).expect(200);
+      expect(names(second.body)).toEqual(['Beta']);
+    });
+  });
+
   describe('pagination', () => {
     it('pages the matches with page and limit', async () => {
       const first = await search({ cityId: 'CAI', ...stay, guests: 2, page: 1, limit: 1 }).expect(200);
@@ -331,15 +464,66 @@ describe('HTL-11 hotel search (e2e, real MongoDB)', () => {
       expect(fields((await search({ cityId: 'CAI', ...stay, guests: 2, rooms: 11 }).expect(400)).body)).toEqual(['rooms']);
     });
 
+    it('minPrice above maxPrice', async () => {
+      const res = await search({ cityId: 'CAI', ...stay, guests: 2, minPrice: 10_001, maxPrice: 10_000 }).expect(400);
+      expect(res.body.details).toEqual([{ field: 'minPrice', message: 'minPrice must not be greater than maxPrice' }]);
+    });
+
+    it('price bounds must be whole, non-negative cents', async () => {
+      expect(fields((await search({ cityId: 'CAI', ...stay, guests: 2, minPrice: -1 }).expect(400)).body)).toEqual([
+        'minPrice',
+      ]);
+      expect(fields((await search({ cityId: 'CAI', ...stay, guests: 2, maxPrice: 1.5 }).expect(400)).body)).toEqual([
+        'maxPrice',
+      ]);
+      // "abc" breaks two constraints (whole number and >= 0), so only the field is asserted here.
+      expect(fields((await search({ cityId: 'CAI', ...stay, guests: 2, minPrice: 'abc' }).expect(400)).body)).toContain(
+        'minPrice',
+      );
+    });
+
+    it('minRating must be a number between 1 and 5', async () => {
+      expect(fields((await search({ cityId: 'CAI', ...stay, guests: 2, minRating: 0 }).expect(400)).body)).toEqual([
+        'minRating',
+      ]);
+      expect(fields((await search({ cityId: 'CAI', ...stay, guests: 2, minRating: 5.1 }).expect(400)).body)).toEqual([
+        'minRating',
+      ]);
+      // "abc" breaks the number, minimum and maximum rules, so only the field is asserted here.
+      expect(fields((await search({ cityId: 'CAI', ...stay, guests: 2, minRating: 'abc' }).expect(400)).body)).toContain(
+        'minRating',
+      );
+    });
+
+    it('an unknown sort or order value', async () => {
+      expect(fields((await search({ cityId: 'CAI', ...stay, guests: 2, sort: 'stars' }).expect(400)).body)).toEqual([
+        'sort',
+      ]);
+      expect(fields((await search({ cityId: 'CAI', ...stay, guests: 2, order: 'up' }).expect(400)).body)).toEqual([
+        'order',
+      ]);
+    });
+
     it('an unknown query parameter', async () => {
-      const res = await search({ cityId: 'CAI', ...stay, guests: 2, sort: 'price' }).expect(400);
-      expect(fields(res.body)).toEqual(['sort']);
+      const res = await search({ cityId: 'CAI', ...stay, guests: 2, currency: 'USD' }).expect(400);
+      expect(fields(res.body)).toEqual(['currency']);
     });
   });
 
   describe('routing', () => {
     it('search is not captured by an :id route (404 only for unknown paths, 200 for search)', async () => {
       await search({ cityId: 'CAI', ...stay, guests: 2 }).expect(200);
+    });
+  });
+
+  describe('swagger', () => {
+    it('documents the HTL-12 filters and sorting', () => {
+      const operation = buildSwaggerDocument(app).paths['/api/hotels/search']?.get;
+      expect(operation).toBeDefined();
+      const parameters = (operation?.parameters ?? []).map((parameter) => ('name' in parameter ? parameter.name : ''));
+      expect(parameters).toEqual(
+        expect.arrayContaining(['minPrice', 'maxPrice', 'minRating', 'sort', 'order']),
+      );
     });
   });
 });
