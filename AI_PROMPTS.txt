@@ -2736,3 +2736,12 @@ Prompt:
 Why are the frontend PRs waiting for the backend CI check? Make the CI skip the backend job when a PR only changes frontend or docs.
 How the output was used:
 Added a small `changes` job to .github/workflows/ci.yml that lists the files a pull request changes (git diff HEAD^1 HEAD on the merge commit). The `backend` job now needs it and runs only when something outside frontend/, docs/, *.md and AI_PROMPTS.txt changed (every PR edits AI_PROMPTS.txt, so it must not count). A job skipped by its own `if` is reported as passed to the required `backend` check, so branch protection still works. Pushes to develop always run everything. Checked the YAML parses and tested the path rule on sample file lists; the real proof is this PR's own run (it touches ci.yml, so backend runs) and a frontend-only PR afterwards.
+
+Date: 2026-11-20
+Student: Ahmed Sanad
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: PAY-01 / FLT-22 (final audit M1.3)
+Prompt:
+Final audit: getPayable for flight bookings checks only owner, status and hold time, so a pending hold can still be paid after its flight departed. Refuse payment in that case without breaking reads of confirmed bookings, and add tests.
+How the output was used:
+Added assertFlightsStillOpen to FlightBookingProvider.getPayable: only for PENDING_PAYMENT bookings it loads the booking's legs and throws 409 when a leg's effective status is not SCHEDULED (reuses effectiveFlightStatus). Confirmed bookings stay readable. Left hotels and airline deactivation alone because deactivation and flight cancellation already release pending holds. Added an e2e case covering both behaviours.
