@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -14,6 +15,7 @@ import { AirlinesService } from '../airlines/airlines.service';
 import { AuditService } from '../audit/audit.service';
 import { BCRYPT_SALT_ROUNDS } from '../auth/auth.service';
 import { AccountStatus, AuthenticatedUser, Role } from '../common';
+import { EmailService } from '../email';
 import { HotelsService } from '../hotels/hotels.service';
 import { User } from '../users/schemas/user.schema';
 import { toAccountResponse } from './dto/account-response.dto';
@@ -35,11 +37,14 @@ type ProviderLink = { kind: 'airline' | 'hotel'; id: string };
  */
 @Injectable()
 export class ModeratorAccountsService {
+  private readonly logger = new Logger(ModeratorAccountsService.name);
+
   constructor(
     @InjectModel(User.name) private readonly users: Model<User>,
     private readonly airlines: AirlinesService,
     private readonly hotels: HotelsService,
     private readonly audit: AuditService,
+    private readonly email: EmailService,
   ) {}
 
   async create(actor: AuthenticatedUser, dto: CreateModeratorDto): Promise<ModeratorResponseDto> {
@@ -91,6 +96,9 @@ export class ModeratorAccountsService {
         'Moderator account was created but the audit record failed. Do not create it again; tell the lead.',
       );
     }
+
+    await this.sendInvite(dto, link);
+
     return {
       ...toAccountResponse({
         _id: created._id,
@@ -102,6 +110,33 @@ export class ModeratorAccountsService {
       }),
       [linkField]: link.id,
     };
+  }
+
+  /**
+   * GEN-01-B: the invitation itself — it carries the plaintext temporary password, so it goes
+   * through EmailService directly (a one-off transactional email) rather than
+   * NotificationsService.notify(), which would persist it into the readable notifications
+   * collection. A failed send is logged and swallowed: the account already exists and the admin
+   * who set the password can relay it another way, so this must never undo or fail the creation.
+   */
+  private async sendInvite(dto: CreateModeratorDto, link: ProviderLink): Promise<void> {
+    try {
+      await this.email.send({
+        to: dto.email,
+        subject: 'Your moderator account was created',
+        text:
+          `Hi ${dto.name},\n\n` +
+          `An administrator created a ${link.kind === 'airline' ? 'airline' : 'hotel'} moderator account for you.\n\n` +
+          `Email: ${dto.email}\n` +
+          `Temporary password: ${dto.temporaryPassword}\n\n` +
+          'Log in and set a new password within 24 hours; the temporary one expires after that.',
+      });
+    } catch (error) {
+      this.logger.error(
+        `Could not send the moderator invitation email to ${dto.email}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
   }
 
   /** Exactly one provider id, of the kind that matches the role; otherwise a 400 naming each wrong field. */

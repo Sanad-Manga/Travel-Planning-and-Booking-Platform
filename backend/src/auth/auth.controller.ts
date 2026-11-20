@@ -100,7 +100,7 @@ export class AuthController {
   @Get('verify-email')
   @ApiOperation({
     summary: 'Verify the email address with the token from the registration email (ACC-02).',
-    description: 'The token is single use and valid for 24 hours. Until the email is verified, booking-creation routes protected with @RequireVerifiedEmail() answer 403.',
+    description: 'The token is single use and valid for 24 hours. Until the email is verified, creating a flight booking (POST /flight-bookings, including a round trip), holding seats (POST /flight-bookings/hold) and creating a hotel booking (POST /hotel-bookings) answer 403. Payments are not guarded: a booking can only exist for a verified user.',
   })
   @ApiOkResponse({ type: VerifyEmailResponseDto, description: 'Email verified (or already verified).' })
   @ApiBadRequestResponse({
