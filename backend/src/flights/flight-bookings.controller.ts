@@ -34,6 +34,7 @@ import {
   Role,
   Roles,
 } from '../common';
+import { RequireVerifiedEmail } from '../auth';
 import { FlightBookingResponseDto } from './dto/flight-booking-response.dto';
 import { CreateFlightBookingDto } from './dto/create-flight-booking.dto';
 import { CancelFlightBookingDto } from './dto/cancel-flight-booking.dto';
@@ -247,6 +248,7 @@ export class FlightBookingsController {
 
   @Post()
   @Roles(Role.USER)
+  @RequireVerifiedEmail()
   @ApiOperation({
     summary:
       'Create a flight booking with passenger and baggage details - FLT-19',
@@ -283,6 +285,7 @@ export class FlightBookingsController {
 
   @Post('hold')
   @Roles(Role.USER)
+  @RequireVerifiedEmail()
   @ApiOperation({
     summary: 'Hold seats and create a PENDING_PAYMENT booking - FLT-22',
     description:
