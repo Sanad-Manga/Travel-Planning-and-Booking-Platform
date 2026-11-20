@@ -2321,6 +2321,14 @@ Added cancellationRefundCents/cancellationRequestedAt to the flight booking sche
 Verification: npm run build passed; npm run lint passed; focused unit npx jest --runInBand "src/flights" "src/refunds" "src/payments/refund-calculator" 64/64 passed; npx jest --config ./test/jest-e2e.json flight-bookings-hold --runInBand 86/86 passed (19 FLT-26); refunds-concurrency 1/1 passed.
 
 Date: 2026-11-19
+Student: Abdulrahman Mohamad Hosny
+Tool: OpenCode (DeepSeek V4.1 Flash Free)
+Related Requirement: FLT-27 (BONUS: change a confirmed flight booking; Flights-owned equal-fare slice)
+Prompt:
+Implement only the Flights-owned part of FLT-27 on PATCH /api/flight-bookings/:id/change-flight: owner-only USER access, only CONFIRMED one-way bookings, another same-route/same-cabin/same-airline flight, seats and replacement status validated, old seats released only on success, and any fare difference answered 409. The lead-approved decisions are to reject round trips with 409 for now and allow only the same airline. Do not touch Payments, Refunds, common/, Airlines or any other owner's production code. Record the still-missing Payments contract for a change charge with its own reference/idempotency key and for several refunds per payment in docs/contracts.md as future work. Add focused unit/E2E/Swagger coverage, append this entry, then build, lint, run the focused Flights/Payments/refund/pagination suites, commit and push.
+How the output was used:
+Added ChangeFlightBookingDto ({ flightId }, Mongo id) and PATCH /api/flight-bookings/:id/change-flight with role USER, ownership through the existing service-side assertOwner/404 convention, and Swagger for 200/400/401/403/404/409. FlightBookingsService.changeFlight rejects any non-CONFIRMED booking, round trips, the same flight, a departed booked flight, and a replacement that is not bookable, changes route or airline, lacks the booked cabin, cannot carry the booked baggage or lacks seats. It recomputes the replacement total from the stored passenger counts, stored segment baggage fee and current replacement cabin fare; only an unchanged total is accepted, and higher/lower differences are 409 with the difference. No payment or refund is created. One MongoDB transaction conditionally reserves the replacement's booked seats with the shared availability filter, updates the booking only while it is still CONFIRMED on the old flight, writes the new segment/top-level pricing, then returns the old booked seats; a failure or concurrent winner aborts the transaction, so old seats are never released early or twice and the replacement cannot be oversold. The booking id, reference, passengers, payment reference and status are preserved and the shared summary response returns the updated confirmed booking. Added a pure replacementTotalCents/fareDifferenceCents helper with unit tests. Documented the equal-fare Flights contract and the deferred Payments createBookingCharge/getBookingCharge and multi-refund/issueAdjustment contracts (explicitly not implemented). Added 10 E2E tests: equal-fare change with baggage and preserved reference, wrong route/airline/same flight/missing cabin, higher and lower fare 409, ineligible statuses and round trip, cancelled/departed replacement, seat shortage, two concurrent changes, owner/role isolation, field validation and Swagger. No Payments, Refunds, common/, Airlines or other production code changed.
+Verification: npm run build passed; npm run lint passed; npx jest --runInBand "src/flights" "src/refunds" "src/payments/refund-calculator" 67/67 passed; npx jest --config ./test/jest-e2e.json flight-bookings-hold --runInBand 96/96 passed (10 FLT-27); npx jest --config ./test/jest-e2e.json payments-webhook payments-concurrency refunds-concurrency pagination --runInBand 243/243 passed.
 Student: Abdelrahman ElGabarty
 Tool: Claude (Claude Code)
 Related Requirement: GEN-10 (SCRUM-100) Admin resolves reports: dismiss, hide or delete content
@@ -2453,7 +2461,174 @@ Added three read-only controllers in the reference-data module, ordered by the o
 MongoDB fields leak. countryCode is trimmed and upper-cased and must be two letters (field-level 400 otherwise); a well-formed code
 nobody uses gives an empty page. Added the three routes to the GEN-05 pagination table and a new e2e spec (11 tests).
 
+
 Date: 2026-11-20
+Student: Ahmed Sanad
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: FLT-28 (SCRUM-114, seat selection, bonus)
+Prompt:
+Build FLT-28, PATCH /api/flight-bookings/:id/seat: the seat must exist in the booked cabin and be free, two users cannot take the
+same seat also under parallel requests (atomic), only the booking's owner may choose, Swagger updated, tests including a
+parallel-request test. The schema change for the booking is to be agreed with the flights owner.
+How the output was used:
+Seat labels are derived from the cabin's totalSeats (rows of six, 1A..), so no cabin schema change. A new collection
+flightSeatClaims with a unique index on flight + cabin + seat decides who gets a seat with one insert (no read-then-write);
+the booking gets an optional seatSelections array, updated by one pipeline update. Claims of bookings that are no longer
+CONFIRMED are treated as free, so no cancellation path has to release seats. Round trips choose per flight; infants take no seat.
+16 e2e tests (incl. 2 parallel ones) and 3 unit tests. The tests were written after the code, not before.
+Date: 2026-11-20
+Student: Abdulrahman Mohamad Hosny
+Tool: OpenCode (DeepSeek V4.1 Flash Free)
+Related Requirement: FLT-27 follow-up review (recheck the replacement inside the change transaction)
+Prompt:
+Address the lead's review on FLT-27: loadBookableFlight checks SCHEDULED/not departed before the transaction, so a FLT-06 cancellation between that check and the booking update could move the booking onto a CANCELLED flight that is never refunded. Re-read the replacement inside the transaction with the same session and require it to still be SCHEDULED and before departure. Add an E2E test where the replacement is cancelled right before the change (409, nothing changed, old seats kept). Also state in docs/contracts.md that the stored baggage fee is kept as is and is not repriced on the replacement. Then build, lint, test, commit and push.
+How the output was used:
+Added FlightInventoryService.loadBookableFlightInSession(flightId, now, session), which applies the same effectiveFlightStatus rule as loadBookableFlight (SCHEDULED and not effectively departed). FlightBookingsService.changeFlight calls it first inside the MongoDB transaction, before reserving seats, so a replacement cancelled or departed after the pre-check aborts the whole transaction and nothing moves. Swagger and docs/contracts.md document the in-transaction re-read and that the stored segment baggage fee is carried over unchanged and never repriced. Added a FLT-27 E2E test that cancels the replacement after loadBookableFlight returns but before the transaction reads it: the request answers 409 "not open for booking (it is CANCELLED)", the booking stays CONFIRMED on the old flight, the old booked seats are kept, the replacement cabin has no seats, and no payment or refund exists.
+Verification: npm run build passed; npm run lint passed; npx jest --runInBand "src/flights" "src/refunds" "src/payments/refund-calculator" 67/67 passed; npx jest --config ./test/jest-e2e.json flight-bookings-hold --runInBand 97/97 passed (11 FLT-27); npx jest --config ./test/jest-e2e.json payments-webhook payments-concurrency refunds-concurrency pagination --runInBand 243/243 passed.
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: SCRUM-118 / BON-01
+Prompt:
+Implement the read-only admin analytics endpoint within the supplied allowlist.
+Verify booking and revenue totals, UTC date bounds, refund handling, and the
+admin guard. Run feature tests, an adversarial pass, and the exact local CI
+sequence before publishing the feature branch for independent review.
+How the output was used:
+Verified SCRUM-118 and the merged ACC-17 dependency. Started
+feature/BON-01-admin-analytics at 63da298a797711a2fb46e2dfe2325d5999172a14
+in its dedicated worktree and passed 36 ACC-17 baseline E2E tests.
+Added GET /api/admin/analytics with shared auth, calendar-date validation,
+and Swagger response and errors. MongoDB filters and groups flight and hotel
+bookings by UTC creation dates, type and provider. Counts include all statuses
+and a separate CONFIRMED count. Only CONFIRMED bookings produce revenue.
+Settled same-currency refunds reduce those bookings' totals. Payment retries,
+nonconfirmed bookings and unsettled refunds do not increase or subtract revenue.
+Used exact integer cents and per-currency totals, preserving nullable names for
+deleted providers. The report has no writes and exposes no customer data.
+Focused verification passed 9/9 unit and 14/14 E2E tests initially. A separate
+10-case adversarial pass exercised ID collisions, payment attempts, tied totals,
+partial/full refunds, cancelled bookings, UTC boundaries, mixed currencies,
+unsafe cents, malformed requests and database errors. It caught a missing
+provider ID returning an invalid row. Added a guard and verified 9/9 unit and
+24/24 E2E afterward, including all 10 adversarial tests.
+Node 22.23.5 and npm 10.9.9 on Windows with disposable MongoDB 8.2.6.
+Exact npm ci, build, lint, npm test (1,300/1,300, 93 suites) and
+npm run test:e2e (1,938/1,938, 76 suites) passed. No failed or skipped tests.
+The additional TypeScript and Git whitespace checks passed. npm reported
+existing lockfile advisories and E2E emitted listener-count warnings.
+Admin README updated only for BON-01. Shared pagination tests and all
+protected files were preserved.
+Student: Hessain Elrefaey
+Tool: OpenCode (DeepSeek V4.1 Flash Free)
+Related Requirement: HTL-12 (hotel search price and rating filters, sorting)
+Prompt:
+Extend the existing GET /api/hotels/search with the HTL-12 filters and sorting: inclusive minPrice/maxPrice per night using the cheapest qualifying room, a minimum average rating 1-5 that excludes unrated hotels, and sort by price or rating in both directions, keeping the existing HTL-11 behaviour when the new parameters are absent. Use the shared validation and pagination rules, mirror the flight search (FLT-15) minPrice/maxPrice and sort/order conventions, and add Swagger, docs and e2e tests.
+How the output was used:
+Added minPrice/maxPrice (integer cents, >= 0), minRating (decimal 1-5) and sort=price|rating plus order=asc|desc to HotelSearchQueryDto, with a service-side minPrice <= maxPrice rule reported as a field-level 400. HotelSearchService now filters each match on the cheapest qualifying nightly price (cheapestNightlyCombination, so rooms > 1 uses the combination rather than the cheapest single room) and on averageRating, excluding unrated hotels only when minRating is set. Sorting keeps the old HTL-11 cheapest-first order as the default and puts unrated hotels last in both rating directions, with name then id tie-breakers. Updated the Swagger operation and docs/api/hotel-search.md and extended hotel-search.e2e-spec.ts (inclusive bounds, combination price, rating filter with an unrated hotel, both sort directions, pagination, field-level 400s). sort/order are optional with service defaults so the ITN-25 reuse keeps compiling. Verification: build, lint and the hotel-search e2e suite.
+Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code)
+Related Requirement: GEN-11 (SCRUM-33) Booking lifecycle: CONFIRMED to COMPLETED for flights
+Prompt:
+Verify GEN-11 against current develop for a scrum-master audit (GitHub issue #159): CONFIRMED to CANCELLED has callers in
+both Flights and Hotels now, but nothing ever moves a CONFIRMED flight booking to COMPLETED. FlightStatusJob only stores a
+Flight's own DEPARTED status, never touches a booking. (Hotels already has this: a daily @Cron sweep plus a lazy per-read
+check in hotel-bookings.service.ts, both calling BookingLifecycle.transition; that half of the original audit was stale.)
+Add the flights equivalent, with a test.
+How the output was used:
+Added completeArrivedBookings (a daily @Cron(EVERY_DAY_AT_MIDNIGHT) job) and completePastFlights to FlightBookingsService,
+mirroring HotelBookingsService.completeCheckedOutStays/completePastStays exactly: same cursor-batched, idempotent,
+exception-tolerant loop, same BookingLifecycle.transition(FLIGHT, id, COMPLETED) call. The one real difference is that a
+flight booking's arrival time isn't stored on the booking itself (unlike a hotel reservation's checkOut), so "due"
+bookings are found with an aggregation: $match CONFIRMED + cursor, then $addFields the last segment's flightId
+($arrayElemAt(segments.flightId, -1), falling back to the booking's own top-level flightId for a legacy pre-FLT-12
+booking with no segments array), $lookup into flights for its arrivalAt, then filter on arrivalAt <= now. The $limit is
+placed after that arrival filter, not right after the initial $match, because most CONFIRMED bookings on any day are
+future flights — limiting before filtering would make a short page falsely signal "nothing else due" while later,
+overdue bookings are still waiting in the cursor.
+Added a GEN-11 describe block to flight-bookings-hold.e2e-spec.ts calling FlightBookingsService.completePastFlights(now)
+directly (same pattern hotel-bookings.e2e-spec.ts already uses for its own sweep), with flights and bookings inserted
+directly into the test database so their arrival time can already be in the past (FLT-03 rejects a past departure
+through the real endpoint). Four cases: a one-way booking completes once its flight has arrived; a booking is left
+CONFIRMED while its flight has not arrived yet; a round trip completes only once its return leg (the last segment) has
+arrived, proving the sweep doesn't complete early on the outbound alone; the sweep is idempotent (a second run completes
+nothing further).
+Verification: npx tsc --noEmit -p ., npx eslint (changed files), npm run build all clean; npx jest src/flights --silent
+56/56 passed; npx jest --config ./test/jest-e2e.json test/flight-bookings-hold.e2e-spec.ts --maxWorkers=1 --silent 90/90
+passed. Not done: no full local e2e/unit suite run (CI covers that); no manual Swagger click-through against Atlas (this
+ticket adds no new endpoint, so nothing to document there).
+
+Date: 2026-11-20
+Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code)
+Related Requirement: GEN-11 (SCRUM-33) Booking lifecycle: CONFIRMED to COMPLETED for flights (PR #177 review fix)
+Prompt:
+PR #177 review (Sanad): the completion sweep's dueForCompletion only checks lastFlight.arrivalAt <= now, so it can
+complete a booking whose flight was CANCELLED by the airline (FLT-06) if its arrival time has already passed. If that
+booking's own cancel/refund step previously failed and it is still CONFIRMED pending a moderator retry, the sweep beats
+the retry to it and moves it to COMPLETED, after which the retry can no longer cancel or refund it (requires CONFIRMED).
+Fix: exclude lastFlight.status === CANCELLED from the match, and add a test for exactly this case.
+How the output was used:
+Added 'lastFlight.status': { $ne: FlightStatus.CANCELLED } to the same $match stage as the arrivalAt filter in
+dueForCompletion (flight-bookings.service.ts), imported FlightStatus from ../common, and updated the method's docblock.
+Added one e2e case to the GEN-11 describe block in flight-bookings-hold.e2e-spec.ts: a CONFIRMED booking on a flight
+whose arrival has passed but whose status is set to CANCELLED stays CONFIRMED after completePastFlights, proving the
+sweep no longer races the airline-cancellation retry flow.
+Verification: npx tsc --noEmit -p . and npx eslint on both changed files clean. npx jest --config ./test/jest-e2e.json
+test/flight-bookings-hold.e2e-spec.ts --maxWorkers=2 run twice: scoped to the GEN-11 describe block alone (6/6 passed,
+including the new case) and then the full file (92/92 passed), both green. Not done: no full local unit/e2e suite run
+(CI covers that; this PR touches only the flights module).
+Related Requirement: SCRUM-112 (BONUS GEN-01-B) Email notifications via SMTP — reopened to To Do
+Prompt:
+GEN-01-B was reopened: the SMTP side (EmailService, NotificationsService's own email side-effect) was already done (#123),
+but the requirement also says moderator invitations are sent by email. ModeratorAccountsService.create() creates the
+account with an admin-typed temporaryPassword and never emails it; email.service.ts's own doc comment names exactly this
+as the intended use for EmailService (a one-off transactional email that must never go through notify(), which would
+persist the plaintext password into the readable notifications collection). Wire the invitation email in, without
+breaking account creation if the email fails, and no real addresses sent in development; tell Ziad when the API is ready.
+How the output was used:
+Added EmailModule to AdminModule's imports and EmailService to ModeratorAccountsService's constructor. After account
+creation AND its audit log both succeed (not before — a failed audit write already tells the admin "do not create it
+again, tell the lead", so nothing should be emailed for an account whose own creation record is in a bad state), a
+private sendInvite() sends the moderator's name, email and the plaintext temporary password through EmailService.send(),
+wrapped in its own try/catch that only logs and never rethrows, so a down SMTP server cannot fail account creation.
+No new "no real addresses in development" work was needed: SmtpEmailSender (GEN-01-B's own existing code) already falls
+back to a throwaway Ethereal test inbox whenever SMTP_HOST isn't configured, and NODE_ENV=test already swaps in
+NoopEmailSender for every e2e spec — both pre-existing safeguards, confirmed by reading email-sender.ts and
+email.module.ts, not re-implemented here.
+Added three cases to moderator-accounts.service.spec.ts: the invitation is sent through EmailService (not notify()) with
+the temporary password in its body; a failed send is swallowed and the account is still created; no invitation is sent
+when the audit write fails (the whole operation already answers 500).
+Verification: npx tsc --noEmit -p ., npx eslint (changed files), npm run build all clean; npx jest src/admin --silent
+163/163 passed; npx jest --config ./test/jest-e2e.json test/admin-moderators.e2e-spec.ts --maxWorkers=1 --silent 16/16
+passed. Not done: no full local e2e/unit suite run (CI covers that); no manual Swagger click-through against Atlas (no
+Swagger-visible change — the invite is an internal side-effect of an existing endpoint).
+Related Requirement: GEN-01 (SCRUM-32) In-app notifications fired for every required event
+Prompt:
+Verify GEN-01 against current develop (63da298) for a scrum-master audit (GitHub issue #158): the requirement lists booking
+confirmation, cancellation, refund, flight schedule change, and account/provider suspension as required notification events.
+Confirmed confirmation, refund, schedule-change and suspension all already notify; the one real gap is cancellation —
+BOOKING_CANCELLED is only sent when an airline cancels a flight (flight-cancellation.service.ts), never when a traveler
+cancels their own flight or hotel booking. Those two paths only trigger a refund notification, and only when the refund is
+positive, so a 0%-tier cancellation notifies nothing at all. Fix it in both cancel services and add a test.
+How the output was used:
+Added a notifyCancelled() call in FlightBookingsService.cancel() (FLT-26, right after BookingLifecycle.transition to
+CANCELLED, before the refund is issued) and in HotelBookingCancellationService.cancel() (HTL-21), each injecting the
+already-exported NotificationsService (both modules already import NotificationsModule for their other notify calls).
+Each sends a distinct BOOKING_CANCELLED notification with a bookingReference-aware message and a /flight-bookings/{id} or
+/hotel-bookings/{id} link, mirroring the exact message/link style flight-cancellation.service.ts already uses for the
+provider-cancellation case. Not added to the already-CANCELLED retry-refund-completion path in either service, since that
+would re-notify a cancellation that already happened. Added e2e assertions in flight-bookings-hold.e2e-spec.ts (the
+positive-refund cancel test, asserting one BOOKING_CANCELLED plus the pre-existing REFUND_UPDATE, and that the already-
+cancelled retry sends no second BOOKING_CANCELLED; the zero-refund cancel test, asserting the notification still fires
+even though RefundsService never runs) and hotel-booking-cancel.e2e-spec.ts (same two cases), filtering on the booking's
+own link rather than a raw count since travelerId is shared across the whole spec file. Added a notifications cleanup to
+hotel-booking-cancel.e2e-spec.ts's beforeEach for the same reason (it wiped hotelBookings/payments/refunds but not
+notifications).
+Verification: npx tsc --noEmit -p . and npx eslint (changed files) clean; npm run build passed; npx jest
+src/flights src/hotels src/notifications src/payments --silent 312/312 passed; npx jest --config ./test/jest-e2e.json
+test/flight-bookings-hold.e2e-spec.ts --maxWorkers=1 --silent 86/86 passed; npx jest --config ./test/jest-e2e.json
+test/hotel-booking-cancel.e2e-spec.ts --maxWorkers=1 --silent 27/27 passed. Not done: no full local e2e/unit suite run
+(CI covers that); no manual Swagger click-through against Atlas.
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
 Related Requirement: ACC-02 (reopened by the scrum master: unverified user could still book)
@@ -2506,3 +2681,10 @@ Prompt:
 Build the frontend API client (same-origin /api, credentials include, JSON, ApiError from the backend error shape, one refresh and one retry on 401, then redirect to login with returnTo), AuthProvider/useAuth (me, login, logout, loading), RequireAuth, a /login page with field-level errors and an Alert, a strict safeReturnTo (same-site single-slash path only, decoded before checking), and a sessionStorage record of only a path and action name to resume an action after login. Header shows Login/Register for guests and Account/Logout when logged in. Tests first, no new dependencies, frontend only, nothing sensitive in web storage.
 How the output was used:
 Added lib/returnTo, lib/pendingAction and lib/api with tests (hostile returnTo inputs, ApiError mapping, single shared refresh and retry), AuthProvider, RequireAuth and LoginForm with tests, the login, account and forgot-password pages, Header account links with logout, and AuthProvider in the layout. Updated the GEN-14 header and shell tests for the new auth dependency and the placeholder test (login is a real page now).
+Student: Ahmed Sanad
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: CI tooling (no ticket)
+Prompt:
+Why are the frontend PRs waiting for the backend CI check? Make the CI skip the backend job when a PR only changes frontend or docs.
+How the output was used:
+Added a small `changes` job to .github/workflows/ci.yml that lists the files a pull request changes (git diff HEAD^1 HEAD on the merge commit). The `backend` job now needs it and runs only when something outside frontend/, docs/, *.md and AI_PROMPTS.txt changed (every PR edits AI_PROMPTS.txt, so it must not count). A job skipped by its own `if` is reported as passed to the required `backend` check, so branch protection still works. Pushes to develop always run everything. Checked the YAML parses and tested the path rule on sample file lists; the real proof is this PR's own run (it touches ci.yml, so backend runs) and a frontend-only PR afterwards.

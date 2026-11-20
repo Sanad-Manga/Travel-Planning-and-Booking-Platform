@@ -12,11 +12,20 @@ import { Connection, Model, Types } from 'mongoose';
 import request from 'supertest';
 import { AirlinesModule } from '../src/airlines';
 import { AuthModule } from '../src/auth/auth.module';
-import { BookingStatus, BookingType, PaymentStatus, Role } from '../src/common';
+import {
+  BookingStatus,
+  BookingType,
+  CabinClass,
+  FlightStatus,
+  PaymentStatus,
+  Role,
+} from '../src/common';
 import configuration from '../src/config/configuration';
 import { FlightsModule } from '../src/flights';
 import { FlightBookingProvider } from '../src/flights/flight-booking.provider';
+import { FlightBookingsService } from '../src/flights/flight-bookings.service';
 import { FlightETicketService } from '../src/flights/flight-eticket.service';
+import { FlightInventoryService } from '../src/flights/flight-inventory.service';
 import { FlightBooking } from '../src/flights/schemas/flight-booking.schema';
 import { NotificationsModule } from '../src/notifications';
 import {
@@ -2309,10 +2318,49 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       });
       expect(stripeGateway.refunds.size).toBe(1);
 
+      // GEN-01: a distinct cancellation notice, separate from the refund notification below.
+      expect(
+        await connection.collection('notifications').countDocuments({
+          userId: new Types.ObjectId(travelerId),
+          type: 'BOOKING_CANCELLED',
+          link: `/flight-bookings/${bookingId}`,
+        }),
+      ).toBe(1);
+      expect(
+        await connection.collection('notifications').countDocuments({
+          userId: new Types.ObjectId(travelerId),
+          type: 'REFUND_UPDATE',
+        }),
+      ).toBeGreaterThan(0);
+
+      // Not just a DB write: the traveler can actually see the cancellation through the real
+      // GET /api/notifications endpoint, same as any other notification.
+      const notificationsPage = await http()
+        .get('/api/notifications')
+        .set('Cookie', traveler)
+        .expect(200);
+      expect(notificationsPage.body.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'BOOKING_CANCELLED',
+            title: 'Flight booking cancelled',
+            link: `/flight-bookings/${bookingId}`,
+          }),
+        ]),
+      );
+
       // The booking is no longer CONFIRMED: a repeated cancellation is a 409 and changes nothing.
       await cancelRequest(bookingId, { confirm: false }).expect(409);
       expect(await connection.collection('refunds').countDocuments()).toBe(1);
       expect(stripeGateway.refunds.size).toBe(1);
+      // The retry (409, nothing cancelled) sends no additional cancellation notice.
+      expect(
+        await connection.collection('notifications').countDocuments({
+          userId: new Types.ObjectId(travelerId),
+          type: 'BOOKING_CANCELLED',
+          link: `/flight-bookings/${bookingId}`,
+        }),
+      ).toBe(1);
     });
 
     it('rejects a changed refund amount (409 with the current amount) and changes nothing until a fresh preview', async () => {
@@ -2535,6 +2583,16 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       });
       expect(await connection.collection('refunds').countDocuments()).toBe(0);
       expect(stripeGateway.refunds.size).toBe(0);
+
+      // GEN-01: even with nothing to refund (so RefundsService never fires), the traveler still
+      // gets a cancellation notice.
+      expect(
+        await connection.collection('notifications').countDocuments({
+          userId: new Types.ObjectId(travelerId),
+          type: 'BOOKING_CANCELLED',
+          link: `/flight-bookings/${bookingId}`,
+        }),
+      ).toBe(1);
     });
 
     it('cancels a round trip as a whole with the outbound airline tier and returns both segments', async () => {
@@ -2939,6 +2997,730 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
         const winner = results.find((res) => res.status === 200)!;
         expect(winner.body.refund.amountCents).toBe(refundAmountCents);
       });
+    });
+  });
+
+  describe('PATCH /api/flight-bookings/:id/change-flight (FLT-27)', () => {
+    const CHANGE = (id: string) => `${BOOKING}/${id}/change-flight`;
+    let paymentSequence = 0;
+    const uniquePaymentRef = () => `pi_change_${++paymentSequence}`;
+
+    /** A CONFIRMED one-way booking whose seats are booked (not merely held). */
+    async function confirmedBooking(
+      flightId: string,
+      extra: Record<string, unknown> = {},
+    ) {
+      const id = await hold(flightId, extra);
+      await lifecycle.confirmPaid(BookingType.FLIGHT, id, uniquePaymentRef());
+      return id;
+    }
+
+    const storedBooking = (id: string) =>
+      connection
+        .collection('flightBookings')
+        .findOne({ _id: new Types.ObjectId(id) });
+
+    const storedStatus = async (id: string) =>
+      (await storedBooking(id))?.status;
+
+    const changeRequest = (id: string, payload: Record<string, unknown>) =>
+      http().patch(CHANGE(id)).set('Cookie', traveler).send(payload);
+
+    it('moves an owner confirmed booking to another same-route/same-airline flight when the total is unchanged', async () => {
+      await setBaggagePolicy(3000, 2);
+      const oldFlightId = await createFlight({ flightNumber: 'MS930' });
+      const newFlightId = await createFlight({
+        flightNumber: 'MS931',
+        departureLocalTime: '2090-12-03T14:30',
+        arrivalLocalTime: '2090-12-03T19:45',
+      });
+      await addCabin(oldFlightId, 'ECONOMY', 10, 0, 0, 45000);
+      await addCabin(newFlightId, 'ECONOMY', 10, 0, 0, 45000);
+
+      const created = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          flightId: oldFlightId,
+          cabinClass: 'ECONOMY',
+          passengers: [
+            {
+              fullName: 'Amina Example',
+              dateOfBirth: '2078-12-01',
+              passportOrIdNumber: 'P1234567',
+              extraBags: [{ weightKg: 20 }],
+            },
+          ],
+        })
+        .expect(201);
+      const bookingId = created.body.id as string;
+      await lifecycle.confirmPaid(
+        BookingType.FLIGHT,
+        bookingId,
+        uniquePaymentRef(),
+      );
+      const reference = (await storedBooking(bookingId))?.bookingReference;
+      expect(created.body.totalCents).toBe(48000);
+
+      const changed = await changeRequest(bookingId, {
+        flightId: newFlightId,
+      }).expect(200);
+
+      expect(changed.body).toMatchObject({
+        id: bookingId,
+        status: BookingStatus.CONFIRMED,
+        bookingReference: reference,
+        totalCents: 48000,
+        baggageFeeCents: 3000,
+        flight: { id: newFlightId },
+        segments: [
+          {
+            flightId: newFlightId,
+            cabinClass: CabinClass.ECONOMY,
+            seats: 1,
+            farePerPassengerCents: 45000,
+            infantFareCents: 4500,
+            baggageFeeCents: 3000,
+          },
+        ],
+        passengers: [
+          {
+            fullName: 'Amina Example',
+            extraBags: [{ weightKg: 20 }],
+            baggageFeeCents: 3000,
+          },
+        ],
+        refund: null,
+      });
+      expect(changed.body).not.toHaveProperty('paymentRef');
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CONFIRMED);
+      expect(await storedBooking(bookingId)).toMatchObject({
+        flightId: new Types.ObjectId(newFlightId),
+        bookingReference: reference,
+        totalCents: 48000,
+      });
+      expect(await cabinOf(oldFlightId)).toMatchObject({
+        bookedSeats: 0,
+        heldSeats: 0,
+      });
+      expect(await cabinOf(newFlightId)).toMatchObject({
+        bookedSeats: 1,
+        heldSeats: 0,
+      });
+      expect(
+        await connection.collection('flightBookings').countDocuments(),
+      ).toBe(1);
+      expect(await connection.collection('payments').countDocuments()).toBe(0);
+      expect(await connection.collection('refunds').countDocuments()).toBe(0);
+
+      // Repeating the same change is not idempotent success: the flight is already booked.
+      await changeRequest(bookingId, { flightId: newFlightId }).expect(409);
+      expect(await cabinOf(newFlightId)).toMatchObject({ bookedSeats: 1 });
+    });
+
+    it('rejects a different route, airline, the same flight or a missing cabin without touching inventory', async () => {
+      const oldFlightId = await createFlight({ flightNumber: 'MS932' });
+      await addCabin(oldFlightId, 'ECONOMY', 10);
+      const bookingId = await confirmedBooking(oldFlightId);
+
+      const wrongRouteId = await createFlight({
+        flightNumber: 'MS933',
+        departureAirport: 'JFK',
+        arrivalAirport: 'CAI',
+        departureLocalTime: '2090-12-04T10:00',
+        arrivalLocalTime: '2090-12-04T18:30',
+      });
+      await addCabin(wrongRouteId, 'ECONOMY', 10);
+
+      const otherAirlineId = await createFlight(
+        { flightNumber: 'BB934' },
+        returnModerator,
+      );
+      await addCabin(otherAirlineId, 'ECONOMY', 10);
+
+      const noCabinId = await createFlight({
+        flightNumber: 'MS935',
+        departureLocalTime: '2090-12-05T10:00',
+        arrivalLocalTime: '2090-12-05T18:30',
+      });
+      await addCabin(noCabinId, 'BUSINESS', 10);
+
+      await changeRequest(bookingId, { flightId: oldFlightId }).expect(409);
+      await changeRequest(bookingId, { flightId: wrongRouteId }).expect(409);
+      await changeRequest(bookingId, { flightId: otherAirlineId }).expect(409);
+      await changeRequest(bookingId, { flightId: noCabinId }).expect(404);
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CONFIRMED);
+      expect((await storedBooking(bookingId))?.flightId.toString()).toBe(
+        oldFlightId,
+      );
+      expect(await cabinOf(oldFlightId)).toMatchObject({
+        bookedSeats: 1,
+        heldSeats: 0,
+      });
+      expect(await cabinOf(wrongRouteId)).toMatchObject({ bookedSeats: 0 });
+      expect(await cabinOf(otherAirlineId)).toMatchObject({ bookedSeats: 0 });
+      expect(await cabinOf(noCabinId, 'BUSINESS')).toMatchObject({
+        bookedSeats: 0,
+      });
+    });
+
+    it('rejects a higher or lower fare with 409 and creates no payment or refund', async () => {
+      const oldFlightId = await createFlight({ flightNumber: 'MS936' });
+      const higherFlightId = await createFlight({
+        flightNumber: 'MS937',
+        departureLocalTime: '2090-12-04T10:00',
+        arrivalLocalTime: '2090-12-04T18:30',
+      });
+      const lowerFlightId = await createFlight({
+        flightNumber: 'MS938',
+        departureLocalTime: '2090-12-05T10:00',
+        arrivalLocalTime: '2090-12-05T18:30',
+      });
+      await addCabin(oldFlightId, 'ECONOMY', 10, 0, 0, 45000);
+      await addCabin(higherFlightId, 'ECONOMY', 10, 0, 0, 46000);
+      await addCabin(lowerFlightId, 'ECONOMY', 10, 0, 0, 44000);
+      const bookingId = await confirmedBooking(oldFlightId);
+
+      const higher = await changeRequest(bookingId, {
+        flightId: higherFlightId,
+      }).expect(409);
+      expect(higher.body.message).toContain('1000');
+
+      const lower = await changeRequest(bookingId, {
+        flightId: lowerFlightId,
+      }).expect(409);
+      expect(lower.body.message).toContain('-1000');
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CONFIRMED);
+      expect((await storedBooking(bookingId))?.flightId.toString()).toBe(
+        oldFlightId,
+      );
+      expect(await cabinOf(oldFlightId)).toMatchObject({ bookedSeats: 1 });
+      expect(await cabinOf(higherFlightId)).toMatchObject({ bookedSeats: 0 });
+      expect(await cabinOf(lowerFlightId)).toMatchObject({ bookedSeats: 0 });
+      expect(await connection.collection('payments').countDocuments()).toBe(0);
+      expect(await connection.collection('refunds').countDocuments()).toBe(0);
+      expect(stripeGateway.refunds.size).toBe(0);
+    });
+
+    it('rejects ineligible booking statuses and round trips without side effects', async () => {
+      const targetFlightId = await createFlight({ flightNumber: 'MS939' });
+      await addCabin(targetFlightId, 'ECONOMY', 10);
+
+      const pendingFlightId = await createFlight({ flightNumber: 'MS940' });
+      await addCabin(pendingFlightId, 'ECONOMY', 10);
+      const pendingId = await hold(pendingFlightId);
+      await changeRequest(pendingId, { flightId: targetFlightId }).expect(409);
+
+      const completedFlightId = await createFlight({ flightNumber: 'MS941' });
+      await addCabin(completedFlightId, 'ECONOMY', 10);
+      const completedId = await confirmedBooking(completedFlightId);
+      await lifecycle.transition(
+        BookingType.FLIGHT,
+        completedId,
+        BookingStatus.COMPLETED,
+      );
+      await changeRequest(completedId, {
+        flightId: targetFlightId,
+      }).expect(409);
+
+      const cancelledFlightId = await createFlight({ flightNumber: 'MS942' });
+      await addCabin(cancelledFlightId, 'ECONOMY', 10);
+      const cancelledId = await confirmedBooking(cancelledFlightId);
+      await lifecycle.transition(
+        BookingType.FLIGHT,
+        cancelledId,
+        BookingStatus.CANCELLED,
+      );
+      await changeRequest(cancelledId, {
+        flightId: targetFlightId,
+      }).expect(409);
+
+      const outboundId = await createFlight({ flightNumber: 'MS943' });
+      const returnId = await createFlight(
+        {
+          flightNumber: 'BB944',
+          departureAirport: 'JFK',
+          arrivalAirport: 'CAI',
+          departureLocalTime: '2090-12-02T10:00',
+          arrivalLocalTime: '2090-12-02T18:30',
+        },
+        returnModerator,
+      );
+      await addCabin(outboundId, 'ECONOMY', 10);
+      await addCabin(returnId, 'ECONOMY', 10);
+      const roundTrip = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          segments: [
+            { flightId: outboundId, cabinClass: 'ECONOMY' },
+            { flightId: returnId, cabinClass: 'ECONOMY' },
+          ],
+          passengers: [
+            {
+              fullName: 'Amina Example',
+              dateOfBirth: '2078-12-01',
+              passportOrIdNumber: 'P1234567',
+            },
+          ],
+        })
+        .expect(201);
+      const roundTripId = roundTrip.body.id as string;
+      await lifecycle.confirmPaid(
+        BookingType.FLIGHT,
+        roundTripId,
+        uniquePaymentRef(),
+      );
+      const roundTripChange = await changeRequest(roundTripId, {
+        flightId: targetFlightId,
+      }).expect(409);
+      expect(roundTripChange.body.message).toMatch(/round-trip/i);
+
+      expect(await storedStatus(pendingId)).toBe(
+        BookingStatus.PENDING_PAYMENT,
+      );
+      expect(await storedStatus(completedId)).toBe(BookingStatus.COMPLETED);
+      expect(await storedStatus(cancelledId)).toBe(BookingStatus.CANCELLED);
+      expect(await cabinOf(pendingFlightId)).toMatchObject({ heldSeats: 1 });
+      expect(await cabinOf(completedFlightId)).toMatchObject({ bookedSeats: 1 });
+      expect(await cabinOf(cancelledFlightId)).toMatchObject({ bookedSeats: 0 });
+      expect(await cabinOf(outboundId)).toMatchObject({ bookedSeats: 1 });
+      expect(await cabinOf(returnId)).toMatchObject({ bookedSeats: 1 });
+      expect(await cabinOf(targetFlightId)).toMatchObject({ bookedSeats: 0 });
+    });
+
+    it('rejects a replacement flight that is cancelled or has departed', async () => {
+      const oldFlightId = await createFlight({ flightNumber: 'MS945' });
+      const cancelledFlightId = await createFlight({
+        flightNumber: 'MS946',
+        departureLocalTime: '2090-12-04T10:00',
+        arrivalLocalTime: '2090-12-04T18:30',
+      });
+      const departedFlightId = await createFlight({
+        flightNumber: 'MS947',
+        departureLocalTime: '2090-12-05T10:00',
+        arrivalLocalTime: '2090-12-05T18:30',
+      });
+      await addCabin(oldFlightId, 'ECONOMY', 10);
+      await addCabin(cancelledFlightId, 'ECONOMY', 10);
+      await addCabin(departedFlightId, 'ECONOMY', 10);
+      const bookingId = await confirmedBooking(oldFlightId);
+
+      await connection
+        .collection('flights')
+        .updateOne(
+          { _id: new Types.ObjectId(cancelledFlightId) },
+          { $set: { status: 'CANCELLED' } },
+        );
+      await connection.collection('flights').updateOne(
+        { _id: new Types.ObjectId(departedFlightId) },
+        {
+          $set: {
+            departureAt: new Date('2020-01-01T00:00:00.000Z'),
+            arrivalAt: new Date('2020-01-01T05:00:00.000Z'),
+          },
+        },
+      );
+
+      await changeRequest(bookingId, {
+        flightId: cancelledFlightId,
+      }).expect(409);
+      await changeRequest(bookingId, {
+        flightId: departedFlightId,
+      }).expect(409);
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CONFIRMED);
+      expect((await storedBooking(bookingId))?.flightId.toString()).toBe(
+        oldFlightId,
+      );
+      expect(await cabinOf(oldFlightId)).toMatchObject({ bookedSeats: 1 });
+      expect(await cabinOf(cancelledFlightId)).toMatchObject({ bookedSeats: 0 });
+      expect(await cabinOf(departedFlightId)).toMatchObject({ bookedSeats: 0 });
+    });
+
+    it('rechecks the replacement inside the transaction when it is cancelled just before the change', async () => {
+      const oldFlightId = await createFlight({ flightNumber: 'MS956' });
+      const targetFlightId = await createFlight({
+        flightNumber: 'MS957',
+        departureLocalTime: '2090-12-04T10:00',
+        arrivalLocalTime: '2090-12-04T18:30',
+      });
+      await addCabin(oldFlightId, 'ECONOMY', 10);
+      await addCabin(targetFlightId, 'ECONOMY', 10);
+      const bookingId = await confirmedBooking(oldFlightId);
+
+      const inventory = app.get(FlightInventoryService);
+      const loadBookableFlight = inventory.loadBookableFlight.bind(inventory);
+      // FLT-06 cancels the replacement after the pre-check passed and before the transaction reads
+      // it again, which is exactly the window the in-transaction re-read must close.
+      const cancelAfterPrecheck = jest
+        .spyOn(inventory, 'loadBookableFlight')
+        .mockImplementation(async (flightId, now) => {
+          const flight = await loadBookableFlight(flightId, now);
+          await connection
+            .collection('flights')
+            .updateOne(
+              { _id: new Types.ObjectId(flightId) },
+              { $set: { status: 'CANCELLED' } },
+            );
+          return flight;
+        });
+
+      let res;
+      try {
+        res = await changeRequest(bookingId, {
+          flightId: targetFlightId,
+        }).expect(409);
+      } finally {
+        cancelAfterPrecheck.mockRestore();
+      }
+      expect(res.body.message).toMatch(/not open for booking/i);
+      expect(res.body.message).toMatch(/CANCELLED/);
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CONFIRMED);
+      expect((await storedBooking(bookingId))?.flightId.toString()).toBe(
+        oldFlightId,
+      );
+      expect(await cabinOf(oldFlightId)).toMatchObject({
+        bookedSeats: 1,
+        heldSeats: 0,
+      });
+      expect(await cabinOf(targetFlightId)).toMatchObject({
+        bookedSeats: 0,
+        heldSeats: 0,
+      });
+      expect(await connection.collection('payments').countDocuments()).toBe(0);
+      expect(await connection.collection('refunds').countDocuments()).toBe(0);
+      expect(stripeGateway.refunds.size).toBe(0);
+      expect(
+        (
+          await connection.collection('flights').findOne({
+            _id: new Types.ObjectId(targetFlightId),
+          })
+        )?.status,
+      ).toBe('CANCELLED');
+    });
+
+    it('rejects a replacement with too few seats and leaves the original booking intact', async () => {
+      const oldFlightId = await createFlight({ flightNumber: 'MS948' });
+      const fullFlightId = await createFlight({
+        flightNumber: 'MS949',
+        departureLocalTime: '2090-12-04T10:00',
+        arrivalLocalTime: '2090-12-04T18:30',
+      });
+      await addCabin(oldFlightId, 'ECONOMY', 10);
+      // One total seat, already held by somebody else: zero available.
+      await addCabin(fullFlightId, 'ECONOMY', 1, 0, 1, 45000);
+      const bookingId = await confirmedBooking(oldFlightId);
+
+      const res = await changeRequest(bookingId, {
+        flightId: fullFlightId,
+      }).expect(409);
+      expect(res.body.message).toMatch(/seats/i);
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CONFIRMED);
+      expect((await storedBooking(bookingId))?.flightId.toString()).toBe(
+        oldFlightId,
+      );
+      expect(await cabinOf(oldFlightId)).toMatchObject({
+        bookedSeats: 1,
+        heldSeats: 0,
+      });
+      expect(await cabinOf(fullFlightId)).toMatchObject({
+        bookedSeats: 0,
+        heldSeats: 1,
+      });
+    });
+
+    it('lets only one of two concurrent changes win without overselling or releasing the old seats twice', async () => {
+      const oldFlightId = await createFlight({ flightNumber: 'MS950' });
+      const targetFlightId = await createFlight({
+        flightNumber: 'MS951',
+        departureLocalTime: '2090-12-04T10:00',
+        arrivalLocalTime: '2090-12-04T18:30',
+      });
+      await addCabin(oldFlightId, 'ECONOMY', 10);
+      await addCabin(targetFlightId, 'ECONOMY', 1);
+      const bookingId = await confirmedBooking(oldFlightId);
+
+      const results = await Promise.all([
+        changeRequest(bookingId, { flightId: targetFlightId }),
+        changeRequest(bookingId, { flightId: targetFlightId }),
+      ]);
+
+      expect(results.map((res) => res.status).sort()).toEqual([200, 409]);
+      const winner = results.find((res) => res.status === 200)!;
+      expect(winner.body).toMatchObject({
+        id: bookingId,
+        status: BookingStatus.CONFIRMED,
+        flight: { id: targetFlightId },
+      });
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CONFIRMED);
+      expect((await storedBooking(bookingId))?.flightId.toString()).toBe(
+        targetFlightId,
+      );
+      expect(await cabinOf(oldFlightId)).toMatchObject({
+        bookedSeats: 0,
+        heldSeats: 0,
+      });
+      expect(await cabinOf(targetFlightId)).toMatchObject({
+        bookedSeats: 1,
+        heldSeats: 0,
+      });
+      expect(
+        await connection.collection('flightBookings').countDocuments(),
+      ).toBe(1);
+      expect(await connection.collection('payments').countDocuments()).toBe(0);
+      expect(await connection.collection('refunds').countDocuments()).toBe(0);
+    });
+
+    it('keeps the change owner-only and role USER only', async () => {
+      const oldFlightId = await createFlight({ flightNumber: 'MS952' });
+      const targetFlightId = await createFlight({
+        flightNumber: 'MS953',
+        departureLocalTime: '2090-12-04T10:00',
+        arrivalLocalTime: '2090-12-04T18:30',
+      });
+      await addCabin(oldFlightId, 'ECONOMY', 10);
+      await addCabin(targetFlightId, 'ECONOMY', 10);
+      const bookingId = await confirmedBooking(oldFlightId);
+
+      await http()
+        .patch(CHANGE(bookingId))
+        .set('Cookie', otherTraveler)
+        .send({ flightId: targetFlightId })
+        .expect(404);
+      await changeRequest(new Types.ObjectId().toString(), {
+        flightId: targetFlightId,
+      }).expect(404);
+      await changeRequest('not-an-id', { flightId: targetFlightId }).expect(404);
+      await http()
+        .patch(CHANGE(bookingId))
+        .set('Cookie', admin)
+        .send({ flightId: targetFlightId })
+        .expect(403);
+      await http()
+        .patch(CHANGE(bookingId))
+        .send({ flightId: targetFlightId })
+        .expect(401);
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CONFIRMED);
+      expect((await storedBooking(bookingId))?.flightId.toString()).toBe(
+        oldFlightId,
+      );
+      expect(await cabinOf(oldFlightId)).toMatchObject({ bookedSeats: 1 });
+      expect(await cabinOf(targetFlightId)).toMatchObject({ bookedSeats: 0 });
+    });
+
+    it('validates flightId with one field-level detail per bad field', async () => {
+      const oldFlightId = await createFlight({ flightNumber: 'MS954' });
+      const targetFlightId = await createFlight({
+        flightNumber: 'MS955',
+        departureLocalTime: '2090-12-04T10:00',
+        arrivalLocalTime: '2090-12-04T18:30',
+      });
+      await addCabin(oldFlightId, 'ECONOMY', 10);
+      await addCabin(targetFlightId, 'ECONOMY', 10);
+      const bookingId = await confirmedBooking(oldFlightId);
+
+      const cases: Array<[Record<string, unknown>, string]> = [
+        [{}, 'flightId'],
+        [{ flightId: 'not-an-id' }, 'flightId'],
+        [{ flightId: targetFlightId, unexpected: true }, 'unexpected'],
+      ];
+      for (const [payload, field] of cases) {
+        const res = await changeRequest(bookingId, payload).expect(400);
+        expect(res.body.message).toBe('Validation failed');
+        expect(
+          (res.body.details as Array<{ field: string }>).some(
+            (detail) => detail.field === field,
+          ),
+        ).toBe(true);
+      }
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CONFIRMED);
+      expect((await storedBooking(bookingId))?.flightId.toString()).toBe(
+        oldFlightId,
+      );
+      expect(await cabinOf(oldFlightId)).toMatchObject({ bookedSeats: 1 });
+      expect(await cabinOf(targetFlightId)).toMatchObject({ bookedSeats: 0 });
+    });
+
+    it('documents the route, request schema, errors and equal-fare rule in Swagger', async () => {
+      const docs = await http().get('/api/docs-json').expect(200);
+      const operation =
+        docs.body.paths['/api/flight-bookings/{id}/change-flight'].patch;
+
+      expect(operation.operationId).toBe(
+        'FlightBookingsController_changeFlight',
+      );
+      expect(operation.description).toMatch(/round-trip/i);
+      expect(operation.description).toMatch(/no price difference/i);
+      expect(operation.description).toMatch(/old booked seats/i);
+      expect(operation.description).toMatch(/409/);
+      const requestRef =
+        operation.requestBody.content['application/json'].schema.$ref;
+      const requestSchema =
+        docs.body.components.schemas[requestRef.split('/').pop()];
+      expect(requestSchema.required).toEqual(
+        expect.arrayContaining(['flightId']),
+      );
+      expect(requestSchema.properties.flightId).toBeDefined();
+      for (const status of ['200', '400', '401', '403', '404', '409']) {
+        expect(operation.responses[status]).toBeDefined();
+      }
+    });
+  });
+
+  describe('flight booking completion sweep (GEN-11)', () => {
+    /** A Flight whose arrivalAt is already in the past, bypassing FLT-03's "no past departure" rule. */
+    async function arrivedFlight(flightNumber: string, arrivedDaysAgo = 1) {
+      const flightId = await createFlight({ flightNumber });
+      await addCabin(flightId, 'ECONOMY', 10);
+      await connection.collection('flights').updateOne(
+        { _id: new Types.ObjectId(flightId) },
+        {
+          $set: {
+            departureAt: new Date(Date.now() - (arrivedDaysAgo + 1) * 86_400_000),
+            arrivalAt: new Date(Date.now() - arrivedDaysAgo * 86_400_000),
+          },
+        },
+      );
+      return flightId;
+    }
+
+    /** A CONFIRMED booking inserted directly (bypassing FLT-22's hold flow) so its flight(s) can already have arrived. */
+    async function confirmedBookingFor(
+      segments: Array<{ flightId: string; airlineId?: string }>,
+    ) {
+      const id = new Types.ObjectId();
+      const segment = (flightId: string, airlineId: string) => ({
+        flightId: new Types.ObjectId(flightId),
+        airlineId: new Types.ObjectId(airlineId),
+        cabinClass: 'ECONOMY',
+        seats: 1,
+        farePerPassengerCents: 45000,
+        infantFareCents: 4500,
+        baggageFeeCents: 0,
+      });
+      await connection.collection('flightBookings').insertOne({
+        _id: id,
+        userId: new Types.ObjectId(travelerId),
+        airlineId: new Types.ObjectId(segments[0].airlineId ?? airline.id),
+        flightId: new Types.ObjectId(segments[0].flightId),
+        segments: segments.map((s) => segment(s.flightId, s.airlineId ?? airline.id)),
+        cabinClass: 'ECONOMY',
+        passengerCounts: { adults: 1, children: 0, infants: 0 },
+        seats: 1,
+        farePerPassengerCents: 45000,
+        infantFareCents: 4500,
+        totalCents: 45000,
+        currency: 'USD',
+        status: BookingStatus.CONFIRMED,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      return id;
+    }
+
+    const statusOf = async (id: Types.ObjectId) =>
+      (await connection.collection('flightBookings').findOne({ _id: id }))?.status;
+
+    it('completes a one-way booking once its only flight has arrived', async () => {
+      const flightId = await arrivedFlight('MS930');
+      const bookingId = await confirmedBookingFor([{ flightId }]);
+
+      const service = app.get(FlightBookingsService);
+      await expect(service.completePastFlights(new Date())).resolves.toBe(1);
+
+      expect(await statusOf(bookingId)).toBe(BookingStatus.COMPLETED);
+    });
+
+    it('leaves a booking CONFIRMED while its flight has not arrived yet', async () => {
+      const flightId = await createFlight({ flightNumber: 'MS931' });
+      await addCabin(flightId, 'ECONOMY', 10);
+      const bookingId = await confirmedBookingFor([{ flightId }]);
+
+      const service = app.get(FlightBookingsService);
+      await expect(service.completePastFlights(new Date())).resolves.toBe(0);
+
+      expect(await statusOf(bookingId)).toBe(BookingStatus.CONFIRMED);
+    });
+
+    it('completes a round trip only once its return leg (the last segment) has arrived, not the outbound alone', async () => {
+      const outboundId = await arrivedFlight('MS932', 5);
+      const notYetReturnId = await createFlight({ flightNumber: 'MS933' });
+      await addCabin(notYetReturnId, 'ECONOMY', 10);
+      const stillOutbound = await confirmedBookingFor([
+        { flightId: outboundId },
+        { flightId: notYetReturnId },
+      ]);
+
+      const arrivedReturnId = await arrivedFlight('MS934', 1);
+      const completedRoundTrip = await confirmedBookingFor([
+        { flightId: outboundId },
+        { flightId: arrivedReturnId },
+      ]);
+
+      const service = app.get(FlightBookingsService);
+      await expect(service.completePastFlights(new Date())).resolves.toBe(1);
+
+      expect(await statusOf(stillOutbound)).toBe(BookingStatus.CONFIRMED);
+      expect(await statusOf(completedRoundTrip)).toBe(BookingStatus.COMPLETED);
+    });
+
+    it('is idempotent and leaves non-CONFIRMED bookings alone', async () => {
+      const flightId = await arrivedFlight('MS935');
+      const bookingId = await confirmedBookingFor([{ flightId }]);
+
+      const service = app.get(FlightBookingsService);
+      await expect(service.completePastFlights(new Date())).resolves.toBe(1);
+      await expect(service.completePastFlights(new Date())).resolves.toBe(0);
+      expect(await statusOf(bookingId)).toBe(BookingStatus.COMPLETED);
+    });
+
+    it('completes a legacy booking with no segments array, via the top-level flightId fallback', async () => {
+      const flightId = await arrivedFlight('MS936');
+      const id = new Types.ObjectId();
+      await connection.collection('flightBookings').insertOne({
+        _id: id,
+        userId: new Types.ObjectId(travelerId),
+        airlineId: new Types.ObjectId(airline.id),
+        flightId: new Types.ObjectId(flightId),
+        // No `segments` field at all: pre-FLT-12 shape.
+        cabinClass: 'ECONOMY',
+        passengerCounts: { adults: 1, children: 0, infants: 0 },
+        seats: 1,
+        farePerPassengerCents: 45000,
+        infantFareCents: 4500,
+        totalCents: 45000,
+        currency: 'USD',
+        status: BookingStatus.CONFIRMED,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const service = app.get(FlightBookingsService);
+      await expect(service.completePastFlights(new Date())).resolves.toBe(1);
+
+      expect(await statusOf(id)).toBe(BookingStatus.COMPLETED);
+    });
+
+    it('leaves a CONFIRMED booking alone when its last flight was cancelled, even if its arrival has passed', async () => {
+      const flightId = await arrivedFlight('MS937');
+      await connection
+        .collection('flights')
+        .updateOne({ _id: new Types.ObjectId(flightId) }, { $set: { status: FlightStatus.CANCELLED } });
+      const bookingId = await confirmedBookingFor([{ flightId }]);
+
+      const service = app.get(FlightBookingsService);
+      await expect(service.completePastFlights(new Date())).resolves.toBe(0);
+
+      expect(await statusOf(bookingId)).toBe(BookingStatus.CONFIRMED);
     });
   });
 });
