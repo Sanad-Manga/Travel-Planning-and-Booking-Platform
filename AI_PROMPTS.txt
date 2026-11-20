@@ -2454,6 +2454,39 @@ MongoDB fields leak. countryCode is trimmed and upper-cased and must be two lett
 nobody uses gives an empty page. Added the three routes to the GEN-05 pagination table and a new e2e spec (11 tests).
 
 Date: 2026-11-20
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: SCRUM-118 / BON-01
+Prompt:
+Implement the read-only admin analytics endpoint within the supplied allowlist.
+Verify booking and revenue totals, UTC date bounds, refund handling, and the
+admin guard. Run feature tests, an adversarial pass, and the exact local CI
+sequence before publishing the feature branch for independent review.
+How the output was used:
+Verified SCRUM-118 and the merged ACC-17 dependency. Started
+feature/BON-01-admin-analytics at 63da298a797711a2fb46e2dfe2325d5999172a14
+in its dedicated worktree and passed 36 ACC-17 baseline E2E tests.
+Added GET /api/admin/analytics with shared auth, calendar-date validation,
+and Swagger response and errors. MongoDB filters and groups flight and hotel
+bookings by UTC creation dates, type and provider. Counts include all statuses
+and a separate CONFIRMED count. Only CONFIRMED bookings produce revenue.
+Settled same-currency refunds reduce those bookings' totals. Payment retries,
+nonconfirmed bookings and unsettled refunds do not increase or subtract revenue.
+Used exact integer cents and per-currency totals, preserving nullable names for
+deleted providers. The report has no writes and exposes no customer data.
+Focused verification passed 9/9 unit and 14/14 E2E tests initially. A separate
+10-case adversarial pass exercised ID collisions, payment attempts, tied totals,
+partial/full refunds, cancelled bookings, UTC boundaries, mixed currencies,
+unsafe cents, malformed requests and database errors. It caught a missing
+provider ID returning an invalid row. Added a guard and verified 9/9 unit and
+24/24 E2E afterward, including all 10 adversarial tests.
+Node 22.23.5 and npm 10.9.9 on Windows with disposable MongoDB 8.2.6.
+Exact npm ci, build, lint, npm test (1,300/1,300, 93 suites) and
+npm run test:e2e (1,938/1,938, 76 suites) passed. No failed or skipped tests.
+The additional TypeScript and Git whitespace checks passed. npm reported
+existing lockfile advisories and E2E emitted listener-count warnings.
+Admin README updated only for BON-01. Shared pagination tests and all
+protected files were preserved.
 Student: Hessain Elrefaey
 Tool: OpenCode (DeepSeek V4.1 Flash Free)
 Related Requirement: HTL-12 (hotel search price and rating filters, sorting)
