@@ -2456,6 +2456,56 @@ nobody uses gives an empty page. Added the three routes to the GEN-05 pagination
 Date: 2026-11-20
 Student: Abdelrahman ElGabarty
 Tool: Claude (Claude Code)
+Related Requirement: GEN-11 (SCRUM-33) Booking lifecycle: CONFIRMED to COMPLETED for flights
+Prompt:
+Verify GEN-11 against current develop for a scrum-master audit (GitHub issue #159): CONFIRMED to CANCELLED has callers in
+both Flights and Hotels now, but nothing ever moves a CONFIRMED flight booking to COMPLETED. FlightStatusJob only stores a
+Flight's own DEPARTED status, never touches a booking. (Hotels already has this: a daily @Cron sweep plus a lazy per-read
+check in hotel-bookings.service.ts, both calling BookingLifecycle.transition; that half of the original audit was stale.)
+Add the flights equivalent, with a test.
+How the output was used:
+Added completeArrivedBookings (a daily @Cron(EVERY_DAY_AT_MIDNIGHT) job) and completePastFlights to FlightBookingsService,
+mirroring HotelBookingsService.completeCheckedOutStays/completePastStays exactly: same cursor-batched, idempotent,
+exception-tolerant loop, same BookingLifecycle.transition(FLIGHT, id, COMPLETED) call. The one real difference is that a
+flight booking's arrival time isn't stored on the booking itself (unlike a hotel reservation's checkOut), so "due"
+bookings are found with an aggregation: $match CONFIRMED + cursor, then $addFields the last segment's flightId
+($arrayElemAt(segments.flightId, -1), falling back to the booking's own top-level flightId for a legacy pre-FLT-12
+booking with no segments array), $lookup into flights for its arrivalAt, then filter on arrivalAt <= now. The $limit is
+placed after that arrival filter, not right after the initial $match, because most CONFIRMED bookings on any day are
+future flights — limiting before filtering would make a short page falsely signal "nothing else due" while later,
+overdue bookings are still waiting in the cursor.
+Added a GEN-11 describe block to flight-bookings-hold.e2e-spec.ts calling FlightBookingsService.completePastFlights(now)
+directly (same pattern hotel-bookings.e2e-spec.ts already uses for its own sweep), with flights and bookings inserted
+directly into the test database so their arrival time can already be in the past (FLT-03 rejects a past departure
+through the real endpoint). Four cases: a one-way booking completes once its flight has arrived; a booking is left
+CONFIRMED while its flight has not arrived yet; a round trip completes only once its return leg (the last segment) has
+arrived, proving the sweep doesn't complete early on the outbound alone; the sweep is idempotent (a second run completes
+nothing further).
+Verification: npx tsc --noEmit -p ., npx eslint (changed files), npm run build all clean; npx jest src/flights --silent
+56/56 passed; npx jest --config ./test/jest-e2e.json test/flight-bookings-hold.e2e-spec.ts --maxWorkers=1 --silent 90/90
+passed. Not done: no full local e2e/unit suite run (CI covers that); no manual Swagger click-through against Atlas (this
+ticket adds no new endpoint, so nothing to document there).
+
+Date: 2026-11-20
+Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code)
+Related Requirement: GEN-11 (SCRUM-33) Booking lifecycle: CONFIRMED to COMPLETED for flights (PR #177 review fix)
+Prompt:
+PR #177 review (Sanad): the completion sweep's dueForCompletion only checks lastFlight.arrivalAt <= now, so it can
+complete a booking whose flight was CANCELLED by the airline (FLT-06) if its arrival time has already passed. If that
+booking's own cancel/refund step previously failed and it is still CONFIRMED pending a moderator retry, the sweep beats
+the retry to it and moves it to COMPLETED, after which the retry can no longer cancel or refund it (requires CONFIRMED).
+Fix: exclude lastFlight.status === CANCELLED from the match, and add a test for exactly this case.
+How the output was used:
+Added 'lastFlight.status': { $ne: FlightStatus.CANCELLED } to the same $match stage as the arrivalAt filter in
+dueForCompletion (flight-bookings.service.ts), imported FlightStatus from ../common, and updated the method's docblock.
+Added one e2e case to the GEN-11 describe block in flight-bookings-hold.e2e-spec.ts: a CONFIRMED booking on a flight
+whose arrival has passed but whose status is set to CANCELLED stays CONFIRMED after completePastFlights, proving the
+sweep no longer races the airline-cancellation retry flow.
+Verification: npx tsc --noEmit -p . and npx eslint on both changed files clean. npx jest --config ./test/jest-e2e.json
+test/flight-bookings-hold.e2e-spec.ts --maxWorkers=2 run twice: scoped to the GEN-11 describe block alone (6/6 passed,
+including the new case) and then the full file (92/92 passed), both green. Not done: no full local unit/e2e suite run
+(CI covers that; this PR touches only the flights module).
 Related Requirement: SCRUM-112 (BONUS GEN-01-B) Email notifications via SMTP — reopened to To Do
 Prompt:
 GEN-01-B was reopened: the SMTP side (EmailService, NotificationsService's own email side-effect) was already done (#123),

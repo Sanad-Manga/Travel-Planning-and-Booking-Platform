@@ -9,6 +9,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { Connection, Model, PipelineStage, Types } from 'mongoose';
 import {
   AuthenticatedUser,
@@ -17,6 +18,7 @@ import {
   CabinClass,
   DEFAULT_PAGE,
   DEFAULT_PAGE_SIZE,
+  FlightStatus,
   HOLD_MINUTES,
   isCalendarDate,
   NotificationType,
@@ -90,6 +92,9 @@ import {
   PassengerCountsInput,
   seatsNeeded,
 } from './utils/booking-price';
+
+/** GEN-11: how many CONFIRMED bookings the completion sweep checks from one page at a time. */
+const FLIGHT_COMPLETION_BATCH_SIZE = 100;
 
 function inputError(field: string, message: string): BadRequestException {
   return new BadRequestException({
@@ -786,6 +791,111 @@ export class FlightBookingsService {
       recorded,
     );
     return this.toCancellationResponse(context, true, refund);
+  }
+
+  /**
+   * GEN-11: a CONFIRMED flight booking becomes COMPLETED once its last flight (the return leg of
+   * a round trip, otherwise the single outbound leg) has arrived. Mirrors
+   * HotelBookingsService.completeCheckedOutStays/completePastStays exactly (same daily schedule,
+   * same cursor-batched, idempotent, exception-tolerant loop) — flights just need their arrival
+   * time joined from the `flights` collection instead of reading a date already on the booking.
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT, { timeZone: 'UTC' })
+  async completeArrivedBookings(): Promise<void> {
+    await this.completePastFlights();
+  }
+
+  async completePastFlights(now: Date = new Date()): Promise<number> {
+    let afterId: Types.ObjectId | undefined;
+    let completed = 0;
+
+    for (;;) {
+      const due = await this.dueForCompletion(now, afterId);
+      if (due.length === 0) return completed;
+
+      for (const id of due) {
+        try {
+          await this.bookingLifecycle.transition(
+            BookingType.FLIGHT,
+            id.toString(),
+            BookingStatus.COMPLETED,
+          );
+          completed += 1;
+        } catch (error) {
+          if (
+            !(error instanceof ConflictException) &&
+            !(error instanceof NotFoundException)
+          ) {
+            this.logger.error(
+              `Could not complete flight booking ${id.toString()}`,
+              error instanceof Error ? error.stack : String(error),
+            );
+          }
+        }
+        // Advance the cursor past this id regardless of outcome, same reasoning as the
+        // hold-expiry sweep: a booking that keeps failing can never block the page behind it.
+        afterId = id;
+      }
+
+      if (due.length < FLIGHT_COMPLETION_BATCH_SIZE) return completed;
+    }
+  }
+
+  /**
+   * One page of CONFIRMED booking ids whose last flight's arrivalAt is at or before `now` and
+   * whose last flight is not CANCELLED, in _id order. The last flight is
+   * `$arrayElemAt: [segments.flightId, -1]` (the return leg when present, otherwise the only
+   * segment), falling back to the booking's own top-level `flightId` for a legacy booking with
+   * no `segments` at all (pre-FLT-12 data, if any still exists).
+   */
+  private async dueForCompletion(
+    now: Date,
+    afterId?: Types.ObjectId,
+  ): Promise<Types.ObjectId[]> {
+    // $limit comes only after the arrival-date filter below (not right after $match/$sort): most
+    // CONFIRMED bookings on any given day are future flights, and a short page must mean nothing
+    // else in the whole remaining cursor is due yet, or the "< BATCH_SIZE means no more" check
+    // above would stop the sweep early while later, overdue bookings are still waiting.
+    const pipeline: PipelineStage[] = [
+      {
+        $match: {
+          status: BookingStatus.CONFIRMED,
+          ...(afterId ? { _id: { $gt: afterId } } : {}),
+        },
+      },
+      { $sort: { _id: 1 } },
+      {
+        $addFields: {
+          lastFlightId: {
+            $ifNull: [{ $arrayElemAt: ['$segments.flightId', -1] }, '$flightId'],
+          },
+        },
+      },
+      {
+        $lookup: {
+          from: this.flights.collection.collectionName,
+          localField: 'lastFlightId',
+          foreignField: '_id',
+          as: 'lastFlight',
+        },
+      },
+      { $unwind: '$lastFlight' },
+      {
+        $match: {
+          'lastFlight.arrivalAt': { $lte: now },
+          // A failed cancel/refund (FLT-06) can leave a booking CONFIRMED on a CANCELLED
+          // flight; completing it here would block the moderator's repeat cancel/refund,
+          // which requires CONFIRMED. Leave it for that flow instead of this sweep.
+          'lastFlight.status': { $ne: FlightStatus.CANCELLED },
+        },
+      },
+      { $limit: FLIGHT_COMPLETION_BATCH_SIZE },
+      { $project: { _id: 1 } },
+    ];
+    const rows = await this.model
+      .aggregate<{ _id: Types.ObjectId }>(pipeline)
+      .exec();
+    return rows.map((row) => row._id);
   }
 
   /** The caller's own booking; another traveler and an unknown id are both 404. */
