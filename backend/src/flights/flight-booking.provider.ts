@@ -12,11 +12,13 @@ import {
   BookingStatusSnapshot,
 } from '../payments/booking-provider.interface';
 import { BookingProviderRegistry } from '../payments/booking-provider.registry';
+import { UpcomingBookingsChecker, UpcomingBookingsRegistry } from '../users/upcoming-bookings';
 import {
   FlightBooking,
   FlightBookingLean,
   getFlightBookingSegments,
 } from './schemas/flight-booking.schema';
+import { Flight } from './schemas/flight.schema';
 
 export interface FlightPayable {
   amountCents: number;
@@ -58,19 +60,50 @@ type ConfirmationOutcome = {
  * the status change, so a booking and its seat counters can never disagree.
  */
 @Injectable()
-export class FlightBookingProvider implements BookingProvider, OnModuleInit {
+export class FlightBookingProvider implements BookingProvider, UpcomingBookingsChecker, OnModuleInit {
   constructor(
     @InjectModel(FlightBooking.name)
     private readonly model: Model<FlightBooking>,
+    @InjectModel(Flight.name)
+    private readonly flights: Model<Flight>,
     @InjectConnection() private readonly connection: Connection,
     private readonly inventory: FlightInventoryService,
     private readonly notifications: NotificationsService,
     private readonly registry: BookingProviderRegistry,
     private readonly airlines: AirlinesService,
+    private readonly upcomingBookings: UpcomingBookingsRegistry,
   ) {}
 
   onModuleInit(): void {
     this.registry.register(BookingType.FLIGHT, this);
+    this.upcomingBookings.register(BookingType.FLIGHT, this);
+  }
+
+  /**
+   * ACC-12: true when the user has a CONFIRMED booking with at least one leg that has not departed yet
+   * (`departureAt >= now`, UTC instants). A round trip counts while ANY leg is still ahead; PENDING_PAYMENT,
+   * CANCELLED, EXPIRED, COMPLETED and fully departed bookings do not. ONE aggregation, stopped at the first match:
+   * it starts from the (userId, ...) index, reads only the flight ids of each booking (`segments.flightId`, or the
+   * legacy top-level `flightId` when there are no segments) and joins them to the flights by `_id`. It never
+   * catches a database error: the caller must see it and refuse the deactivation.
+   */
+  async hasUpcomingConfirmedBookings(userId: string, now: Date): Promise<boolean> {
+    if (!Types.ObjectId.isValid(userId)) return false;
+    const rows = await this.model.aggregate<{ _id: Types.ObjectId }>([
+      { $match: { userId: new Types.ObjectId(userId), status: BookingStatus.CONFIRMED } },
+      {
+        $project: {
+          flightIds: {
+            $cond: [{ $gt: [{ $size: { $ifNull: ['$segments', []] } }, 0] }, '$segments.flightId', ['$flightId']],
+          },
+        },
+      },
+      { $lookup: { from: this.flights.collection.name, localField: 'flightIds', foreignField: '_id', as: 'legs' } },
+      { $match: { 'legs.departureAt': { $gte: now } } },
+      { $limit: 1 },
+      { $project: { _id: 1 } },
+    ]);
+    return rows.length > 0;
   }
 
   /** FLT-21/PAY-01: expose the stored booking total through the documented payable shape. */

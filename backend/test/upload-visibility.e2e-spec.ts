@@ -386,6 +386,22 @@ describe('GH-116 production AppModule/static routing: private Blog images', () =
     assertDenied(await http().get(ref.url), 'get');
   });
 
+  it('ACC-12: the published post image of a deactivated author is served to admins only, and again once reactivated', async () => {
+    const ref = await fixture('published');
+    await http().get(ref.url).expect(200);
+    await db
+      .collection('users')
+      .updateOne({ _id: new Types.ObjectId(authorId) }, { $set: { status: 'DEACTIVATED' } });
+    assertDenied(await http().get(ref.url), 'get');
+    assertDenied(await http().get(ref.url).set('Cookie', cookies.other), 'get');
+    assertDenied(await http().get(ref.url).set('Cookie', cookies.author), 'get');
+    await http().get(ref.url).set('Cookie', cookies.admin).expect(200);
+    await db
+      .collection('users')
+      .updateOne({ _id: new Types.ObjectId(authorId) }, { $set: { status: 'ACTIVE' } });
+    await http().get(ref.url).expect(200);
+  });
+
   it('does not trust request.user or authentication supplied through a URL/header', async () => {
     const ref = await fixture();
     assertDenied(
