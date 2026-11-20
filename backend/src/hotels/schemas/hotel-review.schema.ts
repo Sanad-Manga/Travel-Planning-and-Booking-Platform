@@ -21,6 +21,13 @@ export class HotelReview {
   @Prop({ type: Boolean, default: false })
   isHidden: boolean;
 
+  /** HTL-26: the hotel moderator's reply. Replacing it (editing) is allowed; there is no reply history. */
+  @Prop({ type: String, trim: true })
+  reply?: string;
+
+  @Prop({ type: Date })
+  repliedAt?: Date;
+
   createdAt: Date;
   updatedAt: Date;
 }
