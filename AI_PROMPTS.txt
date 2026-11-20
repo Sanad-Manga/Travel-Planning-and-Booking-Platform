@@ -2453,6 +2453,21 @@ Added three read-only controllers in the reference-data module, ordered by the o
 MongoDB fields leak. countryCode is trimmed and upper-cased and must be two letters (field-level 400 otherwise); a well-formed code
 nobody uses gives an empty page. Added the three routes to the GEN-05 pagination table and a new e2e spec (11 tests).
 
+
+Date: 2026-11-20
+Student: Ahmed Sanad
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: FLT-28 (SCRUM-114, seat selection, bonus)
+Prompt:
+Build FLT-28, PATCH /api/flight-bookings/:id/seat: the seat must exist in the booked cabin and be free, two users cannot take the
+same seat also under parallel requests (atomic), only the booking's owner may choose, Swagger updated, tests including a
+parallel-request test. The schema change for the booking is to be agreed with the flights owner.
+How the output was used:
+Seat labels are derived from the cabin's totalSeats (rows of six, 1A..), so no cabin schema change. A new collection
+flightSeatClaims with a unique index on flight + cabin + seat decides who gets a seat with one insert (no read-then-write);
+the booking gets an optional seatSelections array, updated by one pipeline update. Claims of bookings that are no longer
+CONFIRMED are treated as free, so no cancellation path has to release seats. Round trips choose per flight; infants take no seat.
+16 e2e tests (incl. 2 parallel ones) and 3 unit tests. The tests were written after the code, not before.
 Date: 2026-11-20
 Student: Mohamed Walid
 Tool: OpenAI Codex
