@@ -168,8 +168,8 @@ export class FlightBookingsController {
     description:
       'Moves a CONFIRMED one-way booking to another flight with no price difference. The body is a single `flightId`; the booking cabin, route and passenger/seat counts are kept. ' +
       'The replacement must be a different SCHEDULED flight on the same route, in the same cabin and on the same airline, with enough available seats; the booked flight must not have departed. ' +
-      'The booking total is recomputed from the stored passenger counts and the stored segment baggage fee plus the replacement cabin fare. Only an unchanged total is accepted: a higher or lower fare answers 409 with the difference and changes nothing, because charging/refunding a difference needs a Payments-owned contract that is documented but not implemented yet. ' +
-      'In one MongoDB transaction the replacement cabin gets the booked seats using the same atomic availability guard as a hold, the booking is updated only while it is still CONFIRMED on the old flight, and the old booked seats are returned. A failed change or a concurrent winner rolls the whole transaction back, so old seats are never released on failure and are never released twice. ' +
+      'The booking total is recomputed from the stored passenger counts and the stored segment baggage fee (kept as is, never repriced on the replacement) plus the replacement cabin fare. Only an unchanged total is accepted: a higher or lower fare answers 409 with the difference and changes nothing, because charging/refunding a difference needs a Payments-owned contract that is documented but not implemented yet. ' +
+      'In one MongoDB transaction the replacement is re-read with the transaction session and must still be SCHEDULED and before departure (so a flight cancelled after the first check cannot receive the booking), the replacement cabin gets the booked seats using the same atomic availability guard as a hold, the booking is updated only while it is still CONFIRMED on the old flight, and the old booked seats are returned. A failed change or a concurrent winner rolls the whole transaction back, so old seats are never released on failure and are never released twice. ' +
       'The booking id, unique booking reference, passengers, payment reference and CONFIRMED status are preserved; no second booking, payment or refund is created. Round-trip bookings answer 409 until the product rule for them is agreed. Another traveler and an unknown id both answer 404; only role USER can call it.',
   })
   @ApiOkResponse({
@@ -193,7 +193,7 @@ export class FlightBookingsController {
   @ApiConflictResponse({
     type: ErrorResponseDto,
     description:
-      'The booking is not CONFIRMED, is a round trip, is already on that flight, has departed, the replacement changes the route/airline, is not SCHEDULED, has too few seats or cannot carry the booked baggage, the fare changes (the difference is in the message), or another request changed the booking first',
+      'The booking is not CONFIRMED, is a round trip, is already on that flight, has departed, the replacement changes the route/airline, is not SCHEDULED (including a replacement cancelled between the first check and the change), has too few seats or cannot carry the booked baggage, the fare changes (the difference is in the message), or another request changed the booking first',
   })
   changeFlight(
     @CurrentUser() user: AuthenticatedUser,

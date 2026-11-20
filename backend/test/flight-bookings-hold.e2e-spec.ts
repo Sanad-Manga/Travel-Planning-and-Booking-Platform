@@ -17,6 +17,7 @@ import configuration from '../src/config/configuration';
 import { FlightsModule } from '../src/flights';
 import { FlightBookingProvider } from '../src/flights/flight-booking.provider';
 import { FlightETicketService } from '../src/flights/flight-eticket.service';
+import { FlightInventoryService } from '../src/flights/flight-inventory.service';
 import { FlightBooking } from '../src/flights/schemas/flight-booking.schema';
 import { NotificationsModule } from '../src/notifications';
 import {
@@ -3281,6 +3282,69 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       expect(await cabinOf(oldFlightId)).toMatchObject({ bookedSeats: 1 });
       expect(await cabinOf(cancelledFlightId)).toMatchObject({ bookedSeats: 0 });
       expect(await cabinOf(departedFlightId)).toMatchObject({ bookedSeats: 0 });
+    });
+
+    it('rechecks the replacement inside the transaction when it is cancelled just before the change', async () => {
+      const oldFlightId = await createFlight({ flightNumber: 'MS956' });
+      const targetFlightId = await createFlight({
+        flightNumber: 'MS957',
+        departureLocalTime: '2090-12-04T10:00',
+        arrivalLocalTime: '2090-12-04T18:30',
+      });
+      await addCabin(oldFlightId, 'ECONOMY', 10);
+      await addCabin(targetFlightId, 'ECONOMY', 10);
+      const bookingId = await confirmedBooking(oldFlightId);
+
+      const inventory = app.get(FlightInventoryService);
+      const loadBookableFlight = inventory.loadBookableFlight.bind(inventory);
+      // FLT-06 cancels the replacement after the pre-check passed and before the transaction reads
+      // it again, which is exactly the window the in-transaction re-read must close.
+      const cancelAfterPrecheck = jest
+        .spyOn(inventory, 'loadBookableFlight')
+        .mockImplementation(async (flightId, now) => {
+          const flight = await loadBookableFlight(flightId, now);
+          await connection
+            .collection('flights')
+            .updateOne(
+              { _id: new Types.ObjectId(flightId) },
+              { $set: { status: 'CANCELLED' } },
+            );
+          return flight;
+        });
+
+      let res;
+      try {
+        res = await changeRequest(bookingId, {
+          flightId: targetFlightId,
+        }).expect(409);
+      } finally {
+        cancelAfterPrecheck.mockRestore();
+      }
+      expect(res.body.message).toMatch(/not open for booking/i);
+      expect(res.body.message).toMatch(/CANCELLED/);
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CONFIRMED);
+      expect((await storedBooking(bookingId))?.flightId.toString()).toBe(
+        oldFlightId,
+      );
+      expect(await cabinOf(oldFlightId)).toMatchObject({
+        bookedSeats: 1,
+        heldSeats: 0,
+      });
+      expect(await cabinOf(targetFlightId)).toMatchObject({
+        bookedSeats: 0,
+        heldSeats: 0,
+      });
+      expect(await connection.collection('payments').countDocuments()).toBe(0);
+      expect(await connection.collection('refunds').countDocuments()).toBe(0);
+      expect(stripeGateway.refunds.size).toBe(0);
+      expect(
+        (
+          await connection.collection('flights').findOne({
+            _id: new Types.ObjectId(targetFlightId),
+          })
+        )?.status,
+      ).toBe('CANCELLED');
     });
 
     it('rejects a replacement with too few seats and leaves the original booking intact', async () => {

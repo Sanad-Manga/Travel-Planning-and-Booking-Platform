@@ -2460,3 +2460,13 @@ How the output was used:
 Added three read-only controllers in the reference-data module, ordered by the official code, mapping to small response DTOs so no
 MongoDB fields leak. countryCode is trimmed and upper-cased and must be two letters (field-level 400 otherwise); a well-formed code
 nobody uses gives an empty page. Added the three routes to the GEN-05 pagination table and a new e2e spec (11 tests).
+
+Date: 2026-11-20
+Student: Abdulrahman Mohamad Hosny
+Tool: OpenCode (DeepSeek V4.1 Flash Free)
+Related Requirement: FLT-27 follow-up review (recheck the replacement inside the change transaction)
+Prompt:
+Address the lead's review on FLT-27: loadBookableFlight checks SCHEDULED/not departed before the transaction, so a FLT-06 cancellation between that check and the booking update could move the booking onto a CANCELLED flight that is never refunded. Re-read the replacement inside the transaction with the same session and require it to still be SCHEDULED and before departure. Add an E2E test where the replacement is cancelled right before the change (409, nothing changed, old seats kept). Also state in docs/contracts.md that the stored baggage fee is kept as is and is not repriced on the replacement. Then build, lint, test, commit and push.
+How the output was used:
+Added FlightInventoryService.loadBookableFlightInSession(flightId, now, session), which applies the same effectiveFlightStatus rule as loadBookableFlight (SCHEDULED and not effectively departed). FlightBookingsService.changeFlight calls it first inside the MongoDB transaction, before reserving seats, so a replacement cancelled or departed after the pre-check aborts the whole transaction and nothing moves. Swagger and docs/contracts.md document the in-transaction re-read and that the stored segment baggage fee is carried over unchanged and never repriced. Added a FLT-27 E2E test that cancels the replacement after loadBookableFlight returns but before the transaction reads it: the request answers 409 "not open for booking (it is CANCELLED)", the booking stays CONFIRMED on the old flight, the old booked seats are kept, the replacement cabin has no seats, and no payment or refund exists.
+Verification: npm run build passed; npm run lint passed; npx jest --runInBand "src/flights" "src/refunds" "src/payments/refund-calculator" 67/67 passed; npx jest --config ./test/jest-e2e.json flight-bookings-hold --runInBand 97/97 passed (11 FLT-27); npx jest --config ./test/jest-e2e.json payments-webhook payments-concurrency refunds-concurrency pagination --runInBand 243/243 passed.

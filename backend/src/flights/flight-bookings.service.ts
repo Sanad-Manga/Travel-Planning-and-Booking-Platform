@@ -654,11 +654,13 @@ export class FlightBookingsService {
    * cabin fare; any difference (higher or lower) is a 409 because charging/refunding a difference
    * needs the Payments contract documented in docs/contracts.md, not implemented yet.
    *
-   * One transaction reserves the replacement's booked seats with the same atomic availability
-   * filter as a hold, conditionally updates the booking only while it is still CONFIRMED on the
-   * old flight, and returns the old booked seats. A failure or concurrent winner rolls the whole
-   * transaction back, so the old seats are never released on a failed change. The booking id,
-   * reference, passengers, payment reference and status are preserved; no second booking is made.
+   * One transaction re-reads the replacement with its session (so a flight cancelled after the
+   * pre-check aborts the change), reserves the replacement's booked seats with the same atomic
+   * availability filter as a hold, conditionally updates the booking only while it is still
+   * CONFIRMED on the old flight, and returns the old booked seats. A failure or concurrent winner
+   * rolls the whole transaction back, so the old seats are never released on a failed change. The
+   * booking id, reference, passengers, payment reference and status are preserved; no second
+   * booking is made.
    */
   async changeFlight(
     user: AuthenticatedUser,
@@ -727,6 +729,14 @@ export class FlightBookingsService {
     let updated: FlightBookingLean | undefined;
     await this.connection.transaction(async (session) => {
       updated = undefined;
+
+      // FLT-06 could cancel the replacement after the pre-check and before this transaction. Re-read
+      // it with the transaction's session so a cancelled/departed flight aborts everything.
+      await this.inventory.loadBookableFlightInSession(
+        replacement._id,
+        now,
+        session,
+      );
 
       const cabin = await this.inventory.reserveBookedSeats(
         replacement._id,

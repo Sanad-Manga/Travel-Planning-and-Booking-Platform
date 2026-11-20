@@ -54,6 +54,33 @@ export class FlightInventoryService {
   }
 
   /**
+   * FLT-27: the same bookable-flight rule as {@link loadBookableFlight}, read inside the caller's
+   * transaction with its session. `loadBookableFlight` runs before the change transaction, so an
+   * airline cancellation (FLT-06) could otherwise land between that check and the booking update and
+   * move the booking onto a cancelled flight. Re-reading with the session closes that gap: a flight
+   * that is no longer SCHEDULED (or has effectively departed) aborts the whole transaction.
+   */
+  async loadBookableFlightInSession(
+    flightId: Types.ObjectId | string,
+    now: Date,
+    session: ClientSession,
+  ): Promise<FlightLean> {
+    const flight = await this.flights
+      .findById(flightId)
+      .session(session)
+      .lean<FlightLean>()
+      .exec();
+    if (!flight) throw new NotFoundException('Flight not found');
+    const status = effectiveFlightStatus(flight, now);
+    if (status !== FlightStatus.SCHEDULED) {
+      throw new ConflictException(
+        `This flight is not open for booking (it is ${status})`,
+      );
+    }
+    return flight;
+  }
+
+  /**
    * Reserve `seats` in one cabin: ONE conditional update ("only if total - booked - held >= seats"),
    * never read-then-write, so parallel requests can never hold more seats than exist.
    * Returns the cabin as it is after the update (the fare in it is the one the booking must use),
