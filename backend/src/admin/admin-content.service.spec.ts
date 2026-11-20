@@ -7,6 +7,7 @@ import { Comment } from '../blog/schemas/comment.schema';
 import { Post } from '../blog/schemas/post.schema';
 import { Hotel } from '../hotels/schemas/hotel.schema';
 import { HotelReview } from '../hotels/schemas/hotel-review.schema';
+import { ItinerariesService } from '../itineraries/itineraries.service';
 import { Itinerary } from '../itineraries/schemas/itinerary.schema';
 import { AdminContentService } from './admin-content.service';
 
@@ -25,6 +26,7 @@ describe('AdminContentService', () => {
   let hotels: { updateOne: jest.Mock };
   let hotelReviews: { findOneAndUpdate: jest.Mock; findOneAndDelete: jest.Mock; aggregate: jest.Mock };
   let itineraries: { updateOne: jest.Mock; deleteOne: jest.Mock };
+  let itinerariesService: { removeAsAdmin: jest.Mock };
   let posts: { updateOne: jest.Mock };
   let connection: { transaction: jest.Mock };
   let audit: { log: jest.Mock };
@@ -40,6 +42,7 @@ describe('AdminContentService', () => {
       aggregate: jest.fn().mockReturnValue({ session: () => ({ exec: async () => [] }) }),
     };
     itineraries = { updateOne: jest.fn(), deleteOne: jest.fn() };
+    itinerariesService = { removeAsAdmin: jest.fn().mockResolvedValue(undefined) };
     posts = { updateOne: jest.fn() };
     // Runs the callback against a no-op "session", matching real Mongoose transaction semantics closely enough
     // for this unit test (the real atomicity is proven at the e2e level, per this repo's convention).
@@ -54,6 +57,7 @@ describe('AdminContentService', () => {
       posts as unknown as Model<Post>,
       connection as never,
       audit as unknown as AuditService,
+      itinerariesService as unknown as ItinerariesService,
     );
   });
 
@@ -152,15 +156,18 @@ describe('AdminContentService', () => {
       expect(audit.log).not.toHaveBeenCalled();
     });
 
-    it('deletes an itinerary directly', async () => {
-      itineraries.deleteOne.mockReturnValue({ exec: async () => ({ deletedCount: 1 }) });
+    it('deletes an itinerary together with its children and audits it', async () => {
       await service.delete(admin(), ContentType.ITINERARY, ID);
-      expect(itineraries.deleteOne).toHaveBeenCalledWith({ _id: ID });
+      expect(itinerariesService.removeAsAdmin).toHaveBeenCalledWith(ID);
+      expect(audit.log).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'CONTENT_DELETED', targetType: ContentType.ITINERARY, targetId: ID }),
+      );
     });
 
-    it('answers 404 for an unknown itinerary', async () => {
-      itineraries.deleteOne.mockReturnValue({ exec: async () => ({ deletedCount: 0 }) });
+    it('answers 404 for an unknown itinerary and audits nothing', async () => {
+      itinerariesService.removeAsAdmin.mockRejectedValue(new NotFoundException('Itinerary not found'));
       await expect(service.delete(admin(), ContentType.ITINERARY, ID)).rejects.toBeInstanceOf(NotFoundException);
+      expect(audit.log).not.toHaveBeenCalled();
     });
 
     it('deletes a hotel review and recalculates the hotel rating', async () => {

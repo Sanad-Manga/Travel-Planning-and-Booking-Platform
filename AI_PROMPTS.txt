@@ -2760,3 +2760,12 @@ Prompt:
 Final audit of develop found the README does not explain npm run seed, the demo setup order, or how to get a booking CONFIRMED from Swagger (the Stripe webhook is hidden and only a signed payment_intent.succeeded confirms). Add a Demo setup section and a Demo a payment section using the Stripe CLI, and fix the contracts sentence saying flights complete when DEPARTED (the code completes on arrival in a nightly sweep).
 How the output was used:
 Added the seed script row, the setup order, the stripe listen and payment_intents confirm steps and a note that reviews need pre-prepared past stays to README.md; corrected the GEN-11 flight completion sentence in docs/contracts.md. Checked each step against the controllers and cookie settings. Docs only.
+
+Date: 2026-11-20
+Student: Ahmed Sanad
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GEN-10 (final audit M2)
+Prompt:
+Final audit: when an admin deletes an itinerary through DELETE /api/admin/content/ITINERARY/:id only the itinerary document is removed; its activities, budget entries, transport costs, booking links and activity images stay behind (marked KNOWN GAP in the code). Make the admin delete do the same cleanup as the owner's delete.
+How the output was used:
+Extracted the owner delete's cleanup into ItinerariesService.removeDependents and added removeAsAdmin (no ownership filter, 404 for unknown or malformed id). AdminContentService now calls it (ItinerariesModule imported into AdminModule), keeping the audit entry. Updated the unit spec and added an e2e case with a surviving second itinerary to prove only the deleted one's children go.
