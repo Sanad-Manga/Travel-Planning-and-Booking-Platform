@@ -829,6 +829,8 @@ export class FlightBookingsService {
               baggageFeeCents: segment.baggageFeeCents,
               totalCents: newTotalCents,
             },
+            // FLT-28: seats were chosen on the old flight; they do not carry over.
+            $unset: { seatSelections: '' },
           },
           { new: true, session },
         )

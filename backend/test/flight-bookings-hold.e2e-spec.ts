@@ -12,8 +12,14 @@ import { Connection, Model, Types } from 'mongoose';
 import request from 'supertest';
 import { AirlinesModule } from '../src/airlines';
 import { AuthModule } from '../src/auth/auth.module';
-import { BookingStatus, BookingType, CabinClass, PaymentStatus, Role } from '../src/common';
-import { BookingStatus, BookingType, FlightStatus, PaymentStatus, Role } from '../src/common';
+import {
+  BookingStatus,
+  BookingType,
+  CabinClass,
+  FlightStatus,
+  PaymentStatus,
+  Role,
+} from '../src/common';
 import configuration from '../src/config/configuration';
 import { FlightsModule } from '../src/flights';
 import { FlightBookingProvider } from '../src/flights/flight-booking.provider';
@@ -3567,6 +3573,9 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       for (const status of ['200', '400', '401', '403', '404', '409']) {
         expect(operation.responses[status]).toBeDefined();
       }
+    });
+  });
+
   describe('flight booking completion sweep (GEN-11)', () => {
     /** A Flight whose arrivalAt is already in the past, bypassing FLT-03's "no past departure" rule. */
     async function arrivedFlight(flightNumber: string, arrivedDaysAgo = 1) {

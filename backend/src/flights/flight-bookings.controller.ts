@@ -195,6 +195,20 @@ export class FlightBookingsController {
     type: ErrorResponseDto,
     description:
       'The booking or the replacement flight is unknown, belongs to another traveler, or the replacement has no such cabin',
+  })
+  @ApiConflictResponse({
+    type: ErrorResponseDto,
+    description:
+      'The booking is not CONFIRMED, is a round trip, is already on that flight, has departed, the replacement changes the route/airline, is not SCHEDULED (including a replacement cancelled between the first check and the change), has too few seats or cannot carry the booked baggage, the fare changes (the difference is in the message), or another request changed the booking first',
+  })
+  changeFlight(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: ChangeFlightBookingDto,
+  ) {
+    return this.bookings.changeFlight(user, id, dto);
+  }
+
   @Patch(':id/seat')
   @Roles(Role.USER)
   @ApiOperation({
@@ -220,14 +234,6 @@ export class FlightBookingsController {
   @ApiConflictResponse({
     type: ErrorResponseDto,
     description:
-      'The booking is not CONFIRMED, is a round trip, is already on that flight, has departed, the replacement changes the route/airline, is not SCHEDULED (including a replacement cancelled between the first check and the change), has too few seats or cannot carry the booked baggage, the fare changes (the difference is in the message), or another request changed the booking first',
-  })
-  changeFlight(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id') id: string,
-    @Body() dto: ChangeFlightBookingDto,
-  ) {
-    return this.bookings.changeFlight(user, id, dto);
       'The seat is already taken, the booking is not CONFIRMED, it has no passenger details, or the flight departed or is no longer scheduled',
   })
   selectSeat(
