@@ -2324,6 +2324,22 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
         }),
       ).toBeGreaterThan(0);
 
+      // Not just a DB write: the traveler can actually see the cancellation through the real
+      // GET /api/notifications endpoint, same as any other notification.
+      const notificationsPage = await http()
+        .get('/api/notifications')
+        .set('Cookie', traveler)
+        .expect(200);
+      expect(notificationsPage.body.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'BOOKING_CANCELLED',
+            title: 'Flight booking cancelled',
+            link: `/flight-bookings/${bookingId}`,
+          }),
+        ]),
+      );
+
       // The booking is no longer CONFIRMED: a repeated cancellation is a 409 and changes nothing.
       await cancelRequest(bookingId, { confirm: false }).expect(409);
       expect(await connection.collection('refunds').countDocuments()).toBe(1);

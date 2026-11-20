@@ -286,6 +286,19 @@ describe('cancel a whole hotel reservation with a tier-based refund (HTL-21) ove
           type: 'REFUND_UPDATE',
         }),
       ).toBeGreaterThan(0);
+
+      // Not just a DB write: the traveler can actually see the cancellation through the real
+      // GET /api/notifications endpoint, same as any other notification.
+      const notificationsPage = await http().get('/api/notifications').set('Cookie', travelerCookie).expect(200);
+      expect(notificationsPage.body.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'BOOKING_CANCELLED',
+            title: 'Hotel reservation cancelled',
+            link: `/hotel-bookings/${id.toHexString()}`,
+          }),
+        ]),
+      );
     });
 
     it('refunds the percentage of the tier on the full total (50 %)', async () => {
