@@ -793,3 +793,38 @@ video {
     gap: var(--space-6);
   }
 }
+
+/* ---------------------------------------------------------------------------------------------
+   ACC-10: login form and the Logout button in the header.
+   --------------------------------------------------------------------------------------------- */
+.auth-form {
+  max-width: 26rem;
+}
+.auth-links {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-4);
+}
+.auth-links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+}
+.site-nav-button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+@media (min-width: 40rem) {
+  .auth-links {
+    flex-direction: row;
+    gap: var(--space-6);
+  }
+  .site-nav-button {
+    width: auto;
+  }
+}

@@ -1,14 +1,29 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Header } from './Header';
 import { SkipLink } from './SkipLink';
 
 let pathname = '/';
-vi.mock('next/navigation', () => ({ usePathname: () => pathname }));
+const push = vi.fn();
+const logout = vi.fn();
+const toastError = vi.fn();
+let auth: { user: { id: string; name: string } | null; loading: boolean; logout: () => Promise<void> } = {
+  user: null,
+  loading: false,
+  logout,
+};
+vi.mock('next/navigation', () => ({ usePathname: () => pathname, useRouter: () => ({ push }) }));
+vi.mock('./AuthProvider', () => ({ useAuth: () => auth }));
+vi.mock('./ToastProvider', () => ({ useToast: () => ({ error: toastError }) }));
 
 beforeEach(() => {
   pathname = '/';
+  push.mockReset();
+  logout.mockReset();
+  logout.mockResolvedValue(undefined);
+  toastError.mockReset();
+  auth = { user: null, loading: false, logout };
 });
 
 describe('SkipLink (GEN-14)', () => {
@@ -77,6 +92,51 @@ describe('Header (GEN-14)', () => {
     pathname = '/flightsX';
     render(<Header />);
     expect(screen.getByRole('link', { name: 'Flights' })).not.toHaveAttribute('aria-current');
+  });
+
+  describe('account links (ACC-10)', () => {
+    it('shows Login and Register to a guest, and no Account or Logout', () => {
+      render(<Header />);
+      expect(screen.getByRole('link', { name: 'Login' })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Register' })).toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: 'Account' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Logout' })).toBeNull();
+    });
+
+    it('shows Account and Logout to a logged-in user, and no Login or Register', () => {
+      auth = { user: { id: 'u1', name: 'Ziad' }, loading: false, logout };
+      render(<Header />);
+      expect(screen.getByRole('link', { name: 'Account' })).toHaveAttribute('href', '/account');
+      expect(screen.getByRole('button', { name: 'Logout' })).toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: 'Login' })).toBeNull();
+      expect(screen.queryByRole('link', { name: 'Register' })).toBeNull();
+    });
+
+    it('shows neither set while the session is still being checked (no flash of Login)', () => {
+      auth = { user: null, loading: true, logout };
+      render(<Header />);
+      expect(screen.queryByRole('link', { name: 'Login' })).toBeNull();
+      expect(screen.queryByRole('link', { name: 'Register' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Logout' })).toBeNull();
+    });
+
+    it('Logout logs out and goes home', async () => {
+      auth = { user: { id: 'u1', name: 'Ziad' }, loading: false, logout };
+      render(<Header />);
+      await userEvent.click(screen.getByRole('button', { name: 'Logout' }));
+      expect(logout).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(push).toHaveBeenCalledWith('/'));
+    });
+
+    it('if logout fails it says so and stays put', async () => {
+      logout.mockRejectedValue(new TypeError('offline'));
+      auth = { user: { id: 'u1', name: 'Ziad' }, loading: false, logout };
+      render(<Header />);
+      await userEvent.click(screen.getByRole('button', { name: 'Logout' }));
+      await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
+      expect(toastError.mock.calls[0][0]).toMatch(/couldn.t reach the server/i);
+      expect(push).not.toHaveBeenCalled();
+    });
   });
 
   describe('mobile menu', () => {

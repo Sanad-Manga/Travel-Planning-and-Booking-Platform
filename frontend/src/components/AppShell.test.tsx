@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { AppShell } from './AppShell';
 import { Footer } from './Footer';
 
-vi.mock('next/navigation', () => ({ usePathname: () => '/' }));
+vi.mock('next/navigation', () => ({ usePathname: () => '/', useRouter: () => ({ push: vi.fn() }) }));
+vi.mock('./AuthProvider', () => ({ useAuth: () => ({ user: null, loading: false, logout: vi.fn() }) }));
+vi.mock('./ToastProvider', () => ({ useToast: () => ({ error: vi.fn() }) }));
 
 describe('AppShell / Footer (GEN-14)', () => {
   it('has banner, main and contentinfo landmarks', () => {

@@ -2672,6 +2672,15 @@ Prompt:
 Build reusable usability pieces for the frontend: PageHeader (h1, description, one primary action slot), Breadcrumbs (nav aria-label Breadcrumb, last item aria-current page), FormActions (primary button first, visible cancel, primary disabled with a Spinner while submitting) and Steps (aria-current step). Use them on the GEN-14 placeholder pages, add a short Wording and flow guide to frontend/README.md, tests first, no new dependencies, extend globals.css only.
 How the output was used:
 Added the four components with tests written first, appended a GEN-15 section to globals.css, rebuilt ComingSoon on PageHeader and Breadcrumbs with a description per placeholder page, and added the Wording and flow guide to the frontend README.
+
+Date: 2026-11-20
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-10
+Prompt:
+Build the frontend API client (same-origin /api, credentials include, JSON, ApiError from the backend error shape, one refresh and one retry on 401, then redirect to login with returnTo), AuthProvider/useAuth (me, login, logout, loading), RequireAuth, a /login page with field-level errors and an Alert, a strict safeReturnTo (same-site single-slash path only, decoded before checking), and a sessionStorage record of only a path and action name to resume an action after login. Header shows Login/Register for guests and Account/Logout when logged in. Tests first, no new dependencies, frontend only, nothing sensitive in web storage.
+How the output was used:
+Added lib/returnTo, lib/pendingAction and lib/api with tests (hostile returnTo inputs, ApiError mapping, single shared refresh and retry), AuthProvider, RequireAuth and LoginForm with tests, the login, account and forgot-password pages, Header account links with logout, and AuthProvider in the layout. Updated the GEN-14 header and shell tests for the new auth dependency and the placeholder test (login is a real page now).
 Student: Ahmed Sanad
 Tool: Claude Code (Claude Sonnet 5.5)
 Related Requirement: CI tooling (no ticket)

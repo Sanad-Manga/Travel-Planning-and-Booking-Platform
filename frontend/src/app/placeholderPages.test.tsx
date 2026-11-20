@@ -4,7 +4,7 @@ import BlogPage from './blog/page';
 import FlightsPage from './flights/page';
 import HotelsPage from './hotels/page';
 import ItinerariesPage from './itineraries/page';
-import LoginPage from './login/page';
+import ForgotPasswordPage from './forgot-password/page';
 import RegisterPage from './register/page';
 import HomePage from './page';
 
@@ -13,8 +13,8 @@ const pages = [
   ['Hotels', HotelsPage],
   ['Itineraries', ItinerariesPage],
   ['Blog', BlogPage],
-  ['Login', LoginPage],
   ['Register', RegisterPage],
+  ['Forgot password', ForgotPasswordPage],
 ] as const;
 
 describe('placeholder pages (GEN-14)', () => {
