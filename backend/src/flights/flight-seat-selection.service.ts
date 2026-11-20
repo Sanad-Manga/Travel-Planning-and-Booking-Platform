@@ -13,7 +13,10 @@ import {
   PassengerType,
 } from '../common';
 import {
+  SeatMapQueryDto,
+  SeatMapResponseDto,
   SeatSelectionDto,
+  SeatStatus,
   SelectSeatDto,
   SelectSeatResponseDto,
 } from './dto/select-seat.dto';
@@ -28,7 +31,7 @@ import {
   FlightSeatClaimLean,
 } from './schemas/flight-seat-claim.schema';
 import { Flight, FlightLean } from './schemas/flight.schema';
-import { normalizeSeat, seatExists } from './utils/seat-map';
+import { normalizeSeat, seatExists, seatLabels } from './utils/seat-map';
 
 /** A claim of a CONFIRMED booking that never got its selection written (a crash) is treated as free after this long. */
 const ORPHAN_CLAIM_MS = 60_000;
@@ -212,6 +215,85 @@ export class FlightSeatSelectionService {
         .exec();
     }
     return this.response(bookingId, updated.seatSelections ?? []);
+  }
+
+  /**
+   * FLT-28: the seat chart of the booked cabin, for the owner of a confirmed booking: every seat with FREE, TAKEN
+   * or YOURS. A claim counts only while its booking is still CONFIRMED (same rule as choosing a seat), so seats of
+   * cancelled bookings show as free. Nothing about who holds a TAKEN seat is returned.
+   */
+  async getSeatMap(
+    user: AuthenticatedUser,
+    id: string,
+    query: SeatMapQueryDto,
+  ): Promise<SeatMapResponseDto> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new NotFoundException('Flight booking not found');
+    }
+    const bookingId = new Types.ObjectId(id);
+    const booking = await this.bookings
+      .findOne({ _id: bookingId, userId: new Types.ObjectId(user.userId) })
+      .lean<FlightBookingLean>()
+      .exec();
+    if (!booking) throw new NotFoundException('Flight booking not found');
+    if (booking.status !== BookingStatus.CONFIRMED) {
+      throw new ConflictException(
+        'The seat map is available only on a confirmed booking',
+      );
+    }
+    const segments = getFlightBookingSegments(booking);
+    const segment = query.flightId
+      ? segments.find((s) => s.flightId.toString() === query.flightId)
+      : segments[0];
+    if (!segment) {
+      throw this.invalid(
+        'flightId',
+        'flightId is not a flight of this booking',
+      );
+    }
+
+    const cabin = await this.cabins
+      .findOne({ flightId: segment.flightId, cabinClass: segment.cabinClass })
+      .lean<CabinLean>()
+      .exec();
+    if (!cabin) throw new NotFoundException('The booked cabin was not found');
+
+    const claims = await this.claims
+      .find({ flightId: segment.flightId, cabinClass: segment.cabinClass })
+      .select('seat bookingId')
+      .lean<Pick<FlightSeatClaimLean, 'seat' | 'bookingId'>[]>()
+      .exec();
+    const holderIds = [...new Set(claims.map((c) => c.bookingId.toString()))];
+    const live = new Set(
+      (
+        await this.bookings
+          .find({
+            _id: { $in: holderIds.map((h) => new Types.ObjectId(h)) },
+            status: BookingStatus.CONFIRMED,
+          })
+          .select('_id')
+          .lean<{ _id: Types.ObjectId }[]>()
+          .exec()
+      ).map((b) => b._id.toString()),
+    );
+    const status = new Map<string, SeatStatus>();
+    for (const claim of claims) {
+      const holder = claim.bookingId.toString();
+      if (!live.has(holder)) continue;
+      status.set(
+        claim.seat,
+        holder === bookingId.toString() ? SeatStatus.YOURS : SeatStatus.TAKEN,
+      );
+    }
+    return {
+      bookingId: bookingId.toString(),
+      flightId: segment.flightId.toString(),
+      cabinClass: segment.cabinClass,
+      seats: seatLabels(cabin.totalSeats).map((seat) => ({
+        seat,
+        status: status.get(seat) ?? SeatStatus.FREE,
+      })),
+    };
   }
 
   /**

@@ -61,3 +61,38 @@ export class SelectSeatResponseDto {
   })
   seatSelections: SeatSelectionDto[];
 }
+
+export enum SeatStatus {
+  FREE = 'FREE',
+  TAKEN = 'TAKEN',
+  /** Held by a passenger of this same booking. */
+  YOURS = 'YOURS',
+}
+
+export class SeatMapSeatDto {
+  @ApiProperty({ example: '12A' }) seat: string;
+  @ApiProperty({ enum: SeatStatus, example: SeatStatus.FREE })
+  status: SeatStatus;
+}
+
+export class SeatMapQueryDto {
+  @ApiPropertyOptional({
+    description:
+      'Which flight of a round trip to show. Omit it for the outbound flight (or a one-way booking).',
+  })
+  @IsOptional()
+  @IsMongoId({ message: 'flightId must be a valid id' })
+  flightId?: string;
+}
+
+export class SeatMapResponseDto {
+  @ApiProperty() bookingId: string;
+  @ApiProperty() flightId: string;
+  @ApiProperty({ example: 'ECONOMY' }) cabinClass: string;
+  @ApiProperty({
+    type: [SeatMapSeatDto],
+    description:
+      'Every seat of the booked cabin in row order. TAKEN seats show nobody: no name or booking is revealed.',
+  })
+  seats: SeatMapSeatDto[];
+}

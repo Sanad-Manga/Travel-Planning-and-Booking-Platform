@@ -2669,6 +2669,14 @@ Added the decorator to POST /api/flight-bookings (a round trip is the same route
 Date: 2026-11-20
 Student: Ahmed Sanad
 Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: FLT-28 follow-up (seat chart and seats on the booking summary)
+Prompt:
+Follow-up on FLT-28 on the same branch: show the chosen seats on the booking summary and add a read endpoint for the seat chart of the
+booked cabin, so a UI can grey out taken seats. Owner only, confirmed bookings only, reveal nobody.
+How the output was used:
+Added seatSelections to the booking summary and GET /api/flight-bookings/:id/seat-map (every seat of the cabin as FREE, TAKEN or YOURS,
+computed from live claims only, so a cancelled booking's seats show as free; optional flightId for a round trip). 5 more e2e tests
+(21 in the file). The seat chart is a bounded structure, not a paged list.
 Related Requirement: Test stability follow-up to issue #119 (no requirement ID)
 Prompt:
 Diagnose the "Upload storage or indexes could not be initialized" failure that hit all tests of one e2e suite once under a parallel

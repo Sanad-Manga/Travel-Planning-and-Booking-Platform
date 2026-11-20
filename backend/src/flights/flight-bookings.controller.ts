@@ -44,7 +44,12 @@ import { FlightBookingListRowDto } from './dto/flight-booking-list-row.dto';
 import { FlightBookingSummaryResponseDto } from './dto/flight-booking-summary-response.dto';
 import { HoldFlightBookingDto } from './dto/hold-flight-booking.dto';
 import { MyFlightBookingsQueryDto } from './dto/my-flight-bookings-query.dto';
-import { SelectSeatDto, SelectSeatResponseDto } from './dto/select-seat.dto';
+import {
+  SeatMapQueryDto,
+  SeatMapResponseDto,
+  SelectSeatDto,
+  SelectSeatResponseDto,
+} from './dto/select-seat.dto';
 import { FlightBookingsService } from './flight-bookings.service';
 import { FlightSeatSelectionService } from './flight-seat-selection.service';
 
@@ -207,6 +212,38 @@ export class FlightBookingsController {
     @Body() dto: ChangeFlightBookingDto,
   ) {
     return this.bookings.changeFlight(user, id, dto);
+  }
+
+  @Get(':id/seat-map')
+  @Roles(Role.USER)
+  @ApiOperation({
+    summary: 'See which seats of my booked cabin are free - FLT-28',
+    description:
+      'Owner-only, CONFIRMED booking. Returns every seat of the booked cabin in row order with FREE, TAKEN or YOURS (held by a passenger of this booking). TAKEN seats reveal nobody. `flightId` picks the leg of a round trip (default outbound). Seats of cancelled bookings show as FREE. A seat can still be lost to someone else between this call and choosing it: choosing is what decides (409).',
+  })
+  @ApiOkResponse({ type: SeatMapResponseDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: 'flightId is malformed or not a flight of this booking, or an unknown query parameter',
+  })
+  @ApiForbiddenResponse({
+    type: ErrorResponseDto,
+    description: 'Only travelers (role USER) can see the seat map',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'The booking is unknown or belongs to another traveler',
+  })
+  @ApiConflictResponse({
+    type: ErrorResponseDto,
+    description: 'The booking is not CONFIRMED',
+  })
+  seatMap(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Query() query: SeatMapQueryDto,
+  ): Promise<SeatMapResponseDto> {
+    return this.seats.getSeatMap(user, id, query);
   }
 
   @Patch(':id/seat')
