@@ -2481,6 +2481,33 @@ Verification: npx tsc --noEmit -p ., npx eslint (changed files), npm run build a
 163/163 passed; npx jest --config ./test/jest-e2e.json test/admin-moderators.e2e-spec.ts --maxWorkers=1 --silent 16/16
 passed. Not done: no full local e2e/unit suite run (CI covers that); no manual Swagger click-through against Atlas (no
 Swagger-visible change — the invite is an internal side-effect of an existing endpoint).
+Related Requirement: GEN-01 (SCRUM-32) In-app notifications fired for every required event
+Prompt:
+Verify GEN-01 against current develop (63da298) for a scrum-master audit (GitHub issue #158): the requirement lists booking
+confirmation, cancellation, refund, flight schedule change, and account/provider suspension as required notification events.
+Confirmed confirmation, refund, schedule-change and suspension all already notify; the one real gap is cancellation —
+BOOKING_CANCELLED is only sent when an airline cancels a flight (flight-cancellation.service.ts), never when a traveler
+cancels their own flight or hotel booking. Those two paths only trigger a refund notification, and only when the refund is
+positive, so a 0%-tier cancellation notifies nothing at all. Fix it in both cancel services and add a test.
+How the output was used:
+Added a notifyCancelled() call in FlightBookingsService.cancel() (FLT-26, right after BookingLifecycle.transition to
+CANCELLED, before the refund is issued) and in HotelBookingCancellationService.cancel() (HTL-21), each injecting the
+already-exported NotificationsService (both modules already import NotificationsModule for their other notify calls).
+Each sends a distinct BOOKING_CANCELLED notification with a bookingReference-aware message and a /flight-bookings/{id} or
+/hotel-bookings/{id} link, mirroring the exact message/link style flight-cancellation.service.ts already uses for the
+provider-cancellation case. Not added to the already-CANCELLED retry-refund-completion path in either service, since that
+would re-notify a cancellation that already happened. Added e2e assertions in flight-bookings-hold.e2e-spec.ts (the
+positive-refund cancel test, asserting one BOOKING_CANCELLED plus the pre-existing REFUND_UPDATE, and that the already-
+cancelled retry sends no second BOOKING_CANCELLED; the zero-refund cancel test, asserting the notification still fires
+even though RefundsService never runs) and hotel-booking-cancel.e2e-spec.ts (same two cases), filtering on the booking's
+own link rather than a raw count since travelerId is shared across the whole spec file. Added a notifications cleanup to
+hotel-booking-cancel.e2e-spec.ts's beforeEach for the same reason (it wiped hotelBookings/payments/refunds but not
+notifications).
+Verification: npx tsc --noEmit -p . and npx eslint (changed files) clean; npm run build passed; npx jest
+src/flights src/hotels src/notifications src/payments --silent 312/312 passed; npx jest --config ./test/jest-e2e.json
+test/flight-bookings-hold.e2e-spec.ts --maxWorkers=1 --silent 86/86 passed; npx jest --config ./test/jest-e2e.json
+test/hotel-booking-cancel.e2e-spec.ts --maxWorkers=1 --silent 27/27 passed. Not done: no full local e2e/unit suite run
+(CI covers that); no manual Swagger click-through against Atlas.
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
 Related Requirement: ACC-02 (reopened by the scrum master: unverified user could still book)
