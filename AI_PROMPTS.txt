@@ -2456,13 +2456,17 @@ nobody uses gives an empty page. Added the three routes to the GEN-05 pagination
 Date: 2026-11-20
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
-Related Requirement: GEN-17 (GitHub issue #150), plus the frontend CI job
-Prompt:
-Build the shared design tokens and form/card/table styles for the frontend on the existing .btn, .btn-primary and .btn-danger classes in globals.css without changing the confirm-dialog or empty-state styles, add a labelled TextField (hint, field-level error, aria) and a Card with tests, and add a frontend CI job (install, lint, typecheck, test, build).
-How the output was used:
-Appended a GEN-17 section to globals.css (colour, type and spacing tokens with dark-mode values, .btn-sm/.btn-block, .field-*, .card, .table, reduced-motion) and left every existing rule untouched. Added TextField and Card components with tests (21 frontend tests pass; lint, typecheck pass). Added a "frontend" job to ci.yml.
 Related Requirement: ACC-02 (reopened by the scrum master: unverified user could still book)
 Prompt:
 ACC-02 is back to To Do: RequireVerifiedEmail is used on no booking route. Add @RequireVerifiedEmail() to flight-bookings (create, hold, round trip) and hotel-bookings create, fix the docs that say booking is blocked, and add a test showing an unverified user gets 403 on booking.
 How the output was used:
 Added the decorator to POST /api/flight-bookings (a round trip is the same route with two segments), POST /api/flight-bookings/hold and POST /api/hotel-bookings. Added booking-requires-verified-email.e2e-spec.ts, which runs the real AppModule and checks 403 "Verify your email before booking" for emailVerified=false, no 403 for verified and field-less users, and 401 for guests. Updated the route table in docs/api/email-verification.md and the Swagger text in auth.controller.ts. Payments are left unguarded on purpose (a booking already needs a verified user).
+
+Date: 2026-11-20
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GEN-17 (GitHub issue #150), plus the frontend CI job
+Prompt:
+Build the shared design tokens and form/card/table styles for the frontend on the existing .btn, .btn-primary and .btn-danger classes in globals.css without changing the confirm-dialog or empty-state styles, add a labelled TextField (hint, field-level error, aria) and a Card with tests, and add a frontend CI job (install, lint, typecheck, test, build).
+How the output was used:
+Appended a GEN-17 section to globals.css (colour, type and spacing tokens with dark-mode values, .btn-sm/.btn-block, .field-*, .card, .table, reduced-motion) and left every existing rule untouched. Added TextField and Card components with tests (21 frontend tests pass; lint, typecheck pass). Added a "frontend" job to ci.yml.
