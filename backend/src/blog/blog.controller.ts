@@ -1,0 +1,224 @@
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+} from '@nestjs/common';
+import {
+  ApiBadRequestResponse,
+  ApiCookieAuth,
+  ApiCreatedResponse,
+  ApiNoContentResponse,
+  ApiNotFoundResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+  ApiUnauthorizedResponse,
+} from '@nestjs/swagger';
+import {
+  ApiPaginatedResponse,
+  AuthenticatedRequest,
+  AuthenticatedUser,
+  CurrentUser,
+  ErrorResponseDto,
+  PaginatedResponse,
+  PaginationDto,
+  Public,
+} from '../common';
+import { BlogService } from './blog.service';
+import { BrowsePostsQueryDto } from './dto/browse-posts-query.dto';
+import { CreatePostDto } from './dto/create-post.dto';
+import { MyPostRowDto } from './dto/my-post-row.dto';
+import { PostDetailDto } from './dto/post-detail.dto';
+import { PostLikeResponseDto } from './dto/post-like-response.dto';
+import { PostListRowDto } from './dto/post-list-row.dto';
+import { PostResponseDto } from './dto/post-response.dto';
+import { UpdatePostDto } from './dto/update-post.dto';
+
+@ApiTags('posts')
+@ApiCookieAuth()
+@Controller('posts')
+export class BlogController {
+  constructor(private readonly blogService: BlogService) {}
+
+  @Post()
+  @ApiOperation({
+    summary:
+      'Create a blog post as DRAFT (default, private) or PUBLISHED (any logged-in user)',
+  })
+  @ApiCreatedResponse({ type: PostResponseDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description:
+      'Missing title/body, invalid or unknown field (images are attached through POST /posts/:id/images), more than 5 tags',
+  })
+  @ApiUnauthorizedResponse({
+    type: ErrorResponseDto,
+    description: 'Not logged in',
+  })
+  create(
+    @Body() dto: CreatePostDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<PostResponseDto> {
+    return this.blogService.create(dto, user);
+  }
+
+  // Declared before any future GET /posts/:id so that "mine" is not read as an id.
+  @Get('mine')
+  @ApiOperation({
+    summary:
+      'List my own posts, drafts included, newest first (page size 10 by default)',
+  })
+  @ApiPaginatedResponse(MyPostRowDto)
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: 'Invalid page or limit',
+  })
+  @ApiUnauthorizedResponse({
+    type: ErrorResponseDto,
+    description: 'Not logged in',
+  })
+  listMine(
+    @Query() query: PaginationDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<PaginatedResponse<MyPostRowDto>> {
+    return this.blogService.listMine(query, user);
+  }
+
+  @Get()
+  @Public()
+  @ApiOperation({
+    summary:
+      'Browse or search published posts (BLG-02, BLG-09, public)',
+    description:
+      'Without q: newest published first, optionally filtered by tag. With q: every word must appear in the title, a tag or the author name (case-insensitive); results are ordered by likes + comments descending, then newest first. Each row has title, author, date and an excerpt. No match returns an empty list, not an error. Drafts and hidden posts never appear. page and limit paginate (default 10).',
+  })
+  @ApiPaginatedResponse(PostListRowDto)
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: 'Invalid page, limit, tag or q (longer than 100 characters)',
+  })
+  list(
+    @Query() query: BrowsePostsQueryDto,
+  ): Promise<PaginatedResponse<PostListRowDto>> {
+    return this.blogService.listPublished(query);
+  }
+
+    @Get(':id')
+  @Public()
+  @ApiOperation({
+    summary:
+      'Open a published post with comments in chronological order (BLG-02, BLG-05)',
+    description:
+      'Public endpoint. The page and limit query parameters paginate the comments, with 10 comments per page by default.',
+  })
+  @ApiOkResponse({ type: PostDetailDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: 'Invalid page or limit',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description:
+      'Unknown or malformed id, a draft, or a hidden post the caller may not see',
+  })
+  findOne(
+    @Param('id') id: string,
+    @Query() query: PaginationDto,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<PostDetailDto> {
+    return this.blogService.findOne(id, request.user, query);
+  }
+
+  @Post(':id/like')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Like a published post (BLG-06)' })
+  @ApiOkResponse({ type: PostLikeResponseDto })
+  @ApiUnauthorizedResponse({
+    type: ErrorResponseDto,
+    description: 'Not logged in',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'Unknown, unpublished, or hidden post',
+  })
+  like(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<PostLikeResponseDto> {
+    return this.blogService.like(id, user);
+  }
+
+  @Delete(':id/like')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Remove your like from a post (BLG-06)' })
+  @ApiOkResponse({ type: PostLikeResponseDto })
+  @ApiUnauthorizedResponse({
+    type: ErrorResponseDto,
+    description: 'Not logged in',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'Post not found',
+  })
+  unlike(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<PostLikeResponseDto> {
+    return this.blogService.unlike(id, user);
+  }
+
+  @Patch(':id')
+  @ApiOperation({
+    summary:
+      'Edit my own post (partial update of title, body, tags, status; images use /posts/:id/images)',
+  })
+  @ApiOkResponse({ type: PostResponseDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: 'Empty body, invalid or unknown field (e.g. images), more than 5 tags',
+  })
+  @ApiUnauthorizedResponse({
+    type: ErrorResponseDto,
+    description: 'Not logged in',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: "Unknown or malformed id, or someone else's post",
+  })
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdatePostDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<PostResponseDto> {
+    return this.blogService.update(id, dto, user);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Delete my own post together with its comments, likes and images',
+  })
+  @ApiNoContentResponse({ description: 'Deleted' })
+  @ApiUnauthorizedResponse({
+    type: ErrorResponseDto,
+    description: 'Not logged in',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: "Unknown or malformed id, or someone else's post",
+  })
+  remove(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<void> {
+    return this.blogService.remove(id, user);
+  }
+}

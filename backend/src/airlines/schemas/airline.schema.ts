@@ -1,0 +1,84 @@
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
+import { HydratedDocument, Types } from 'mongoose';
+
+/** Extra-baggage rules of an airline (FLT-08). Embedded, no own collection. */
+@Schema({ _id: false })
+export class BaggagePolicy {
+  /** Price of one extra bag in integer cents (> 0). */
+  @Prop({ type: Number, required: true, min: 1 })
+  extraBagPriceCents: number;
+
+  /** Most extra bags one passenger may add (>= 0; 0 means none offered). */
+  @Prop({ type: Number, required: true, min: 0 })
+  maxExtraBags: number;
+}
+
+export const BaggagePolicySchema = SchemaFactory.createForClass(BaggagePolicy);
+
+/** One cancellation tier of an airline (FLT-09). Same shape Payments' RefundCalculator reads. */
+@Schema({ _id: false })
+export class CancellationTierEntry {
+  /** Days before departure at or above which this tier applies (whole number >= 0, unique per airline). */
+  @Prop({ type: Number, required: true, min: 0 })
+  daysBeforeThreshold: number;
+
+  /** Refund percentage, 0-100. */
+  @Prop({ type: Number, required: true, min: 0, max: 100 })
+  refundPercent: number;
+}
+
+export const CancellationTierSchema = SchemaFactory.createForClass(
+  CancellationTierEntry,
+);
+
+/**
+ * An airline (collection `airlines`). Flights (FLT-03) and moderators (users.airlineId) reference it by `_id`.
+ */
+@Schema({ timestamps: true, collection: 'airlines' })
+export class Airline {
+  @Prop({ type: String, required: true, trim: true })
+  name: string;
+
+  /** Airline designator, e.g. "MS". Stored upper-case; unique across the platform. */
+  @Prop({ type: String, required: true, trim: true, uppercase: true })
+  code: string;
+
+  /**
+   * One logo per airline (GEN-08), stored by the shared upload service. `logoId` is the upload id (needed to delete
+   * the file), `logoUrl` its backend-relative url. Both are set and cleared together, only by AirlineLogoService.
+   */
+  @Prop({ type: String })
+  logoId?: string;
+
+  @Prop({ type: String, trim: true })
+  logoUrl?: string;
+
+  /**
+   * Admin can deactivate a provider (ACC-15). Deactivated airlines are hidden from flight search and
+   * cannot be booked. Nothing in this module changes the flag; the Admin module owns that endpoint.
+   */
+  @Prop({ type: Boolean, default: true })
+  isActive: boolean;
+
+  /** Extra-baggage price and limit (FLT-08). Absent until the moderator sets it. */
+  @Prop({ type: BaggagePolicySchema })
+  baggagePolicy?: BaggagePolicy;
+
+  /** Cancellation tiers (FLT-09). Absent or empty means nothing is refunded. */
+  @Prop({ type: [CancellationTierSchema], default: undefined })
+  cancellationTiers?: CancellationTierEntry[];
+}
+
+export type AirlineDocument = HydratedDocument<Airline>;
+
+/** An airline as returned by `.lean()` (timestamps: true adds createdAt / updatedAt). */
+export type AirlineLean = Airline & {
+  _id: Types.ObjectId;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export const AirlineSchema = SchemaFactory.createForClass(Airline);
+
+// No two airlines share a code (409 on a duplicate).
+AirlineSchema.index({ code: 1 }, { unique: true });

@@ -1,0 +1,3767 @@
+import { ConflictException, INestApplication } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import {
+  getConnectionToken,
+  getModelToken,
+  MongooseModule,
+} from '@nestjs/mongoose';
+import { Test } from '@nestjs/testing';
+import { hashSync } from 'bcryptjs';
+import { MongoMemoryReplSet } from 'mongodb-memory-server';
+import { Connection, Model, Types } from 'mongoose';
+import request from 'supertest';
+import { AirlinesModule } from '../src/airlines';
+import { AuthModule } from '../src/auth/auth.module';
+import {
+  BookingStatus,
+  BookingType,
+  CabinClass,
+  FlightStatus,
+  PaymentStatus,
+  Role,
+} from '../src/common';
+import configuration from '../src/config/configuration';
+import { FlightsModule } from '../src/flights';
+import { FlightBookingProvider } from '../src/flights/flight-booking.provider';
+import { FlightBookingsService } from '../src/flights/flight-bookings.service';
+import { FlightETicketService } from '../src/flights/flight-eticket.service';
+import { FlightInventoryService } from '../src/flights/flight-inventory.service';
+import { FlightBooking } from '../src/flights/schemas/flight-booking.schema';
+import { NotificationsModule } from '../src/notifications';
+import {
+  BookingLifecycle,
+  PAYMENT_ACTIVITY,
+  PaymentsModule,
+  PrepareExpiryResult,
+  STRIPE_GATEWAY,
+} from '../src/payments';
+import { FakeStripeGateway } from '../src/payments/fake-stripe-gateway';
+import { ReferenceDataModule } from '../src/reference-data/reference-data.module';
+import { setupApp, setupSwagger } from '../src/setup-app';
+import {
+  TEST_ACCESS_SECRET,
+  TEST_REFRESH_SECRET,
+} from './helpers/auth-test-app';
+
+/**
+ * FLT-22: seat hold. Runs on an in-memory MongoDB REPLICA SET, because the hold and the status changes use
+ * MongoDB transactions (a single-node server does not support them).
+ */
+describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
+  let app: INestApplication;
+  let mongo: MongoMemoryReplSet;
+  let connection: Connection;
+  let lifecycle: BookingLifecycle;
+  let bookingModel: Model<FlightBooking>;
+  let bookingProvider: FlightBookingProvider;
+  let etickets: FlightETicketService;
+  let stripeGateway: FakeStripeGateway;
+
+  const PASSWORD = 'Passw0rdOK';
+  const HOLD = '/api/flight-bookings/hold';
+  const BOOKING = '/api/flight-bookings';
+  const http = () => request(app.getHttpServer());
+
+  async function loginAs(email: string, extra: Record<string, unknown> = {}) {
+    await connection.collection('users').insertOne({
+      name: 'Seeded',
+      email,
+      passwordHash: hashSync(PASSWORD, 4),
+      role: Role.USER,
+      status: 'ACTIVE',
+      consentAcceptedAt: new Date(),
+      preferredCurrency: 'USD',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      ...extra,
+    });
+    const res = await http()
+      .post('/api/auth/login')
+      .send({ email, password: PASSWORD })
+      .expect(200);
+    const cookies = res.headers['set-cookie'] as unknown as string[];
+    return cookies.map((c) => c.split(';')[0]).join('; ');
+  }
+
+  let admin: string;
+  let traveler: string;
+  let otherTraveler: string;
+  let moderator: string;
+  let returnModerator: string;
+  let airline: { id: string };
+  let returnAirline: { id: string };
+  let travelerId: string;
+
+  /**
+   * Test seam for the late-paid path: BookingLifecycle asks PaymentActivity what to do with an
+   * overdue hold. The real Stripe implementation needs a PaymentIntent, so this stand-in returns
+   * EXPIRE by default and PAID only in the focused late-paid test — no Stripe event is involved.
+   */
+  let nextPrepareExpiry: PrepareExpiryResult = 'EXPIRE';
+  const paymentActivity = {
+    prepareExpiry: (): Promise<PrepareExpiryResult> =>
+      Promise.resolve(nextPrepareExpiry),
+  };
+
+  /** A flight created through the real FLT-03 endpoint (far in the future). */
+  async function createFlight(
+    overrides: Record<string, unknown> = {},
+    moderatorCookie = moderator,
+  ) {
+    const res = await http()
+      .post('/api/flights')
+      .set('Cookie', moderatorCookie)
+      .send({
+        flightNumber: 'MS777',
+        departureAirport: 'CAI',
+        arrivalAirport: 'JFK',
+        departureLocalTime: '2090-12-01T14:30',
+        arrivalLocalTime: '2090-12-01T19:45',
+        ...overrides,
+      })
+      .expect(201);
+    return res.body.id as string;
+  }
+
+  /** Cabins cannot be created through the API yet (FLT-04), so tests insert them directly. */
+  async function addCabin(
+    flightId: string,
+    cabinClass: string,
+    totalSeats: number,
+    bookedSeats = 0,
+    heldSeats = 0,
+    priceCents = 45000,
+  ) {
+    await connection.collection('cabins').insertOne({
+      flightId: new Types.ObjectId(flightId),
+      cabinClass,
+      totalSeats,
+      bookedSeats,
+      heldSeats,
+      priceCents,
+      freeBags: 1,
+      maxBagWeightKg: 23,
+    });
+  }
+
+  const cabinOf = (flightId: string, cabinClass = 'ECONOMY') =>
+    connection
+      .collection('cabins')
+      .findOne({ flightId: new Types.ObjectId(flightId), cabinClass });
+
+  const body = (flightId: string, extra: Record<string, unknown> = {}) => ({
+    flightId,
+    cabinClass: 'ECONOMY',
+    adults: 1,
+    ...extra,
+  });
+
+  /** Holds seats through the API and returns the booking id. */
+  async function hold(flightId: string, extra: Record<string, unknown> = {}) {
+    const res = await http()
+      .post(HOLD)
+      .set('Cookie', traveler)
+      .send(body(flightId, extra))
+      .expect(201);
+    return res.body.id as string;
+  }
+
+  async function setBaggagePolicy(
+    extraBagPriceCents = 3000,
+    maxExtraBags = 2,
+    airlineId = airline.id,
+    moderatorCookie = moderator,
+  ) {
+    await http()
+      .put(`/api/airlines/${airlineId}/baggage-policy`)
+      .set('Cookie', moderatorCookie)
+      .send({ extraBagPriceCents, maxExtraBags })
+      .expect(200);
+  }
+
+  const expireNow = (bookingId: string) =>
+    connection
+      .collection('flightBookings')
+      .updateOne(
+        { _id: new Types.ObjectId(bookingId) },
+        { $set: { holdExpiresAt: new Date(Date.now() - 60_000) } },
+      );
+
+  beforeAll(async () => {
+    process.env.JWT_ACCESS_SECRET = TEST_ACCESS_SECRET;
+    process.env.JWT_REFRESH_SECRET = TEST_REFRESH_SECRET;
+    process.env.COOKIE_SECURE = 'false';
+
+    mongo = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
+    stripeGateway = new FakeStripeGateway();
+    const moduleRef = await Test.createTestingModule({
+      imports: [
+        ConfigModule.forRoot({
+          isGlobal: true,
+          ignoreEnvFile: true,
+          load: [configuration],
+        }),
+        MongooseModule.forRoot(mongo.getUri()),
+        AuthModule,
+        AirlinesModule,
+        ReferenceDataModule,
+        NotificationsModule,
+        PaymentsModule,
+        FlightsModule,
+      ],
+    })
+      .overrideProvider(PAYMENT_ACTIVITY)
+      .useValue(paymentActivity)
+      // FLT-26 issues real refunds through RefundsService; keep Stripe out of the test.
+      .overrideProvider(STRIPE_GATEWAY)
+      .useValue(stripeGateway)
+      .compile();
+    app = moduleRef.createNestApplication();
+    setupApp(app);
+    setupSwagger(app);
+    await app.listen(0, '127.0.0.1');
+    connection = app.get<Connection>(getConnectionToken());
+    lifecycle = app.get(BookingLifecycle);
+    bookingModel = app.get<Model<FlightBooking>>(
+      getModelToken(FlightBooking.name),
+    );
+    bookingProvider = app.get(FlightBookingProvider);
+    etickets = app.get(FlightETicketService);
+    await connection.model('User').init();
+    await connection.model('Airline').init();
+    await connection.model('Flight').init();
+    await bookingModel.init();
+
+    await connection.collection('airports').insertMany([
+      {
+        iata_code: 'CAI',
+        name: 'Cairo',
+        city_id: 'c1',
+        country_code: 'EG',
+        time_zone: 'Africa/Cairo',
+      },
+      {
+        iata_code: 'JFK',
+        name: 'John F. Kennedy',
+        city_id: 'c2',
+        country_code: 'US',
+        time_zone: 'America/New_York',
+      },
+    ]);
+
+    admin = await loginAs('admin@example.com', { role: Role.ADMIN });
+    traveler = await loginAs('traveler@example.com');
+    travelerId = (await connection
+      .collection('users')
+      .findOne({ email: 'traveler@example.com' }))!._id.toString();
+    otherTraveler = await loginAs('other-traveler@example.com');
+    airline = (
+      await http()
+        .post('/api/airlines')
+        .set('Cookie', admin)
+        .send({ name: 'Airline A', code: 'AA' })
+        .expect(201)
+    ).body;
+    moderator = await loginAs('moda@example.com', {
+      role: Role.AIRLINE_MODERATOR,
+      airlineId: new Types.ObjectId(airline.id),
+    });
+    returnAirline = (
+      await http()
+        .post('/api/airlines')
+        .set('Cookie', admin)
+        .send({ name: 'Airline B', code: 'BB' })
+        .expect(201)
+    ).body;
+    returnModerator = await loginAs('modb@example.com', {
+      role: Role.AIRLINE_MODERATOR,
+      airlineId: new Types.ObjectId(returnAirline.id),
+    });
+  }, 240_000);
+
+  afterAll(async () => {
+    await app?.close();
+    await mongo?.stop();
+  });
+
+  afterEach(async () => {
+    jest.restoreAllMocks();
+    nextPrepareExpiry = 'EXPIRE';
+    stripeGateway.refunds.clear();
+    await Promise.all(
+      [
+        'flights',
+        'cabins',
+        'flightBookings',
+        'payments',
+        'refunds',
+        'notifications',
+      ].map((name) => connection.collection(name).deleteMany({})),
+    );
+    await connection
+      .collection('airlines')
+      .updateOne(
+        { _id: new Types.ObjectId(airline.id) },
+        {
+          $set: { isActive: true },
+          $unset: { baggagePolicy: '', cancellationTiers: '' },
+        },
+      );
+    await connection
+      .collection('airlines')
+      .updateOne(
+        { _id: new Types.ObjectId(returnAirline.id) },
+        {
+          $set: { isActive: true },
+          $unset: { baggagePolicy: '', cancellationTiers: '' },
+        },
+      );
+  });
+
+  describe('POST /api/flight-bookings/hold', () => {
+    it('holds seats: 201, PENDING_PAYMENT, expiry 10 minutes ahead, seats held, price from the cabin', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 100, 30, 5, 45000);
+      const before = Date.now();
+
+      const res = await http()
+        .post(HOLD)
+        .set('Cookie', traveler)
+        .send(body(flightId, { adults: 2, children: 1 }))
+        .expect(201);
+
+      expect(res.body).toMatchObject({
+        flightId,
+        cabinClass: 'ECONOMY',
+        passengerCounts: { adults: 2, children: 1, infants: 0 },
+        seats: 3,
+        farePerPassengerCents: 45000,
+        infantFareCents: 4500,
+        totalCents: 3 * 45000,
+        status: 'PENDING_PAYMENT',
+      });
+      expect(typeof res.body.currency).toBe('string');
+      expect(res.body.id).toMatch(/^[0-9a-f]{24}$/);
+      expect(res.body._id).toBeUndefined();
+      expect(res.body.__v).toBeUndefined();
+
+      const expiresIn = new Date(res.body.holdExpiresAt).getTime() - before;
+      expect(expiresIn).toBeGreaterThan(9 * 60_000);
+      expect(expiresIn).toBeLessThan(11 * 60_000);
+
+      expect(await cabinOf(flightId)).toMatchObject({
+        heldSeats: 8,
+        bookedSeats: 30,
+      });
+      const stored = await connection
+        .collection('flightBookings')
+        .findOne({ _id: new Types.ObjectId(res.body.id) });
+      expect(stored?.userId.toString()).toBe(travelerId);
+      expect(stored?.airlineId.toString()).toBe(airline.id);
+    });
+
+    it('infants take no seat and pay 10% of the fare', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 100, 0, 0, 45000);
+
+      const res = await http()
+        .post(HOLD)
+        .set('Cookie', traveler)
+        .send(body(flightId, { adults: 2, children: 1, infants: 2 }))
+        .expect(201);
+
+      expect(res.body.seats).toBe(3);
+      expect(res.body.totalCents).toBe(3 * 45000 + 2 * 4500);
+      expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 3 });
+    });
+
+    it('a cabin with exactly the seats needed can be held; the next request gets 409', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 1);
+      await http()
+        .post(HOLD)
+        .set('Cookie', traveler)
+        .send(body(flightId))
+        .expect(201);
+      await http()
+        .post(HOLD)
+        .set('Cookie', traveler)
+        .send(body(flightId))
+        .expect(409);
+      expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 1 });
+    });
+
+    it('availability seen by search drops after a hold', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10, 0, 0, 45000);
+      await hold(flightId, { adults: 4 });
+      const res = await http()
+        .get('/api/flights/search')
+        .query({
+          departureAirport: 'CAI',
+          arrivalAirport: 'JFK',
+          departureDate: '2090-12-01',
+          passengers: 1,
+        })
+        .expect(200);
+      expect(res.body.items[0].cabins[0].availableSeats).toBe(6);
+    });
+
+    describe('validation (400, nothing is held)', () => {
+      const failsOn = async (
+        payload: Record<string, unknown>,
+        field: string,
+      ) => {
+        const res = await http()
+          .post(HOLD)
+          .set('Cookie', traveler)
+          .send(payload)
+          .expect(400);
+        expect(res.body.details).toEqual(
+          expect.arrayContaining([expect.objectContaining({ field })]),
+        );
+        expect(
+          await connection.collection('flightBookings').countDocuments(),
+        ).toBe(0);
+      };
+
+      it('no adult', async () => {
+        const flightId = await createFlight();
+        await addCabin(flightId, 'ECONOMY', 10);
+        await failsOn(body(flightId, { adults: 0 }), 'adults');
+        expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0 });
+      });
+
+      it('more infants than adults', async () => {
+        const flightId = await createFlight();
+        await addCabin(flightId, 'ECONOMY', 10);
+        await failsOn(body(flightId, { adults: 1, infants: 2 }), 'infants');
+        expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0 });
+      });
+
+      it('bad flightId, bad cabin, negative or fractional counts', async () => {
+        const flightId = await createFlight();
+        await failsOn(body('not-an-id'), 'flightId');
+        await failsOn(body(flightId, { cabinClass: 'LUXURY' }), 'cabinClass');
+        await failsOn(body(flightId, { children: -1 }), 'children');
+        await failsOn(body(flightId, { adults: 1.5 }), 'adults');
+      });
+
+      it('fields the server controls are rejected, not obeyed', async () => {
+        const flightId = await createFlight();
+        await addCabin(flightId, 'ECONOMY', 10);
+        await failsOn(body(flightId, { totalCents: 1 }), 'totalCents');
+        await failsOn(
+          body(flightId, { userId: new Types.ObjectId().toString() }),
+          'userId',
+        );
+        await failsOn(body(flightId, { status: 'CONFIRMED' }), 'status');
+      });
+
+      it('errors use the contract shape', async () => {
+        const res = await http()
+          .post(HOLD)
+          .set('Cookie', traveler)
+          .send({})
+          .expect(400);
+        expect(res.body).toMatchObject({
+          statusCode: 400,
+          error: 'Bad Request',
+          path: HOLD,
+        });
+        expect(typeof res.body.timestamp).toBe('string');
+      });
+    });
+
+    describe('not found and conflicts (nothing is held)', () => {
+      it('unknown flight: 404', async () => {
+        await http()
+          .post(HOLD)
+          .set('Cookie', traveler)
+          .send(body(new Types.ObjectId().toString()))
+          .expect(404);
+      });
+
+      it('the flight has no such cabin: 404', async () => {
+        const flightId = await createFlight();
+        await addCabin(flightId, 'ECONOMY', 10);
+        await http()
+          .post(HOLD)
+          .set('Cookie', traveler)
+          .send(body(flightId, { cabinClass: 'FIRST' }))
+          .expect(404);
+      });
+
+      it('not enough seats: 409 and the counters do not change', async () => {
+        const flightId = await createFlight();
+        await addCabin(flightId, 'ECONOMY', 5, 2, 1); // 2 available
+        await http()
+          .post(HOLD)
+          .set('Cookie', traveler)
+          .send(body(flightId, { adults: 3 }))
+          .expect(409);
+        expect(await cabinOf(flightId)).toMatchObject({
+          bookedSeats: 2,
+          heldSeats: 1,
+        });
+        expect(
+          await connection.collection('flightBookings').countDocuments(),
+        ).toBe(0);
+      });
+
+      it.each(['CANCELLED', 'DEPARTED'])(
+        'a %s flight cannot be held: 409',
+        async (status) => {
+          const flightId = await createFlight();
+          await addCabin(flightId, 'ECONOMY', 10);
+          await connection
+            .collection('flights')
+            .updateOne(
+              { _id: new Types.ObjectId(flightId) },
+              { $set: { status } },
+            );
+          await http()
+            .post(HOLD)
+            .set('Cookie', traveler)
+            .send(body(flightId))
+            .expect(409);
+          expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0 });
+        },
+      );
+
+      it('a flight whose departure has passed cannot be held while its stored status is still SCHEDULED (FLT-30): 409, no seats held', async () => {
+        const flightId = await createFlight();
+        await addCabin(flightId, 'ECONOMY', 10);
+        await connection
+          .collection('flights')
+          .updateOne(
+            { _id: new Types.ObjectId(flightId) },
+            { $set: { departureAt: new Date(Date.now() - 3_600_000) } },
+          );
+        const stored = await connection
+          .collection('flights')
+          .findOne({ _id: new Types.ObjectId(flightId) });
+        expect(stored?.status).toBe('SCHEDULED'); // the status job has not run
+
+        const res = await http()
+          .post(HOLD)
+          .set('Cookie', traveler)
+          .send(body(flightId))
+          .expect(409);
+
+        expect(res.body.message).toContain('DEPARTED'); // names the effective status
+        expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0 });
+        expect(
+          await connection.collection('flightBookings').countDocuments(),
+        ).toBe(0);
+      });
+
+      it('a pending hold on a flight that has departed meanwhile can no longer be paid, but a confirmed booking stays readable', async () => {
+        const flightId = await createFlight();
+        await addCabin(flightId, 'ECONOMY', 10);
+        const pending = await http()
+          .post(HOLD)
+          .set('Cookie', traveler)
+          .send(body(flightId))
+          .expect(201);
+        const confirmed = await http()
+          .post(HOLD)
+          .set('Cookie', traveler)
+          .send(body(flightId))
+          .expect(201);
+        await lifecycle.confirmPaid(
+          BookingType.FLIGHT,
+          confirmed.body.id,
+          'pi_departed_confirmed',
+        );
+        await expect(
+          bookingProvider.getPayable(pending.body.id, travelerId),
+        ).resolves.toMatchObject({ status: 'PENDING_PAYMENT' });
+
+        await connection
+          .collection('flights')
+          .updateOne(
+            { _id: new Types.ObjectId(flightId) },
+            { $set: { departureAt: new Date(Date.now() - 60_000) } },
+          );
+
+        await expect(
+          bookingProvider.getPayable(pending.body.id, travelerId),
+        ).rejects.toBeInstanceOf(ConflictException);
+        await expect(
+          bookingProvider.getPayable(confirmed.body.id, travelerId),
+        ).resolves.toMatchObject({ status: 'CONFIRMED' });
+        await http()
+          .get(`${BOOKING}/${confirmed.body.id}`)
+          .set('Cookie', traveler)
+          .expect(200);
+      });
+
+      it('a deactivated airline cannot be booked: 409', async () => {
+        const flightId = await createFlight();
+        await addCabin(flightId, 'ECONOMY', 10);
+        await connection
+          .collection('airlines')
+          .updateOne(
+            { _id: new Types.ObjectId(airline.id) },
+            { $set: { isActive: false } },
+          );
+        await http()
+          .post(HOLD)
+          .set('Cookie', traveler)
+          .send(body(flightId))
+          .expect(409);
+      });
+    });
+
+    describe('who may call it', () => {
+      it('a guest gets 401', async () => {
+        await http()
+          .post(HOLD)
+          .send(body(new Types.ObjectId().toString()))
+          .expect(401);
+      });
+
+      it.each([
+        ['admin', () => admin],
+        ['airline moderator', () => moderator],
+      ])('%s gets 403', async (_name, cookie) => {
+        await http()
+          .post(HOLD)
+          .set('Cookie', cookie())
+          .send(body(new Types.ObjectId().toString()))
+          .expect(403);
+      });
+    });
+
+    describe('concurrency: seats are never over-held', () => {
+      it('20 parallel holds of 1 seat for the last 5 seats: exactly 5 succeed, no seat is over-held', async () => {
+        const flightId = await createFlight();
+        await addCabin(flightId, 'ECONOMY', 5);
+
+        const results = await Promise.all(
+          Array.from({ length: 20 }, () =>
+            http().post(HOLD).set('Cookie', traveler).send(body(flightId)),
+          ),
+        );
+
+        const statuses = results.map((r) => r.status);
+        expect(statuses.filter((s) => s === 201)).toHaveLength(5);
+        expect(statuses.filter((s) => s === 409)).toHaveLength(15);
+        expect(statuses.every((s) => s === 201 || s === 409)).toBe(true);
+        expect(await cabinOf(flightId)).toMatchObject({
+          heldSeats: 5,
+          bookedSeats: 0,
+        });
+        expect(
+          await connection
+            .collection('flightBookings')
+            .countDocuments({ status: 'PENDING_PAYMENT' }),
+        ).toBe(5);
+      }, 90_000);
+
+      it('parallel holds of 2 seats for 5 seats: exactly 2 succeed', async () => {
+        const flightId = await createFlight();
+        await addCabin(flightId, 'ECONOMY', 5);
+
+        const results = await Promise.all(
+          Array.from({ length: 8 }, () =>
+            http()
+              .post(HOLD)
+              .set('Cookie', traveler)
+              .send(body(flightId, { adults: 2 })),
+          ),
+        );
+
+        expect(results.filter((r) => r.status === 201)).toHaveLength(2);
+        expect(results.every((r) => r.status === 201 || r.status === 409)).toBe(
+          true,
+        );
+        expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 4 });
+      }, 90_000);
+    });
+
+    it('is atomic: if the booking cannot be saved, the seats are not held either (rollback)', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+      jest
+        .spyOn(bookingModel, 'create')
+        .mockRejectedValueOnce(new Error('boom') as never);
+
+      await http()
+        .post(HOLD)
+        .set('Cookie', traveler)
+        .send(body(flightId, { adults: 3 }))
+        .expect(500);
+
+      expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0 });
+      expect(
+        await connection.collection('flightBookings').countDocuments(),
+      ).toBe(0);
+    });
+  });
+
+  describe('POST /api/flight-bookings (FLT-19)', () => {
+    const passenger = (
+      fullName: string,
+      dateOfBirth: string,
+      passportOrIdNumber: string,
+      extraBags?: Array<{ weightKg: number }>,
+    ) => ({
+      fullName,
+      dateOfBirth,
+      passportOrIdNumber,
+      ...(extraBags ? { extraBags } : {}),
+    });
+
+    it('derives age groups at the departure-date boundaries and includes baggage fees in cents', async () => {
+      await setBaggagePolicy(3000, 2);
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10, 0, 0, 45000);
+
+      const res = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          flightId,
+          cabinClass: 'ECONOMY',
+          passengers: [
+            passenger('Adult Passenger', '2078-12-01', 'A1234567', [
+              { weightKg: 20 },
+            ]),
+            passenger('Child Passenger', '2088-12-01', 'C1234567'),
+            passenger('Infant Passenger', '2089-12-02', 'I1234567'),
+          ],
+        })
+        .expect(201);
+
+      expect(res.body).toMatchObject({
+        flightId,
+        passengerCounts: { adults: 1, children: 1, infants: 1 },
+        passengers: [
+          {
+            fullName: 'Adult Passenger',
+            dateOfBirth: '2078-12-01',
+            passengerType: 'ADULT',
+            extraBags: [{ weightKg: 20 }],
+            baggageFeeCents: 3000,
+          },
+          {
+            fullName: 'Child Passenger',
+            passengerType: 'CHILD',
+            extraBags: [],
+            baggageFeeCents: 0,
+          },
+          {
+            fullName: 'Infant Passenger',
+            passengerType: 'INFANT',
+            extraBags: [],
+            baggageFeeCents: 0,
+          },
+        ],
+        seats: 2,
+        baggageFeeCents: 3000,
+        totalCents: 97500,
+        status: 'PENDING_PAYMENT',
+      });
+      expect(res.body.passengers[0]).not.toHaveProperty('passportOrIdNumber');
+
+      const stored = await connection
+        .collection('flightBookings')
+        .findOne({ _id: new Types.ObjectId(res.body.id) });
+      expect(stored?.passengers[0].passportOrIdNumber).toBe('A1234567');
+      expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 2 });
+    });
+
+    it('documents that passenger type uses the outbound local departure date and publishes the FLT-26 cancellation route', async () => {
+      const docs = await http().get('/api/docs-json').expect(200);
+
+      const operation = docs.body.paths['/api/flight-bookings'].post;
+      expect(operation.description).toContain(
+        "outbound flight's local departure date",
+      );
+      expect(operation.description).toContain('ADULT 12+');
+      expect(operation.description).toContain('CHILD 2-11');
+      expect(operation.description).toContain('INFANT under 2');
+
+      expect(
+        docs.body.components.schemas.BookingPassengerDto.properties.dateOfBirth
+          .description,
+      ).toContain("outbound flight's local departure date");
+
+      // FLT-26 adds the owner-only preview/confirm cancellation route.
+      expect(
+        docs.body.paths['/api/flight-bookings/{id}/cancel'].post,
+      ).toBeDefined();
+    });
+
+    it('creates one payable booking with two segments and holds/confirms both legs atomically', async () => {
+      await setBaggagePolicy(3000, 2);
+      await setBaggagePolicy(5000, 2, returnAirline.id, returnModerator);
+      const outboundId = await createFlight();
+      const returnId = await createFlight(
+        {
+          flightNumber: 'BB778',
+          departureAirport: 'JFK',
+          arrivalAirport: 'CAI',
+          departureLocalTime: '2090-12-02T10:00',
+          arrivalLocalTime: '2090-12-02T18:30',
+        },
+        returnModerator,
+      );
+      await addCabin(outboundId, 'ECONOMY', 10, 0, 0, 45000);
+      await addCabin(returnId, 'BUSINESS', 10, 0, 0, 60000);
+
+      const created = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          segments: [
+            { flightId: outboundId, cabinClass: 'ECONOMY' },
+            { flightId: returnId, cabinClass: 'BUSINESS' },
+          ],
+          passengers: [
+            passenger('Adult Passenger', '2078-12-01', 'A123', [
+              { weightKg: 20 },
+            ]),
+            passenger('Infant Passenger', '2089-12-01', 'I123'),
+          ],
+        })
+        .expect(201);
+
+      expect(created.body).toMatchObject({
+        flightId: outboundId,
+        passengerCounts: { adults: 1, children: 0, infants: 1 },
+        seats: 1,
+        baggageFeeCents: 8000,
+        totalCents: 123500,
+        status: 'PENDING_PAYMENT',
+        segments: [
+          {
+            flightId: outboundId,
+            cabinClass: 'ECONOMY',
+            seats: 1,
+            farePerPassengerCents: 45000,
+            infantFareCents: 4500,
+            baggageFeeCents: 3000,
+          },
+          {
+            flightId: returnId,
+            cabinClass: 'BUSINESS',
+            seats: 1,
+            farePerPassengerCents: 60000,
+            infantFareCents: 6000,
+            baggageFeeCents: 5000,
+          },
+        ],
+        passengers: [
+          { passengerType: 'ADULT', baggageFeeCents: 8000 },
+          { passengerType: 'INFANT', baggageFeeCents: 0 },
+        ],
+      });
+      expect(
+        await connection.collection('flightBookings').countDocuments(),
+      ).toBe(1);
+      expect(await cabinOf(outboundId, 'ECONOMY')).toMatchObject({
+        heldSeats: 1,
+      });
+      expect(await cabinOf(returnId, 'BUSINESS')).toMatchObject({
+        heldSeats: 1,
+      });
+      await expect(
+        bookingProvider.getPayable(created.body.id, travelerId),
+      ).resolves.toMatchObject({ amountCents: 123500, currency: 'USD' });
+      const summary = await http()
+        .get(`${BOOKING}/${created.body.id}`)
+        .set('Cookie', traveler)
+        .expect(200);
+      expect(summary.body.totalCents).toBe(123500);
+      expect(
+        summary.body.segments.map(
+          (segment: { flight: { id: string } }) => segment.flight.id,
+        ),
+      ).toEqual([outboundId, returnId]);
+
+      await lifecycle.confirmPaid(
+        BookingType.FLIGHT,
+        created.body.id,
+        'pi_round_trip_one_reference',
+      );
+      const stored = await connection
+        .collection('flightBookings')
+        .findOne({ _id: new Types.ObjectId(created.body.id) });
+      expect(stored?.paymentRef).toBe('pi_round_trip_one_reference');
+      expect(await cabinOf(outboundId, 'ECONOMY')).toMatchObject({
+        heldSeats: 0,
+        bookedSeats: 1,
+      });
+      expect(await cabinOf(returnId, 'BUSINESS')).toMatchObject({
+        heldSeats: 0,
+        bookedSeats: 1,
+      });
+    });
+
+    it('rolls back the outbound hold if the return leg cannot reserve seats', async () => {
+      const outboundId = await createFlight();
+      const returnId = await createFlight(
+        {
+          flightNumber: 'BB778',
+          departureAirport: 'JFK',
+          arrivalAirport: 'CAI',
+          departureLocalTime: '2090-12-02T10:00',
+          arrivalLocalTime: '2090-12-02T18:30',
+        },
+        returnModerator,
+      );
+      await addCabin(outboundId, 'ECONOMY', 10);
+      await addCabin(returnId, 'BUSINESS', 1, 1, 0, 60000);
+
+      await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          segments: [
+            { flightId: outboundId, cabinClass: 'ECONOMY' },
+            { flightId: returnId, cabinClass: 'BUSINESS' },
+          ],
+          passengers: [
+            {
+              fullName: 'Adult Passenger',
+              dateOfBirth: '2078-12-01',
+              passportOrIdNumber: 'A123',
+            },
+          ],
+        })
+        .expect(409);
+
+      expect(await cabinOf(outboundId, 'ECONOMY')).toMatchObject({
+        heldSeats: 0,
+      });
+      expect(await cabinOf(returnId, 'BUSINESS')).toMatchObject({
+        heldSeats: 0,
+        bookedSeats: 1,
+      });
+      expect(
+        await connection.collection('flightBookings').countDocuments(),
+      ).toBe(0);
+    });
+
+    it.each([
+      ['fullName', { dateOfBirth: '2078-12-01', passportOrIdNumber: 'A123' }],
+      ['dateOfBirth', { fullName: 'Passenger', passportOrIdNumber: 'A123' }],
+      [
+        'passportOrIdNumber',
+        { fullName: 'Passenger', dateOfBirth: '2078-12-01' },
+      ],
+    ])("requires each passenger's %s", async (field, passengerDetails) => {
+      const res = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          flightId: new Types.ObjectId().toString(),
+          cabinClass: 'ECONOMY',
+          passengers: [passengerDetails],
+        })
+        .expect(400);
+
+      expect(res.body.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: `passengers.0.${field}` }),
+        ]),
+      );
+    });
+
+    it('rejects invalid and future dates of birth with a field-level error', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+      const base = {
+        flightId,
+        cabinClass: 'ECONOMY',
+        passengers: [passenger('Passenger', '2090-02-29', 'P123')],
+      };
+
+      const invalid = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send(base)
+        .expect(400);
+      expect(invalid.body.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: 'passengers.0.dateOfBirth' }),
+        ]),
+      );
+
+      const future = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          ...base,
+          passengers: [passenger('Passenger', '2091-01-01', 'P123')],
+        })
+        .expect(400);
+      expect(future.body.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: 'passengers.0.dateOfBirth' }),
+        ]),
+      );
+      expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0 });
+    });
+
+    it('requires an adult and limits infants to one per adult', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+
+      const noAdult = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          flightId,
+          cabinClass: 'ECONOMY',
+          passengers: [passenger('Child', '2088-12-01', 'C123')],
+        })
+        .expect(400);
+      expect(noAdult.body.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: 'passengers' }),
+        ]),
+      );
+
+      const tooManyInfants = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          flightId,
+          cabinClass: 'ECONOMY',
+          passengers: [
+            passenger('Adult', '2078-12-01', 'A123'),
+            passenger('Infant 1', '2089-12-02', 'I123'),
+            passenger('Infant 2', '2089-12-03', 'I456'),
+          ],
+        })
+        .expect(400);
+      expect(tooManyInfants.body.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: 'passengers' }),
+        ]),
+      );
+      expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0 });
+    });
+
+    it('rejects extra bags when no airline baggage policy exists', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+
+      const res = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          flightId,
+          cabinClass: 'ECONOMY',
+          passengers: [
+            passenger('Adult', '2078-12-01', 'A123', [{ weightKg: 20 }]),
+          ],
+        })
+        .expect(400);
+
+      expect(res.body.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: 'passengers' }),
+        ]),
+      );
+      expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0 });
+    });
+
+    it('rejects bags above the airline maximum without holding seats', async () => {
+      await setBaggagePolicy(3000, 1);
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+
+      const res = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          flightId,
+          cabinClass: 'ECONOMY',
+          passengers: [
+            passenger('Adult', '2078-12-01', 'A123', [
+              { weightKg: 20 },
+              { weightKg: 21 },
+            ]),
+          ],
+        })
+        .expect(400);
+
+      expect(res.body.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: 'passengers.0.extraBags' }),
+        ]),
+      );
+      expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0 });
+    });
+
+    it('rejects an extra bag heavier than the cabin limit without holding seats', async () => {
+      await setBaggagePolicy();
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+
+      const res = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          flightId,
+          cabinClass: 'ECONOMY',
+          passengers: [
+            passenger('Adult', '2078-12-01', 'A123', [{ weightKg: 23.01 }]),
+          ],
+        })
+        .expect(400);
+
+      expect(res.body.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: 'passengers.0.extraBags.0.weightKg',
+          }),
+        ]),
+      );
+      expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0 });
+      expect(
+        await connection.collection('flightBookings').countDocuments(),
+      ).toBe(0);
+    });
+
+    it('allows a passenger booking without extra bags when no baggage policy exists', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+
+      const res = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          flightId,
+          cabinClass: 'ECONOMY',
+          passengers: [passenger('Adult', '2078-12-01', 'A123')],
+        })
+        .expect(201);
+
+      expect(res.body).toMatchObject({
+        passengerCounts: { adults: 1, children: 0, infants: 0 },
+        baggageFeeCents: 0,
+        totalCents: 45000,
+      });
+    });
+
+    it('requires an authenticated traveler', async () => {
+      const payload = {
+        flightId: new Types.ObjectId().toString(),
+        cabinClass: 'ECONOMY',
+        passengers: [passenger('Adult', '2078-12-01', 'A123')],
+      };
+      await http().post(BOOKING).send(payload).expect(401);
+      await http().post(BOOKING).set('Cookie', admin).send(payload).expect(403);
+    });
+  });
+
+  describe('GET /api/flight-bookings/:id (FLT-21)', () => {
+    it('returns the flight, passenger and baggage summary with the payable total', async () => {
+      await setBaggagePolicy(3000, 2);
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10, 0, 0, 45000);
+      const created = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          flightId,
+          cabinClass: 'ECONOMY',
+          passengers: [
+            {
+              fullName: 'Adult Passenger',
+              dateOfBirth: '2078-12-01',
+              passportOrIdNumber: 'P1234567',
+              extraBags: [{ weightKg: 20 }],
+            },
+          ],
+        })
+        .expect(201);
+
+      const summary = await http()
+        .get(`${BOOKING}/${created.body.id}`)
+        .set('Cookie', traveler)
+        .expect(200);
+      const payable = await bookingProvider.getPayable(
+        created.body.id as string,
+        travelerId,
+      );
+
+      expect(payable).not.toBeNull();
+      expect(summary.body).toMatchObject({
+        id: created.body.id,
+        flight: {
+          id: flightId,
+          flightNumber: 'MS777',
+          departureAirport: 'CAI',
+          arrivalAirport: 'JFK',
+        },
+        cabinClass: 'ECONOMY',
+        passengerCounts: { adults: 1, children: 0, infants: 0 },
+        passengers: [
+          {
+            fullName: 'Adult Passenger',
+            dateOfBirth: '2078-12-01',
+            passengerType: 'ADULT',
+            extraBags: [{ weightKg: 20 }],
+            baggageFeeCents: 3000,
+          },
+        ],
+        baggageFeeCents: 3000,
+        totalCents: 48000,
+        currency: 'USD',
+        status: 'PENDING_PAYMENT',
+      });
+      expect(summary.body.totalCents).toBe(payable?.amountCents);
+      expect(summary.body.passengers[0]).not.toHaveProperty(
+        'passportOrIdNumber',
+      );
+      expect(summary.body).not.toHaveProperty('bookingReference');
+      expect(summary.body).not.toHaveProperty('refund');
+      expect(summary.body.holdExpiresAt).not.toBeNull();
+    });
+
+    it('allows only the booking owner to view the summary', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+      const bookingId = await hold(flightId);
+
+      await http()
+        .get(`${BOOKING}/${bookingId}`)
+        .set('Cookie', otherTraveler)
+        .expect(404);
+      await http().get(`${BOOKING}/${bookingId}`).expect(401);
+      await http()
+        .get(`${BOOKING}/${bookingId}`)
+        .set('Cookie', admin)
+        .expect(403);
+    });
+
+    it('returns 404 for malformed or unknown booking ids', async () => {
+      await http()
+        .get(`${BOOKING}/not-an-id`)
+        .set('Cookie', traveler)
+        .expect(404);
+      await http()
+        .get(`${BOOKING}/${new Types.ObjectId().toString()}`)
+        .set('Cookie', traveler)
+        .expect(404);
+    });
+
+    it('lets the owner read back a confirmed one-way booking with its reference', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+      const bookingId = await hold(flightId);
+      await lifecycle.confirmPaid(
+        BookingType.FLIGHT,
+        bookingId,
+        'pi_summary_one_way',
+      );
+      const stored = await connection
+        .collection('flightBookings')
+        .findOne({ _id: new Types.ObjectId(bookingId) });
+      expect(stored?.bookingReference).toMatch(/^FLT-[0-9A-F]{16}$/);
+
+      const details = await http()
+        .get(`${BOOKING}/${bookingId}`)
+        .set('Cookie', traveler)
+        .expect(200);
+
+      expect(details.body).toMatchObject({
+        id: bookingId,
+        status: 'CONFIRMED',
+        bookingReference: stored?.bookingReference,
+        holdExpiresAt: null,
+        cabinClass: 'ECONOMY',
+        passengerCounts: { adults: 1, children: 0, infants: 0 },
+        currency: 'USD',
+        totalCents: 45000,
+        refund: null,
+      });
+      expect(details.body.flight).toMatchObject({
+        id: flightId,
+        flightNumber: 'MS777',
+        departureAirport: 'CAI',
+        arrivalAirport: 'JFK',
+      });
+      expect(details.body.segments).toHaveLength(1);
+      expect(details.body.segments[0]).toMatchObject({
+        flightId,
+        cabinClass: 'ECONOMY',
+        flight: {
+          id: flightId,
+          flightNumber: 'MS777',
+          departureAirport: 'CAI',
+          arrivalAirport: 'JFK',
+        },
+      });
+      expect(details.body.passengers).toEqual([]);
+    });
+
+    it('lets the owner read back both segments of a confirmed round trip', async () => {
+      const outboundId = await createFlight();
+      const returnId = await createFlight(
+        {
+          flightNumber: 'BB778',
+          departureAirport: 'JFK',
+          arrivalAirport: 'CAI',
+          departureLocalTime: '2090-12-02T10:00',
+          arrivalLocalTime: '2090-12-02T18:30',
+        },
+        returnModerator,
+      );
+      await addCabin(outboundId, 'ECONOMY', 10);
+      await addCabin(returnId, 'BUSINESS', 10);
+      const created = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          segments: [
+            { flightId: outboundId, cabinClass: 'ECONOMY' },
+            { flightId: returnId, cabinClass: 'BUSINESS' },
+          ],
+          passengers: [
+            {
+              fullName: 'Amina Example',
+              dateOfBirth: '2078-12-01',
+              passportOrIdNumber: 'P1234567',
+            },
+          ],
+        })
+        .expect(201);
+      const bookingId = created.body.id as string;
+      await lifecycle.confirmPaid(
+        BookingType.FLIGHT,
+        bookingId,
+        'pi_summary_round_trip',
+      );
+
+      const details = await http()
+        .get(`${BOOKING}/${bookingId}`)
+        .set('Cookie', traveler)
+        .expect(200);
+
+      expect(details.body.status).toBe('CONFIRMED');
+      expect(details.body.bookingReference).toMatch(/^FLT-[0-9A-F]{16}$/);
+      expect(details.body.holdExpiresAt).toBeNull();
+      expect(details.body.refund).toBeNull();
+      expect(details.body.segments).toHaveLength(2);
+      const segments = details.body.segments as Array<{
+        flightId: string;
+        cabinClass: string;
+        flight: { flightNumber: string };
+      }>;
+      expect(segments.map((segment) => segment.flightId)).toEqual([
+        outboundId,
+        returnId,
+      ]);
+      expect(segments.map((segment) => segment.cabinClass)).toEqual([
+        'ECONOMY',
+        'BUSINESS',
+      ]);
+      expect(segments.map((segment) => segment.flight.flightNumber)).toEqual([
+        'MS777',
+        'BB778',
+      ]);
+      expect(details.body.passengers[0]).toMatchObject({
+        fullName: 'Amina Example',
+        passengerType: 'ADULT',
+      });
+      expect(details.body.passengers[0]).not.toHaveProperty(
+        'passportOrIdNumber',
+      );
+    });
+
+    it("shows the latest refund through PAY-03's getLatestForBooking contract", async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10, 0, 0, 45000);
+      const bookingId = await hold(flightId);
+      await lifecycle.confirmPaid(
+        BookingType.FLIGHT,
+        bookingId,
+        'pi_summary_refund',
+      );
+      await connection.collection('refunds').insertMany([
+        {
+          bookingType: 'FLIGHT',
+          bookingId: new Types.ObjectId(bookingId),
+          userId: new Types.ObjectId(travelerId),
+          stripePaymentIntentId: 'pi_summary_refund',
+          stripeRefundId: 're_summary_older',
+          amountCents: 10000,
+          currency: 'USD',
+          status: 'PENDING',
+          createdAt: new Date('2026-11-18T09:00:00.000Z'),
+          updatedAt: new Date('2026-11-18T09:00:00.000Z'),
+        },
+        {
+          bookingType: 'FLIGHT',
+          bookingId: new Types.ObjectId(bookingId),
+          userId: new Types.ObjectId(travelerId),
+          stripePaymentIntentId: 'pi_summary_refund_2',
+          stripeRefundId: 're_summary_latest',
+          amountCents: 45000,
+          currency: 'USD',
+          status: 'REFUNDED',
+          reason: 'Cancelled per tier 2',
+          createdAt: new Date('2026-11-18T10:00:00.000Z'),
+          updatedAt: new Date('2026-11-18T10:00:00.000Z'),
+        },
+      ]);
+
+      const details = await http()
+        .get(`${BOOKING}/${bookingId}`)
+        .set('Cookie', traveler)
+        .expect(200);
+
+      expect(details.body.refund).toMatchObject({
+        bookingType: 'FLIGHT',
+        bookingId,
+        status: 'REFUNDED',
+        amountCents: 45000,
+        currency: 'USD',
+        reason: 'Cancelled per tier 2',
+        createdAt: '2026-11-18T10:00:00.000Z',
+      });
+      expect(details.body.refund).not.toHaveProperty('stripeRefundId');
+      expect(details.body.refund).not.toHaveProperty('stripePaymentIntentId');
+      expect(details.body.refund).not.toHaveProperty('userId');
+    });
+
+    it('hides a confirmed booking from another traveler', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+      const bookingId = await hold(flightId);
+      await lifecycle.confirmPaid(
+        BookingType.FLIGHT,
+        bookingId,
+        'pi_summary_other',
+      );
+
+      await http()
+        .get(`${BOOKING}/${bookingId}`)
+        .set('Cookie', otherTraveler)
+        .expect(404);
+      await http().get(`${BOOKING}/${bookingId}`).expect(401);
+    });
+
+    it('lazily expires an overdue hold before returning the summary', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+      const created = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          flightId,
+          cabinClass: 'ECONOMY',
+          passengers: [
+            {
+              fullName: 'Adult Passenger',
+              dateOfBirth: '2078-12-01',
+              passportOrIdNumber: 'P1234567',
+            },
+          ],
+        })
+        .expect(201);
+      await expireNow(created.body.id);
+
+      await http()
+        .get(`${BOOKING}/${created.body.id}`)
+        .set('Cookie', traveler)
+        .expect(409);
+
+      const stored = await connection
+        .collection('flightBookings')
+        .findOne({ _id: new Types.ObjectId(created.body.id) });
+      expect(stored?.status).toBe(BookingStatus.EXPIRED);
+      expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0 });
+    });
+
+    it('publishes the summary route and response schema in Swagger', async () => {
+      const docs = await http().get('/api/docs-json').expect(200);
+      expect(
+        docs.body.paths['/api/flight-bookings/{id}'].get.responses['200'],
+      ).toBeDefined();
+      expect(docs.body.paths['/api/flight-bookings/{id}'].get.operationId).toBe(
+        'FlightBookingsController_getSummary',
+      );
+    });
+  });
+
+  describe('GET /api/flight-bookings (FLT-25)', () => {
+    /** A legacy confirmed booking inserted straight into the collection (no FLT-19 passengers). */
+    function legacyBooking(overrides: Record<string, unknown> = {}) {
+      return {
+        userId: new Types.ObjectId(travelerId),
+        airlineId: new Types.ObjectId(airline.id),
+        cabinClass: 'ECONOMY',
+        passengerCounts: { adults: 1, children: 0, infants: 0 },
+        seats: 1,
+        farePerPassengerCents: 45000,
+        infantFareCents: 4500,
+        totalCents: 45000,
+        baggageFeeCents: 0,
+        currency: 'USD',
+        status: 'CONFIRMED',
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        ...overrides,
+      };
+    }
+
+    /** Moves a flight into the past without going through the (rejecting) create endpoint. */
+    async function moveFlightToPast(flightId: string) {
+      await connection.collection('flights').updateOne(
+        { _id: new Types.ObjectId(flightId) },
+        {
+          $set: {
+            departureAt: new Date('2020-01-01T00:00:00.000Z'),
+            arrivalAt: new Date('2020-01-01T05:00:00.000Z'),
+          },
+        },
+      );
+    }
+
+    it('groups a traveler\'s bookings into Upcoming, Past and Cancelled, cancellation winning over the date', async () => {
+      const upcomingFlight = await createFlight({ flightNumber: 'MS801' });
+      await addCabin(upcomingFlight, 'ECONOMY', 10);
+      const upcomingBooking = await hold(upcomingFlight);
+
+      const pastFlight = await createFlight({ flightNumber: 'MS802' });
+      await addCabin(pastFlight, 'ECONOMY', 10);
+      const pastBooking = await hold(pastFlight);
+      await moveFlightToPast(pastFlight);
+
+      const cancelledFlight = await createFlight({ flightNumber: 'MS803' });
+      await addCabin(cancelledFlight, 'ECONOMY', 10);
+      const cancelledBooking = await hold(cancelledFlight);
+      await lifecycle.confirmPaid(
+        BookingType.FLIGHT,
+        cancelledBooking,
+        'pi_list_cancelled',
+      );
+      await lifecycle.transition(
+        BookingType.FLIGHT,
+        cancelledBooking,
+        BookingStatus.CANCELLED,
+      );
+
+      const res = await http()
+        .get(BOOKING)
+        .set('Cookie', traveler)
+        .expect(200);
+
+      expect(res.body).toMatchObject({
+        page: 1,
+        limit: 10,
+        total: 3,
+        totalPages: 1,
+      });
+      const items = res.body.items as Array<{
+        id: string;
+        group: string;
+        status: string;
+        cabinClass: string;
+        bookingReference?: string;
+      }>;
+      const byId = new Map(items.map((item) => [item.id, item]));
+      expect(byId.get(upcomingBooking)?.group).toBe('UPCOMING');
+      expect(byId.get(pastBooking)?.group).toBe('PAST');
+      expect(byId.get(cancelledBooking)?.group).toBe('CANCELLED');
+      expect(byId.get(cancelledBooking)?.status).toBe('CANCELLED');
+      expect(byId.get(cancelledBooking)?.cabinClass).toBe('ECONOMY');
+      expect(byId.get(cancelledBooking)?.bookingReference).toMatch(
+        /^FLT-[0-9A-F]{16}$/,
+      );
+
+      const past = await http()
+        .get(`${BOOKING}?group=PAST`)
+        .set('Cookie', traveler)
+        .expect(200);
+      expect(past.body.total).toBe(1);
+      expect(past.body.items.map((item: { id: string }) => item.id)).toEqual([
+        pastBooking,
+      ]);
+    });
+
+    it('groups a round trip by its outbound segment and returns both segments', async () => {
+      const outboundId = await createFlight({ flightNumber: 'MS811' });
+      const returnId = await createFlight(
+        {
+          flightNumber: 'BB812',
+          departureAirport: 'JFK',
+          arrivalAirport: 'CAI',
+          departureLocalTime: '2090-12-02T10:00',
+          arrivalLocalTime: '2090-12-02T18:30',
+        },
+        returnModerator,
+      );
+      await addCabin(outboundId, 'ECONOMY', 10);
+      await addCabin(returnId, 'ECONOMY', 10);
+      const created = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          segments: [
+            { flightId: outboundId, cabinClass: 'ECONOMY' },
+            { flightId: returnId, cabinClass: 'ECONOMY' },
+          ],
+          passengers: [
+            {
+              fullName: 'Amina Example',
+              dateOfBirth: '2078-12-01',
+              passportOrIdNumber: 'P1234567',
+            },
+          ],
+        })
+        .expect(201);
+
+      // Only the return leg is in the past: the trip must still be UPCOMING (outbound decides).
+      await moveFlightToPast(returnId);
+
+      const res = await http()
+        .get(BOOKING)
+        .set('Cookie', traveler)
+        .expect(200);
+      const [item] = res.body.items as Array<{
+        id: string;
+        group: string;
+        bookingReference?: string;
+        flight: { id: string; flightNumber: string };
+        segments: Array<{
+          flightId: string;
+          flight: { flightNumber: string };
+        }>;
+        passengers: Array<Record<string, unknown>>;
+      }>;
+      expect(item.id).toBe(created.body.id);
+      expect(item.group).toBe('UPCOMING');
+      expect(item.flight.id).toBe(outboundId);
+      expect(item.segments.map((segment) => segment.flightId)).toEqual([
+        outboundId,
+        returnId,
+      ]);
+      expect(
+        item.segments.map((segment) => segment.flight.flightNumber),
+      ).toEqual(['MS811', 'BB812']);
+      expect(item.passengers).toHaveLength(1);
+      expect(item.passengers[0]).not.toHaveProperty('passportOrIdNumber');
+    });
+
+    it('lists a legacy one-way booking without segments and without a reference', async () => {
+      const flightId = await createFlight({ flightNumber: 'MS821' });
+      const legacyId = new Types.ObjectId();
+      await connection.collection('flightBookings').insertOne({
+        _id: legacyId,
+        flightId: new Types.ObjectId(flightId),
+        ...legacyBooking(),
+      });
+
+      const res = await http()
+        .get(BOOKING)
+        .set('Cookie', traveler)
+        .expect(200);
+      const [item] = res.body.items as Array<{
+        id: string;
+        group: string;
+        bookingReference?: string;
+        segments: Array<{ flightId: string }>;
+        passengers: unknown[];
+      }>;
+      expect(item.id).toBe(legacyId.toString());
+      expect(item.group).toBe('UPCOMING');
+      expect(item).not.toHaveProperty('bookingReference');
+      expect(item.segments).toHaveLength(1);
+      expect(item.segments[0].flightId).toBe(flightId);
+      expect(item.passengers).toEqual([]);
+    });
+
+    it('returns only the caller\'s bookings and keeps details owner-only', async () => {
+      const flightId = await createFlight({ flightNumber: 'MS831' });
+      await addCabin(flightId, 'ECONOMY', 10);
+      const mine = await hold(flightId);
+      const theirs = (
+        await http()
+          .post(HOLD)
+          .set('Cookie', otherTraveler)
+          .send(body(flightId))
+          .expect(201)
+      ).body.id as string;
+
+      const mineList = await http()
+        .get(BOOKING)
+        .set('Cookie', traveler)
+        .expect(200);
+      expect(mineList.body.total).toBe(1);
+      expect(mineList.body.items.map((item: { id: string }) => item.id)).toEqual([
+        mine,
+      ]);
+
+      const theirList = await http()
+        .get(BOOKING)
+        .set('Cookie', otherTraveler)
+        .expect(200);
+      expect(theirList.body.total).toBe(1);
+      expect(
+        theirList.body.items.map((item: { id: string }) => item.id),
+      ).toEqual([theirs]);
+
+      await http()
+        .get(`${BOOKING}/${theirs}`)
+        .set('Cookie', traveler)
+        .expect(404);
+    });
+
+    it('paginates with page size 10 by default, explicit pages, stable totals and an empty out-of-range page', async () => {
+      const flightId = await createFlight({ flightNumber: 'MS841' });
+      const docs = Array.from({ length: 12 }, (_, index) => ({
+        _id: new Types.ObjectId(),
+        flightId: new Types.ObjectId(flightId),
+        ...legacyBooking({
+          createdAt: new Date(Date.UTC(2026, 10, 1, 10, index)),
+          updatedAt: new Date(Date.UTC(2026, 10, 1, 10, index)),
+        }),
+      }));
+      await connection.collection('flightBookings').insertMany(docs);
+
+      const first = await http()
+        .get(BOOKING)
+        .set('Cookie', traveler)
+        .expect(200);
+      expect(first.body).toMatchObject({
+        page: 1,
+        limit: 10,
+        total: 12,
+        totalPages: 2,
+      });
+      expect(first.body.items).toHaveLength(10);
+      // Newest first: the 12th inserted document (10:11) is the first row.
+      expect(first.body.items[0].id).toBe(docs[11]._id.toString());
+
+      const repeated = await http()
+        .get(BOOKING)
+        .set('Cookie', traveler)
+        .expect(200);
+      expect(repeated.body.items.map((item: { id: string }) => item.id)).toEqual(
+        first.body.items.map((item: { id: string }) => item.id),
+      );
+
+      const second = await http()
+        .get(`${BOOKING}?page=2&limit=10`)
+        .set('Cookie', traveler)
+        .expect(200);
+      expect(second.body.items.map((item: { id: string }) => item.id)).toEqual([
+        docs[1]._id.toString(),
+        docs[0]._id.toString(),
+      ]);
+
+      const empty = await http()
+        .get(`${BOOKING}?page=3&limit=10`)
+        .set('Cookie', traveler)
+        .expect(200);
+      expect(empty.body).toMatchObject({
+        items: [],
+        page: 3,
+        limit: 10,
+        total: 12,
+        totalPages: 2,
+      });
+
+      const single = await http()
+        .get(`${BOOKING}?page=1&limit=1`)
+        .set('Cookie', traveler)
+        .expect(200);
+      expect(single.body).toMatchObject({ limit: 1, total: 12, totalPages: 12 });
+      expect(single.body.items).toHaveLength(1);
+
+      await http().get(`${BOOKING}?page=0`).set('Cookie', traveler).expect(400);
+      await http()
+        .get(`${BOOKING}?limit=51`)
+        .set('Cookie', traveler)
+        .expect(400);
+      await http()
+        .get(`${BOOKING}?group=LATER`)
+        .set('Cookie', traveler)
+        .expect(400);
+    });
+
+    it('requires the traveler role and publishes the list contract in Swagger', async () => {
+      await http().get(BOOKING).set('Cookie', admin).expect(403);
+      await http().get(BOOKING).expect(401);
+
+      const docs = await http().get('/api/docs-json').expect(200);
+      const operation = docs.body.paths['/api/flight-bookings'].get;
+      expect(operation.operationId).toBe('FlightBookingsController_listMine');
+      expect(
+        operation.parameters.map((parameter: { name: string }) => parameter.name),
+      ).toEqual(expect.arrayContaining(['page', 'limit', 'group']));
+      const ok = operation.responses['200'].content['application/json'].schema;
+      expect(ok.required).toEqual(
+        expect.arrayContaining([
+          'items',
+          'page',
+          'limit',
+          'total',
+          'totalPages',
+        ]),
+      );
+      expect(ok.properties.items.type).toBe('array');
+      expect(ok.properties.page).toMatchObject({ type: 'integer', example: 1 });
+      expect(ok.properties.limit).toMatchObject({
+        type: 'integer',
+        example: 10,
+      });
+      expect(operation.responses['400']).toBeDefined();
+      expect(operation.responses['403']).toBeDefined();
+    });
+  });
+
+  describe('GET /api/flight-bookings/:id/e-ticket (FLT-23)', () => {
+    const ticketPassenger = (fullName: string, passportOrIdNumber: string) => ({
+      fullName,
+      dateOfBirth: '2078-12-01',
+      passportOrIdNumber,
+    });
+
+    async function createConfirmedOneWay(
+      flightOverrides: Record<string, unknown> = {},
+    ) {
+      const flightId = await createFlight(flightOverrides);
+      await addCabin(flightId, 'ECONOMY', 10);
+      const created = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          flightId,
+          cabinClass: 'ECONOMY',
+          passengers: [ticketPassenger('Amina Example', 'P1234567')],
+        })
+        .expect(201);
+      const id = created.body.id as string;
+      await lifecycle.confirmPaid(BookingType.FLIGHT, id, 'pi_eticket_one_way');
+      const stored = await connection
+        .collection('flightBookings')
+        .findOne({ _id: new Types.ObjectId(id) });
+      return { id, flightId, reference: stored?.bookingReference as string };
+    }
+
+    async function createConfirmedRoundTrip() {
+      const outboundId = await createFlight();
+      const returnId = await createFlight(
+        {
+          flightNumber: 'BB778',
+          departureAirport: 'JFK',
+          arrivalAirport: 'CAI',
+          departureLocalTime: '2090-12-02T10:00',
+          arrivalLocalTime: '2090-12-02T18:30',
+        },
+        returnModerator,
+      );
+      await addCabin(outboundId, 'ECONOMY', 10);
+      await addCabin(returnId, 'BUSINESS', 10);
+      const created = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          segments: [
+            { flightId: outboundId, cabinClass: 'ECONOMY' },
+            { flightId: returnId, cabinClass: 'BUSINESS' },
+          ],
+          passengers: [ticketPassenger('Amina Example', 'P1234567')],
+        })
+        .expect(201);
+      const id = created.body.id as string;
+      await lifecycle.confirmPaid(
+        BookingType.FLIGHT,
+        id,
+        'pi_eticket_round_trip',
+      );
+      return { id, outboundId, returnId };
+    }
+
+    const download = (id: string, cookie = traveler) =>
+      http().get(`${BOOKING}/${id}/e-ticket`).set('Cookie', cookie);
+
+    it('returns a downloadable PDF for the owner, named after the reference', async () => {
+      const { id, reference } = await createConfirmedOneWay();
+      const res = await download(id).expect(200);
+
+      expect(res.headers['content-type']).toMatch(/^application\/pdf/);
+      expect(res.headers['content-disposition']).toBe(
+        `attachment; filename="e-ticket-${reference}.pdf"`,
+      );
+      const pdf = res.body as Buffer;
+      expect(Buffer.isBuffer(pdf)).toBe(true);
+      expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');
+      expect(pdf.toString('latin1')).toContain('%%EOF');
+      expect(pdf.length).toBeGreaterThan(500);
+      expect(reference).toMatch(/^FLT-[0-9A-F]{16}$/);
+    });
+
+    it('represents both booked segments in a round-trip e-ticket', async () => {
+      const { id, outboundId, returnId } = await createConfirmedRoundTrip();
+      const buildSpy = jest.spyOn(etickets, 'buildData');
+
+      const res = await download(id).expect(200);
+
+      expect((res.body as Buffer).subarray(0, 5).toString()).toBe('%PDF-');
+      expect(buildSpy).toHaveBeenCalledTimes(1);
+      const [, flights] = buildSpy.mock.calls[0];
+      expect(flights.map((flight) => flight._id.toString())).toEqual([
+        outboundId,
+        returnId,
+      ]);
+      expect(flights.map((flight) => flight.flightNumber)).toEqual([
+        'MS777',
+        'BB778',
+      ]);
+    });
+
+    it("hides another traveler's ticket and requires the traveler role", async () => {
+      const { id } = await createConfirmedOneWay();
+
+      await download(id, otherTraveler).expect(404);
+      await download(id, admin).expect(403);
+      await http().get(`${BOOKING}/${id}/e-ticket`).expect(401);
+    });
+
+    it('returns 404 for unknown or malformed booking ids', async () => {
+      await download(new Types.ObjectId().toString()).expect(404);
+      await download('not-an-object-id').expect(404);
+    });
+
+    it('returns 409 while pending and for a historical confirmed booking with no reference', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+      const pendingId = await hold(flightId);
+      await download(pendingId).expect(409);
+
+      const { id } = await createConfirmedOneWay({ flightNumber: 'MS779' });
+      await connection
+        .collection('flightBookings')
+        .updateOne(
+          { _id: new Types.ObjectId(id) },
+          { $unset: { bookingReference: '' } },
+        );
+      await download(id).expect(409);
+    });
+
+    it('documents the PDF response and ownership/eligibility errors', async () => {
+      const docs = await http().get('/api/docs-json').expect(200);
+      const operation =
+        docs.body.paths['/api/flight-bookings/{id}/e-ticket'].get;
+
+      expect(
+        operation.responses['200'].content['application/pdf'],
+      ).toBeDefined();
+      expect(operation.responses['403']).toBeDefined();
+      expect(operation.responses['404']).toBeDefined();
+      expect(operation.responses['409']).toBeDefined();
+    });
+  });
+
+  describe('expiry, confirmation and cancellation through BookingLifecycle', () => {
+    it('an expired hold becomes EXPIRED and its seats are released (lazy expiry)', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+      const id = await hold(flightId, { adults: 3 });
+      expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 3 });
+
+      await expireNow(id);
+      await expect(lifecycle.expireIfDue(BookingType.FLIGHT, id)).resolves.toBe(
+        true,
+      );
+
+      const stored = await connection
+        .collection('flightBookings')
+        .findOne({ _id: new Types.ObjectId(id) });
+      expect(stored?.status).toBe(BookingStatus.EXPIRED);
+      expect(stored?.holdExpiresAt).toBeUndefined();
+      expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0 });
+
+      // Running it again must not release the seats twice.
+      await expect(lifecycle.expireIfDue(BookingType.FLIGHT, id)).resolves.toBe(
+        false,
+      );
+      expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 0 });
+    });
+
+    it('a hold that has not run out yet is left alone', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+      const id = await hold(flightId);
+      await expect(lifecycle.expireIfDue(BookingType.FLIGHT, id)).resolves.toBe(
+        false,
+      );
+      expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 1 });
+    });
+
+    it('the sweep expires every due hold and releases all their seats, and only those', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 20);
+      const due1 = await hold(flightId, { adults: 2 });
+      const due2 = await hold(flightId, { adults: 3 });
+      const fresh = await hold(flightId, { adults: 4 });
+      await expireNow(due1);
+      await expireNow(due2);
+
+      await expect(lifecycle.sweepExpiredHolds()).resolves.toBe(2);
+
+      expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 4 });
+      const status = async (id: string) =>
+        (
+          await connection
+            .collection('flightBookings')
+            .findOne({ _id: new Types.ObjectId(id) })
+        )?.status;
+      expect(await status(due1)).toBe(BookingStatus.EXPIRED);
+      expect(await status(due2)).toBe(BookingStatus.EXPIRED);
+      expect(await status(fresh)).toBe(BookingStatus.PENDING_PAYMENT);
+    });
+
+    it('released seats can be held again', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 2);
+      const id = await hold(flightId, { adults: 2 });
+      await http()
+        .post(HOLD)
+        .set('Cookie', traveler)
+        .send(body(flightId))
+        .expect(409);
+      await expireNow(id);
+      await lifecycle.sweepExpiredHolds();
+      await http()
+        .post(HOLD)
+        .set('Cookie', traveler)
+        .send(body(flightId))
+        .expect(201);
+    });
+
+    it('confirming a paid booking turns held seats into booked seats, once, and assigns one reference', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+      const id = await hold(flightId, { adults: 3, infants: 1 });
+
+      await lifecycle.confirmPaid(BookingType.FLIGHT, id, 'pi_test_1');
+
+      const stored = await connection
+        .collection('flightBookings')
+        .findOne({ _id: new Types.ObjectId(id) });
+      expect(stored).toMatchObject({
+        status: 'CONFIRMED',
+        paymentRef: 'pi_test_1',
+      });
+      expect(stored?.bookingReference).toMatch(/^FLT-[0-9A-F]{16}$/);
+      const reference = stored?.bookingReference;
+      expect(stored?.holdExpiresAt).toBeUndefined();
+      expect(await cabinOf(flightId)).toMatchObject({
+        heldSeats: 0,
+        bookedSeats: 3,
+      });
+
+      const notifications = await connection
+        .collection('notifications')
+        .find({
+          userId: new Types.ObjectId(travelerId),
+          type: 'BOOKING_CONFIRMED',
+        })
+        .toArray();
+      expect(notifications).toHaveLength(1);
+
+      // The webhook and the late-paid path can both arrive: the second call changes and sends nothing.
+      await lifecycle.confirmPaid(BookingType.FLIGHT, id, 'pi_test_1');
+      const repeated = await connection
+        .collection('flightBookings')
+        .findOne({ _id: new Types.ObjectId(id) });
+      expect(repeated?.bookingReference).toBe(reference);
+      expect(repeated?.paymentRef).toBe('pi_test_1');
+      expect(await cabinOf(flightId)).toMatchObject({
+        heldSeats: 0,
+        bookedSeats: 3,
+      });
+      expect(
+        await connection
+          .collection('notifications')
+          .countDocuments({ type: 'BOOKING_CONFIRMED' }),
+      ).toBe(1);
+    });
+
+    it('a different payment reference cannot overwrite the original reference', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+      const id = await hold(flightId);
+      await lifecycle.confirmPaid(BookingType.FLIGHT, id, 'pi_test_1');
+      const before = await connection
+        .collection('flightBookings')
+        .findOne({ _id: new Types.ObjectId(id) });
+
+      await expect(
+        lifecycle.confirmPaid(BookingType.FLIGHT, id, 'pi_other'),
+      ).rejects.toThrow();
+
+      const after = await connection
+        .collection('flightBookings')
+        .findOne({ _id: new Types.ObjectId(id) });
+      expect(after?.paymentRef).toBe('pi_test_1');
+      expect(after?.bookingReference).toBe(before?.bookingReference);
+      expect(await cabinOf(flightId)).toMatchObject({
+        heldSeats: 0,
+        bookedSeats: 1,
+      });
+    });
+
+    it('the late-paid expiry path confirms a flight booking without a Stripe event object', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+      const id = await hold(flightId, { adults: 2 });
+      await expireNow(id);
+      nextPrepareExpiry = { outcome: 'PAID', paymentRef: 'pi_late_paid' };
+
+      await expect(lifecycle.expireIfDue(BookingType.FLIGHT, id)).resolves.toBe(
+        true,
+      );
+
+      const stored = await connection
+        .collection('flightBookings')
+        .findOne({ _id: new Types.ObjectId(id) });
+      expect(stored).toMatchObject({
+        status: 'CONFIRMED',
+        paymentRef: 'pi_late_paid',
+      });
+      expect(stored?.bookingReference).toMatch(/^FLT-[0-9A-F]{16}$/);
+      expect(stored?.holdExpiresAt).toBeUndefined();
+      expect(await cabinOf(flightId)).toMatchObject({
+        heldSeats: 0,
+        bookedSeats: 2,
+      });
+      expect(
+        await connection
+          .collection('notifications')
+          .countDocuments({ type: 'BOOKING_CONFIRMED' }),
+      ).toBe(1);
+    });
+
+    it('an expired booking cannot be confirmed and its seats stay released', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+      const id = await hold(flightId, { adults: 2 });
+      await expireNow(id);
+      await lifecycle.sweepExpiredHolds();
+      await expect(
+        lifecycle.confirmPaid(BookingType.FLIGHT, id, 'pi_late'),
+      ).rejects.toThrow();
+      expect(await cabinOf(flightId)).toMatchObject({
+        heldSeats: 0,
+        bookedSeats: 0,
+      });
+    });
+
+    it('cancelling a confirmed booking gives its booked seats back', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+      const id = await hold(flightId, { adults: 4 });
+      await lifecycle.confirmPaid(BookingType.FLIGHT, id, 'pi_test_1');
+      expect(await cabinOf(flightId)).toMatchObject({ bookedSeats: 4 });
+
+      await lifecycle.transition(
+        BookingType.FLIGHT,
+        id,
+        BookingStatus.CANCELLED,
+      );
+
+      expect(await cabinOf(flightId)).toMatchObject({
+        bookedSeats: 0,
+        heldSeats: 0,
+      });
+      expect(
+        (
+          await connection
+            .collection('flightBookings')
+            .findOne({ _id: new Types.ObjectId(id) })
+        )?.status,
+      ).toBe(BookingStatus.CANCELLED);
+    });
+
+    it('a pending booking cannot be cancelled (only CONFIRMED can) and nothing changes', async () => {
+      const flightId = await createFlight();
+      await addCabin(flightId, 'ECONOMY', 10);
+      const id = await hold(flightId, { adults: 2 });
+      await expect(
+        lifecycle.transition(BookingType.FLIGHT, id, BookingStatus.CANCELLED),
+      ).rejects.toThrow();
+      expect(await cabinOf(flightId)).toMatchObject({ heldSeats: 2 });
+    });
+
+    it('unknown booking ids are 404, never a crash', async () => {
+      await expect(
+        lifecycle.confirmPaid(
+          BookingType.FLIGHT,
+          new Types.ObjectId().toString(),
+          'pi_x',
+        ),
+      ).rejects.toThrow();
+      await expect(
+        lifecycle.expireIfDue(BookingType.FLIGHT, 'not-an-id'),
+      ).resolves.toBe(false);
+    });
+  });
+
+  describe('POST /api/flight-bookings/:id/cancel (FLT-26)', () => {
+    const CANCEL = (id: string) => `${BOOKING}/${id}/cancel`;
+    let paymentSequence = 0;
+    const uniquePaymentRef = () => `pi_cancel_${++paymentSequence}`;
+
+    async function setCancellationPolicy(
+      tiers: Array<{ daysBeforeThreshold: number; refundPercent: number }>,
+      airlineId = airline.id,
+      moderatorCookie = moderator,
+    ) {
+      await http()
+        .put(`/api/airlines/${airlineId}/cancellation-policy`)
+        .set('Cookie', moderatorCookie)
+        .send({ cancellationTiers: tiers })
+        .expect(200);
+    }
+
+    /** A confirmed booking whose seats are booked (not merely held). */
+    async function confirmedBooking(
+      flightId: string,
+      extra: Record<string, unknown> = {},
+    ) {
+      const id = await hold(flightId, extra);
+      await lifecycle.confirmPaid(BookingType.FLIGHT, id, uniquePaymentRef());
+      return id;
+    }
+
+    /** PAY-03 requires a SUCCEEDED payment before it will issue a refund. */
+    async function seedSucceededPayment(
+      bookingId: string,
+      amountCents: number,
+      paymentRef: string,
+    ) {
+      await connection.collection('payments').insertOne({
+        bookingType: BookingType.FLIGHT,
+        bookingId: new Types.ObjectId(bookingId),
+        userId: new Types.ObjectId(travelerId),
+        stripePaymentIntentId: paymentRef,
+        amountCents,
+        currency: 'USD',
+        status: PaymentStatus.SUCCEEDED,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    }
+
+    const storedStatus = async (id: string) =>
+      (
+        await connection
+          .collection('flightBookings')
+          .findOne({ _id: new Types.ObjectId(id) })
+      )?.status;
+
+    const cancelRequest = (id: string, payload: Record<string, unknown>) =>
+      http().post(CANCEL(id)).set('Cookie', traveler).send(payload);
+
+    it('previews the tier refund without changing the booking, inventory or a refund', async () => {
+      const flightId = await createFlight({ flightNumber: 'MS901' });
+      await addCabin(flightId, 'ECONOMY', 10);
+      await setCancellationPolicy([
+        { daysBeforeThreshold: 30, refundPercent: 50 },
+        { daysBeforeThreshold: 7, refundPercent: 20 },
+        { daysBeforeThreshold: 0, refundPercent: 0 },
+      ]);
+      const bookingId = await confirmedBooking(flightId);
+
+      const preview = await cancelRequest(bookingId, { confirm: false }).expect(
+        200,
+      );
+
+      expect(preview.body).toMatchObject({
+        id: bookingId,
+        status: 'CONFIRMED',
+        cancelled: false,
+        currency: 'USD',
+        totalCents: 45000,
+        refundAmountCents: 22500,
+        refundPercent: 50,
+        appliedTier: { daysBeforeThreshold: 30, refundPercent: 50 },
+        outboundFlightId: flightId,
+        outboundAirlineId: airline.id,
+        refund: null,
+      });
+      expect(preview.body.bookingReference).toMatch(/^FLT-[0-9A-F]{16}$/);
+      expect(preview.body.daysBefore).toBeGreaterThan(30);
+      expect(preview.body).not.toHaveProperty('stripeRefundId');
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CONFIRMED);
+      expect(await cabinOf(flightId)).toMatchObject({
+        heldSeats: 0,
+        bookedSeats: 1,
+      });
+      expect(await connection.collection('refunds').countDocuments()).toBe(0);
+      expect(stripeGateway.refunds.size).toBe(0);
+    });
+
+    it('confirms with the previewed amount: CANCELLED, seats returned, one refund issued', async () => {
+      const flightId = await createFlight({ flightNumber: 'MS902' });
+      await addCabin(flightId, 'ECONOMY', 10);
+      await setCancellationPolicy([{ daysBeforeThreshold: 30, refundPercent: 50 }]);
+      const bookingId = await confirmedBooking(flightId);
+      const paymentRef = uniquePaymentRef();
+      await seedSucceededPayment(bookingId, 45000, paymentRef);
+
+      const preview = await cancelRequest(bookingId, { confirm: false }).expect(
+        200,
+      );
+      const confirmed = await cancelRequest(bookingId, {
+        confirm: true,
+        expectedRefundAmountCents: preview.body.refundAmountCents,
+      }).expect(200);
+
+      expect(confirmed.body).toMatchObject({
+        id: bookingId,
+        status: 'CANCELLED',
+        cancelled: true,
+        totalCents: 45000,
+        refundAmountCents: 22500,
+        refundPercent: 50,
+        appliedTier: { daysBeforeThreshold: 30, refundPercent: 50 },
+      });
+      expect(confirmed.body.refund).toMatchObject({
+        bookingType: 'FLIGHT',
+        bookingId,
+        status: 'REFUNDED',
+        amountCents: 22500,
+        currency: 'USD',
+        reason: 'Flight booking cancelled by traveler',
+      });
+      expect(confirmed.body.refund).not.toHaveProperty('stripePaymentIntentId');
+      expect(confirmed.body.refund).not.toHaveProperty('stripeRefundId');
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CANCELLED);
+      expect(await cabinOf(flightId)).toMatchObject({
+        heldSeats: 0,
+        bookedSeats: 0,
+      });
+      const refunds = await connection.collection('refunds').find({}).toArray();
+      expect(refunds).toHaveLength(1);
+      expect(refunds[0]).toMatchObject({
+        bookingType: 'FLIGHT',
+        amountCents: 22500,
+        currency: 'USD',
+        reason: 'Flight booking cancelled by traveler',
+        stripePaymentIntentId: paymentRef,
+      });
+      expect(stripeGateway.refunds.size).toBe(1);
+
+      // GEN-01: a distinct cancellation notice, separate from the refund notification below.
+      expect(
+        await connection.collection('notifications').countDocuments({
+          userId: new Types.ObjectId(travelerId),
+          type: 'BOOKING_CANCELLED',
+          link: `/flight-bookings/${bookingId}`,
+        }),
+      ).toBe(1);
+      expect(
+        await connection.collection('notifications').countDocuments({
+          userId: new Types.ObjectId(travelerId),
+          type: 'REFUND_UPDATE',
+        }),
+      ).toBeGreaterThan(0);
+
+      // Not just a DB write: the traveler can actually see the cancellation through the real
+      // GET /api/notifications endpoint, same as any other notification.
+      const notificationsPage = await http()
+        .get('/api/notifications')
+        .set('Cookie', traveler)
+        .expect(200);
+      expect(notificationsPage.body.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'BOOKING_CANCELLED',
+            title: 'Flight booking cancelled',
+            link: `/flight-bookings/${bookingId}`,
+          }),
+        ]),
+      );
+
+      // The booking is no longer CONFIRMED: a repeated cancellation is a 409 and changes nothing.
+      await cancelRequest(bookingId, { confirm: false }).expect(409);
+      expect(await connection.collection('refunds').countDocuments()).toBe(1);
+      expect(stripeGateway.refunds.size).toBe(1);
+      // The retry (409, nothing cancelled) sends no additional cancellation notice.
+      expect(
+        await connection.collection('notifications').countDocuments({
+          userId: new Types.ObjectId(travelerId),
+          type: 'BOOKING_CANCELLED',
+          link: `/flight-bookings/${bookingId}`,
+        }),
+      ).toBe(1);
+    });
+
+    it('rejects a changed refund amount (409 with the current amount) and changes nothing until a fresh preview', async () => {
+      const flightId = await createFlight({ flightNumber: 'MS903' });
+      await addCabin(flightId, 'ECONOMY', 10);
+      await setCancellationPolicy([{ daysBeforeThreshold: 30, refundPercent: 50 }]);
+      const bookingId = await confirmedBooking(flightId);
+
+      const preview = await cancelRequest(bookingId, { confirm: false }).expect(
+        200,
+      );
+      expect(preview.body.refundAmountCents).toBe(22500);
+
+      // The airline changes the policy between preview and confirmation.
+      await setCancellationPolicy([{ daysBeforeThreshold: 30, refundPercent: 25 }]);
+
+      const conflict = await cancelRequest(bookingId, {
+        confirm: true,
+        expectedRefundAmountCents: 22500,
+      }).expect(409);
+      expect(conflict.body.message).toContain('11250');
+      expect(conflict.body.details).toEqual([
+        expect.objectContaining({
+          field: 'expectedRefundAmountCents',
+          message: expect.stringContaining('11250'),
+        }),
+      ]);
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CONFIRMED);
+      expect(await cabinOf(flightId)).toMatchObject({
+        heldSeats: 0,
+        bookedSeats: 1,
+      });
+      expect(await connection.collection('refunds').countDocuments()).toBe(0);
+      expect(stripeGateway.refunds.size).toBe(0);
+
+      const fresh = await cancelRequest(bookingId, { confirm: false }).expect(
+        200,
+      );
+      expect(fresh.body.refundAmountCents).toBe(11250);
+
+      const paymentRef = uniquePaymentRef();
+      await seedSucceededPayment(bookingId, 45000, paymentRef);
+      await cancelRequest(bookingId, {
+        confirm: true,
+        expectedRefundAmountCents: fresh.body.refundAmountCents,
+      }).expect(200);
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CANCELLED);
+      expect(await cabinOf(flightId)).toMatchObject({ bookedSeats: 0 });
+      expect(
+        (await connection.collection('refunds').findOne({}))?.amountCents,
+      ).toBe(11250);
+    });
+
+    it('validates confirm and the expected amount: a missing confirmation is never consent', async () => {
+      const flightId = await createFlight({ flightNumber: 'MS904' });
+      await addCabin(flightId, 'ECONOMY', 10);
+      await setCancellationPolicy([{ daysBeforeThreshold: 30, refundPercent: 50 }]);
+      const bookingId = await confirmedBooking(flightId);
+
+      const cases: Array<[Record<string, unknown>, string]> = [
+        [{}, 'confirm'],
+        [{ confirm: 'false' }, 'confirm'],
+        [{ confirm: true }, 'expectedRefundAmountCents'],
+        [{ confirm: true, expectedRefundAmountCents: 1.5 }, 'expectedRefundAmountCents'],
+        [{ confirm: true, expectedRefundAmountCents: -1 }, 'expectedRefundAmountCents'],
+        [{ confirm: false, unexpected: true }, 'unexpected'],
+      ];
+      for (const [payload, field] of cases) {
+        const res = await cancelRequest(bookingId, payload).expect(400);
+        expect(res.body.message).toBe('Validation failed');
+        expect(
+          (res.body.details as Array<{ field: string }>).some(
+            (detail) => detail.field === field,
+          ),
+        ).toBe(true);
+      }
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CONFIRMED);
+      expect(await cabinOf(flightId)).toMatchObject({ bookedSeats: 1 });
+      expect(await connection.collection('refunds').countDocuments()).toBe(0);
+    });
+
+    it('keeps cancellation owner-only: another traveler and an unknown id are 404, roles are enforced', async () => {
+      const flightId = await createFlight({ flightNumber: 'MS905' });
+      await addCabin(flightId, 'ECONOMY', 10);
+      const bookingId = await confirmedBooking(flightId);
+
+      await http()
+        .post(CANCEL(bookingId))
+        .set('Cookie', otherTraveler)
+        .send({ confirm: false })
+        .expect(404);
+      await cancelRequest(new Types.ObjectId().toString(), {
+        confirm: false,
+      }).expect(404);
+      await cancelRequest('not-an-id', { confirm: false }).expect(404);
+      await http()
+        .post(CANCEL(bookingId))
+        .set('Cookie', admin)
+        .send({ confirm: false })
+        .expect(403);
+      await http()
+        .post(CANCEL(bookingId))
+        .send({ confirm: false })
+        .expect(401);
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CONFIRMED);
+      expect(await cabinOf(flightId)).toMatchObject({ bookedSeats: 1 });
+      expect(await connection.collection('refunds').countDocuments()).toBe(0);
+    });
+
+    it('rejects pending, expired, completed and already-cancelled bookings without side effects', async () => {
+      const flightId = await createFlight({ flightNumber: 'MS906' });
+      await addCabin(flightId, 'ECONOMY', 10);
+
+      const pending = await hold(flightId);
+      await cancelRequest(pending, { confirm: false }).expect(409);
+
+      const expired = await hold(flightId);
+      await lifecycle.transition(
+        BookingType.FLIGHT,
+        expired,
+        BookingStatus.EXPIRED,
+      );
+      await cancelRequest(expired, { confirm: false }).expect(409);
+
+      const completed = await confirmedBooking(flightId);
+      await lifecycle.transition(
+        BookingType.FLIGHT,
+        completed,
+        BookingStatus.COMPLETED,
+      );
+      await cancelRequest(completed, { confirm: false }).expect(409);
+
+      await setCancellationPolicy([]);
+      const cancelled = await confirmedBooking(flightId);
+      await cancelRequest(cancelled, {
+        confirm: true,
+        expectedRefundAmountCents: 0,
+      }).expect(200);
+      await cancelRequest(cancelled, { confirm: false }).expect(409);
+
+      expect(await storedStatus(pending)).toBe(BookingStatus.PENDING_PAYMENT);
+      expect(await storedStatus(expired)).toBe(BookingStatus.EXPIRED);
+      expect(await storedStatus(completed)).toBe(BookingStatus.COMPLETED);
+      expect(await storedStatus(cancelled)).toBe(BookingStatus.CANCELLED);
+      // The cancelled booking's seats came back once; the other statuses never released anything here.
+      expect(await cabinOf(flightId)).toMatchObject({
+        heldSeats: 1,
+        bookedSeats: 1,
+      });
+      expect(await connection.collection('refunds').countDocuments()).toBe(0);
+    });
+
+    it('blocks cancellation at or after the outbound departure without side effects', async () => {
+      const flightId = await createFlight({ flightNumber: 'MS907' });
+      await addCabin(flightId, 'ECONOMY', 10);
+      await setCancellationPolicy([{ daysBeforeThreshold: 30, refundPercent: 50 }]);
+      const bookingId = await confirmedBooking(flightId);
+
+      await connection.collection('flights').updateOne(
+        { _id: new Types.ObjectId(flightId) },
+        {
+          $set: {
+            departureAt: new Date('2020-01-01T00:00:00.000Z'),
+            arrivalAt: new Date('2020-01-01T05:00:00.000Z'),
+          },
+        },
+      );
+
+      const preview = await cancelRequest(bookingId, { confirm: false }).expect(
+        409,
+      );
+      expect(preview.body.message).toContain('departure');
+      await cancelRequest(bookingId, {
+        confirm: true,
+        expectedRefundAmountCents: 22500,
+      }).expect(409);
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CONFIRMED);
+      expect(await cabinOf(flightId)).toMatchObject({ bookedSeats: 1 });
+      expect(await connection.collection('refunds').countDocuments()).toBe(0);
+      expect(stripeGateway.refunds.size).toBe(0);
+    });
+
+    it('cancels a zero-refund booking and returns seats without calling PAY-03', async () => {
+      const flightId = await createFlight({ flightNumber: 'MS908' });
+      await addCabin(flightId, 'ECONOMY', 10);
+      await setCancellationPolicy([]);
+      const bookingId = await confirmedBooking(flightId);
+
+      const preview = await cancelRequest(bookingId, { confirm: false }).expect(
+        200,
+      );
+      expect(preview.body).toMatchObject({
+        status: 'CONFIRMED',
+        refundAmountCents: 0,
+        refundPercent: 0,
+        appliedTier: null,
+        refund: null,
+      });
+
+      const confirmed = await cancelRequest(bookingId, {
+        confirm: true,
+        expectedRefundAmountCents: 0,
+      }).expect(200);
+      expect(confirmed.body).toMatchObject({
+        status: 'CANCELLED',
+        cancelled: true,
+        refundAmountCents: 0,
+        refund: null,
+      });
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CANCELLED);
+      expect(await cabinOf(flightId)).toMatchObject({
+        heldSeats: 0,
+        bookedSeats: 0,
+      });
+      expect(await connection.collection('refunds').countDocuments()).toBe(0);
+      expect(stripeGateway.refunds.size).toBe(0);
+
+      // GEN-01: even with nothing to refund (so RefundsService never fires), the traveler still
+      // gets a cancellation notice.
+      expect(
+        await connection.collection('notifications').countDocuments({
+          userId: new Types.ObjectId(travelerId),
+          type: 'BOOKING_CANCELLED',
+          link: `/flight-bookings/${bookingId}`,
+        }),
+      ).toBe(1);
+    });
+
+    it('cancels a round trip as a whole with the outbound airline tier and returns both segments', async () => {
+      const outboundId = await createFlight({ flightNumber: 'MS909' });
+      const returnId = await createFlight(
+        {
+          flightNumber: 'BB910',
+          departureAirport: 'JFK',
+          arrivalAirport: 'CAI',
+          departureLocalTime: '2090-12-02T10:00',
+          arrivalLocalTime: '2090-12-02T18:30',
+        },
+        returnModerator,
+      );
+      await addCabin(outboundId, 'ECONOMY', 10);
+      await addCabin(returnId, 'ECONOMY', 10);
+      // The outbound airline refunds 50%; the return airline would refund 100% if it were used.
+      await setCancellationPolicy([{ daysBeforeThreshold: 30, refundPercent: 50 }]);
+      await setCancellationPolicy(
+        [{ daysBeforeThreshold: 30, refundPercent: 100 }],
+        returnAirline.id,
+        returnModerator,
+      );
+
+      const created = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          segments: [
+            { flightId: outboundId, cabinClass: 'ECONOMY' },
+            { flightId: returnId, cabinClass: 'ECONOMY' },
+          ],
+          passengers: [
+            {
+              fullName: 'Amina Example',
+              dateOfBirth: '2078-12-01',
+              passportOrIdNumber: 'P1234567',
+            },
+          ],
+        })
+        .expect(201);
+      const bookingId = created.body.id as string;
+      const paymentRef = uniquePaymentRef();
+      await lifecycle.confirmPaid(BookingType.FLIGHT, bookingId, paymentRef);
+      await seedSucceededPayment(bookingId, 90000, paymentRef);
+      expect(await cabinOf(outboundId)).toMatchObject({ bookedSeats: 1 });
+      expect(await cabinOf(returnId)).toMatchObject({ bookedSeats: 1 });
+
+      const preview = await cancelRequest(bookingId, { confirm: false }).expect(
+        200,
+      );
+      expect(preview.body).toMatchObject({
+        outboundFlightId: outboundId,
+        outboundAirlineId: airline.id,
+        totalCents: 90000,
+        refundAmountCents: 45000,
+        refundPercent: 50,
+      });
+
+      await cancelRequest(bookingId, {
+        confirm: true,
+        expectedRefundAmountCents: preview.body.refundAmountCents,
+      }).expect(200);
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CANCELLED);
+      expect(await cabinOf(outboundId)).toMatchObject({ bookedSeats: 0 });
+      expect(await cabinOf(returnId)).toMatchObject({ bookedSeats: 0 });
+      expect(await connection.collection('refunds').countDocuments()).toBe(1);
+      expect(
+        (await connection.collection('refunds').findOne({}))?.amountCents,
+      ).toBe(45000);
+    });
+
+    it('lets only one of two concurrent confirmations win: one refund and one seat release', async () => {
+      const flightId = await createFlight({ flightNumber: 'MS911' });
+      await addCabin(flightId, 'ECONOMY', 10);
+      await setCancellationPolicy([{ daysBeforeThreshold: 30, refundPercent: 50 }]);
+      const bookingId = await confirmedBooking(flightId);
+      const paymentRef = uniquePaymentRef();
+      await seedSucceededPayment(bookingId, 45000, paymentRef);
+
+      const payload = { confirm: true, expectedRefundAmountCents: 22500 };
+      const results = await Promise.all([
+        cancelRequest(bookingId, payload),
+        cancelRequest(bookingId, payload),
+      ]);
+
+      expect(results.map((res) => res.status).sort()).toEqual([200, 409]);
+      const winner = results.find((res) => res.status === 200)!;
+      expect(winner.body).toMatchObject({
+        status: 'CANCELLED',
+        refundAmountCents: 22500,
+      });
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CANCELLED);
+      expect(await cabinOf(flightId)).toMatchObject({
+        heldSeats: 0,
+        bookedSeats: 0,
+        totalSeats: 10,
+      });
+      expect(await connection.collection('refunds').countDocuments()).toBe(1);
+      expect(stripeGateway.refunds.size).toBe(1);
+
+      // A later retry is still a 409 and adds nothing.
+      await cancelRequest(bookingId, payload).expect(409);
+      expect(await connection.collection('refunds').countDocuments()).toBe(1);
+      expect(stripeGateway.refunds.size).toBe(1);
+      expect(await cabinOf(flightId)).toMatchObject({ bookedSeats: 0 });
+    });
+
+    it('documents the preview/confirm flow, validation and zero-refund behavior in Swagger', async () => {
+      const docs = await http().get('/api/docs-json').expect(200);
+      const operation = docs.body.paths['/api/flight-bookings/{id}/cancel'].post;
+
+      expect(operation.operationId).toBe('FlightBookingsController_cancel');
+      expect(operation.description).toMatch(/confirm: false/i);
+      expect(operation.description).toMatch(/zero refund/i);
+      expect(operation.description).toMatch(/409/);
+      expect(operation.description).toMatch(/503/);
+      expect(operation.description).toMatch(/recorded amount/i);
+      const requestRef =
+        operation.requestBody.content['application/json'].schema.$ref;
+      const requestSchema =
+        docs.body.components.schemas[requestRef.split('/').pop()];
+      expect(requestSchema.required).toEqual(expect.arrayContaining(['confirm']));
+      expect(requestSchema.properties.confirm).toBeDefined();
+      expect(
+        requestSchema.properties.expectedRefundAmountCents,
+      ).toBeDefined();
+      expect(operation.responses['200']).toBeDefined();
+      expect(operation.responses['400']).toBeDefined();
+      expect(operation.responses['401']).toBeDefined();
+      expect(operation.responses['403']).toBeDefined();
+      expect(operation.responses['404']).toBeDefined();
+      expect(operation.responses['409']).toBeDefined();
+      expect(operation.responses['503']).toBeDefined();
+    });
+
+    describe('a refund that failed is completed by cancelling again', () => {
+      const storedBooking = async (id: string) =>
+        connection
+          .collection('flightBookings')
+          .findOne({ _id: new Types.ObjectId(id) });
+
+      /**
+       * A confirmed booking whose first refund attempt fails at Stripe. It is left CANCELLED with
+       * the amount its cancellation recorded and the seats already returned.
+       */
+      async function cancelledAfterFailedRefund(flightNumber: string) {
+        const flightId = await createFlight({ flightNumber });
+        await addCabin(flightId, 'ECONOMY', 10);
+        await setCancellationPolicy([
+          { daysBeforeThreshold: 30, refundPercent: 50 },
+        ]);
+        const bookingId = await confirmedBooking(flightId);
+        await seedSucceededPayment(bookingId, 45000, uniquePaymentRef());
+        const preview = await cancelRequest(bookingId, {
+          confirm: false,
+        }).expect(200);
+        const refundAmountCents = preview.body.refundAmountCents as number;
+        jest
+          .spyOn(stripeGateway, 'createRefund')
+          .mockRejectedValueOnce(new Error('Stripe is down'));
+        const failed = await cancelRequest(bookingId, {
+          confirm: true,
+          expectedRefundAmountCents: refundAmountCents,
+        }).expect(503);
+        return { flightId, bookingId, refundAmountCents, failed };
+      }
+
+      it('answers 503, keeps the booking CANCELLED with the recorded amount and releases the seats once', async () => {
+        const flightId = await createFlight({ flightNumber: 'MS921' });
+        await addCabin(flightId, 'ECONOMY', 10);
+        await setCancellationPolicy([
+          { daysBeforeThreshold: 30, refundPercent: 50 },
+        ]);
+        const bookingId = await confirmedBooking(flightId);
+        await seedSucceededPayment(bookingId, 45000, uniquePaymentRef());
+        jest
+          .spyOn(stripeGateway, 'createRefund')
+          .mockRejectedValueOnce(new Error('Stripe is down'));
+        const transition = jest.spyOn(lifecycle, 'transition');
+
+        const failed = await cancelRequest(bookingId, {
+          confirm: true,
+          expectedRefundAmountCents: 22500,
+        }).expect(503);
+        expect(failed.body.message).toMatch(/cancelled/i);
+        expect(failed.body.message).toMatch(/again/i);
+        expect(failed.body).not.toHaveProperty('refundAmountCents');
+
+        const stored = await storedBooking(bookingId);
+        expect(stored?.status).toBe(BookingStatus.CANCELLED);
+        expect(stored?.cancellationRefundCents).toBe(22500);
+        expect(stored?.cancellationRequestedAt).toBeInstanceOf(Date);
+        expect(transition).toHaveBeenCalledTimes(1);
+        expect(await cabinOf(flightId)).toMatchObject({
+          heldSeats: 0,
+          bookedSeats: 0,
+          totalSeats: 10,
+        });
+        expect(await connection.collection('refunds').countDocuments()).toBe(0);
+        expect(stripeGateway.refunds.size).toBe(0);
+      });
+
+      it('completes the refund with the confirmed amount and never releases the seats again', async () => {
+        const { flightId, bookingId, refundAmountCents } =
+          await cancelledAfterFailedRefund('MS922');
+        const transition = jest.spyOn(lifecycle, 'transition');
+
+        const retry = await cancelRequest(bookingId, {
+          confirm: true,
+          expectedRefundAmountCents: refundAmountCents,
+        }).expect(200);
+
+        expect(retry.body).toMatchObject({
+          id: bookingId,
+          status: 'CANCELLED',
+          cancelled: true,
+          totalCents: 45000,
+          refundAmountCents,
+          refundPercent: 50,
+          appliedTier: null,
+        });
+        expect(retry.body.refund).toMatchObject({
+          bookingType: 'FLIGHT',
+          bookingId,
+          status: 'REFUNDED',
+          amountCents: refundAmountCents,
+          currency: 'USD',
+          reason: 'Flight booking cancelled by traveler',
+        });
+        expect(retry.body.refund).not.toHaveProperty('stripePaymentIntentId');
+        expect(retry.body.refund).not.toHaveProperty('stripeRefundId');
+
+        // The retry only finishes the refund: the seats were released by the first request.
+        expect(transition).not.toHaveBeenCalled();
+        expect(await cabinOf(flightId)).toMatchObject({
+          heldSeats: 0,
+          bookedSeats: 0,
+          totalSeats: 10,
+        });
+        const refunds = await connection.collection('refunds').find({}).toArray();
+        expect(refunds).toHaveLength(1);
+        expect(refunds[0]).toMatchObject({
+          bookingType: 'FLIGHT',
+          amountCents: refundAmountCents,
+          reason: 'Flight booking cancelled by traveler',
+        });
+        expect(stripeGateway.refunds.size).toBe(1);
+      });
+
+      it('uses the recorded amount, not a changed policy or the departure window of the retry', async () => {
+        const { flightId, bookingId, refundAmountCents } =
+          await cancelledAfterFailedRefund('MS923');
+
+        // The airline raises the tier and the departure moves into the past after the failure.
+        await setCancellationPolicy([
+          { daysBeforeThreshold: 30, refundPercent: 100 },
+        ]);
+        await connection.collection('flights').updateOne(
+          { _id: new Types.ObjectId(flightId) },
+          {
+            $set: {
+              departureAt: new Date('2020-01-01T00:00:00.000Z'),
+              arrivalAt: new Date('2020-01-01T05:00:00.000Z'),
+            },
+          },
+        );
+
+        const retry = await cancelRequest(bookingId, {
+          confirm: true,
+          expectedRefundAmountCents: refundAmountCents,
+        }).expect(200);
+
+        expect(retry.body.refundAmountCents).toBe(refundAmountCents);
+        expect(retry.body.daysBefore).toBeLessThan(0);
+        expect(
+          (await connection.collection('refunds').findOne({}))?.amountCents,
+        ).toBe(refundAmountCents);
+        expect(await storedBooking(bookingId)).toMatchObject({
+          cancellationRefundCents: refundAmountCents,
+        });
+      });
+
+      it('does not issue a duplicate refund and reports the issued refund on a further retry', async () => {
+        const { bookingId, refundAmountCents } =
+          await cancelledAfterFailedRefund('MS924');
+
+        await cancelRequest(bookingId, {
+          confirm: true,
+          expectedRefundAmountCents: refundAmountCents,
+        }).expect(200);
+
+        const again = await cancelRequest(bookingId, {
+          confirm: true,
+          expectedRefundAmountCents: refundAmountCents,
+        }).expect(409);
+        expect(again.body.message).toMatch(/refund was issued/i);
+        expect(await connection.collection('refunds').countDocuments()).toBe(1);
+        expect(stripeGateway.refunds.size).toBe(1);
+      });
+
+      it('handles a zero-refund cancellation without Stripe and refuses a pointless retry', async () => {
+        const flightId = await createFlight({ flightNumber: 'MS925' });
+        await addCabin(flightId, 'ECONOMY', 10);
+        await setCancellationPolicy([]);
+        const bookingId = await confirmedBooking(flightId);
+        const stripe = jest.spyOn(stripeGateway, 'createRefund');
+
+        await cancelRequest(bookingId, {
+          confirm: true,
+          expectedRefundAmountCents: 0,
+        }).expect(200);
+        expect(stripe).not.toHaveBeenCalled();
+        expect(await storedBooking(bookingId)).toMatchObject({
+          cancellationRefundCents: 0,
+        });
+
+        const retry = await cancelRequest(bookingId, {
+          confirm: true,
+          expectedRefundAmountCents: 0,
+        }).expect(409);
+        expect(retry.body.message).toMatch(/nothing left to refund/i);
+        expect(await connection.collection('refunds').countDocuments()).toBe(0);
+        expect(stripeGateway.refunds.size).toBe(0);
+        expect(await cabinOf(flightId)).toMatchObject({
+          heldSeats: 0,
+          bookedSeats: 0,
+        });
+      });
+
+      it('keeps recovery owner-only, refuses a different amount and never invents one for a legacy cancellation', async () => {
+        const { bookingId, refundAmountCents } =
+          await cancelledAfterFailedRefund('MS926');
+
+        await http()
+          .post(CANCEL(bookingId))
+          .set('Cookie', otherTraveler)
+          .send({ confirm: true, expectedRefundAmountCents: refundAmountCents })
+          .expect(404);
+        await http()
+          .post(CANCEL(bookingId))
+          .set('Cookie', admin)
+          .send({ confirm: true, expectedRefundAmountCents: refundAmountCents })
+          .expect(403);
+        const mismatch = await cancelRequest(bookingId, {
+          confirm: true,
+          expectedRefundAmountCents: refundAmountCents + 1,
+        }).expect(409);
+        expect(mismatch.body.message).toContain(String(refundAmountCents));
+        // A preview of a cancelled booking is still a 409.
+        await cancelRequest(bookingId, { confirm: false }).expect(409);
+        expect(await connection.collection('refunds').countDocuments()).toBe(0);
+        expect(stripeGateway.refunds.size).toBe(0);
+
+        // Cancelled outside this route (no recorded amount): no amount is invented.
+        const legacyFlightId = await createFlight({ flightNumber: 'MS927' });
+        await addCabin(legacyFlightId, 'ECONOMY', 10);
+        await setCancellationPolicy([
+          { daysBeforeThreshold: 30, refundPercent: 50 },
+        ]);
+        const legacyBookingId = await confirmedBooking(legacyFlightId);
+        await lifecycle.transition(
+          BookingType.FLIGHT,
+          legacyBookingId,
+          BookingStatus.CANCELLED,
+        );
+
+        const legacyRetry = await cancelRequest(legacyBookingId, {
+          confirm: true,
+          expectedRefundAmountCents: 22500,
+        }).expect(409);
+        expect(legacyRetry.body.message).toMatch(/recorded refund amount/i);
+        expect(await storedBooking(legacyBookingId)).not.toHaveProperty(
+          'cancellationRefundCents',
+        );
+        expect(await connection.collection('refunds').countDocuments()).toBe(0);
+        expect(stripeGateway.refunds.size).toBe(0);
+      });
+
+      it('lets exactly one of two simultaneous retries issue the refund', async () => {
+        const { bookingId, refundAmountCents } =
+          await cancelledAfterFailedRefund('MS928');
+        const payload = {
+          confirm: true,
+          expectedRefundAmountCents: refundAmountCents,
+        };
+
+        const results = await Promise.all([
+          cancelRequest(bookingId, payload),
+          cancelRequest(bookingId, payload),
+        ]);
+
+        // A concurrent loser either completes it too (same refund) or sees it already issued.
+        expect(
+          results.every((res) => res.status === 200 || res.status === 409),
+        ).toBe(true);
+        expect(results.some((res) => res.status === 200)).toBe(true);
+        expect(await connection.collection('refunds').countDocuments()).toBe(1);
+        expect(stripeGateway.refunds.size).toBe(1);
+        const winner = results.find((res) => res.status === 200)!;
+        expect(winner.body.refund.amountCents).toBe(refundAmountCents);
+      });
+    });
+  });
+
+  describe('PATCH /api/flight-bookings/:id/change-flight (FLT-27)', () => {
+    const CHANGE = (id: string) => `${BOOKING}/${id}/change-flight`;
+    let paymentSequence = 0;
+    const uniquePaymentRef = () => `pi_change_${++paymentSequence}`;
+
+    /** A CONFIRMED one-way booking whose seats are booked (not merely held). */
+    async function confirmedBooking(
+      flightId: string,
+      extra: Record<string, unknown> = {},
+    ) {
+      const id = await hold(flightId, extra);
+      await lifecycle.confirmPaid(BookingType.FLIGHT, id, uniquePaymentRef());
+      return id;
+    }
+
+    const storedBooking = (id: string) =>
+      connection
+        .collection('flightBookings')
+        .findOne({ _id: new Types.ObjectId(id) });
+
+    const storedStatus = async (id: string) =>
+      (await storedBooking(id))?.status;
+
+    const changeRequest = (id: string, payload: Record<string, unknown>) =>
+      http().patch(CHANGE(id)).set('Cookie', traveler).send(payload);
+
+    it('moves an owner confirmed booking to another same-route/same-airline flight when the total is unchanged', async () => {
+      await setBaggagePolicy(3000, 2);
+      const oldFlightId = await createFlight({ flightNumber: 'MS930' });
+      const newFlightId = await createFlight({
+        flightNumber: 'MS931',
+        departureLocalTime: '2090-12-03T14:30',
+        arrivalLocalTime: '2090-12-03T19:45',
+      });
+      await addCabin(oldFlightId, 'ECONOMY', 10, 0, 0, 45000);
+      await addCabin(newFlightId, 'ECONOMY', 10, 0, 0, 45000);
+
+      const created = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          flightId: oldFlightId,
+          cabinClass: 'ECONOMY',
+          passengers: [
+            {
+              fullName: 'Amina Example',
+              dateOfBirth: '2078-12-01',
+              passportOrIdNumber: 'P1234567',
+              extraBags: [{ weightKg: 20 }],
+            },
+          ],
+        })
+        .expect(201);
+      const bookingId = created.body.id as string;
+      await lifecycle.confirmPaid(
+        BookingType.FLIGHT,
+        bookingId,
+        uniquePaymentRef(),
+      );
+      const reference = (await storedBooking(bookingId))?.bookingReference;
+      expect(created.body.totalCents).toBe(48000);
+
+      const changed = await changeRequest(bookingId, {
+        flightId: newFlightId,
+      }).expect(200);
+
+      expect(changed.body).toMatchObject({
+        id: bookingId,
+        status: BookingStatus.CONFIRMED,
+        bookingReference: reference,
+        totalCents: 48000,
+        baggageFeeCents: 3000,
+        flight: { id: newFlightId },
+        segments: [
+          {
+            flightId: newFlightId,
+            cabinClass: CabinClass.ECONOMY,
+            seats: 1,
+            farePerPassengerCents: 45000,
+            infantFareCents: 4500,
+            baggageFeeCents: 3000,
+          },
+        ],
+        passengers: [
+          {
+            fullName: 'Amina Example',
+            extraBags: [{ weightKg: 20 }],
+            baggageFeeCents: 3000,
+          },
+        ],
+        refund: null,
+      });
+      expect(changed.body).not.toHaveProperty('paymentRef');
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CONFIRMED);
+      expect(await storedBooking(bookingId)).toMatchObject({
+        flightId: new Types.ObjectId(newFlightId),
+        bookingReference: reference,
+        totalCents: 48000,
+      });
+      expect(await cabinOf(oldFlightId)).toMatchObject({
+        bookedSeats: 0,
+        heldSeats: 0,
+      });
+      expect(await cabinOf(newFlightId)).toMatchObject({
+        bookedSeats: 1,
+        heldSeats: 0,
+      });
+      expect(
+        await connection.collection('flightBookings').countDocuments(),
+      ).toBe(1);
+      expect(await connection.collection('payments').countDocuments()).toBe(0);
+      expect(await connection.collection('refunds').countDocuments()).toBe(0);
+
+      // Repeating the same change is not idempotent success: the flight is already booked.
+      await changeRequest(bookingId, { flightId: newFlightId }).expect(409);
+      expect(await cabinOf(newFlightId)).toMatchObject({ bookedSeats: 1 });
+    });
+
+    it('rejects a different route, airline, the same flight or a missing cabin without touching inventory', async () => {
+      const oldFlightId = await createFlight({ flightNumber: 'MS932' });
+      await addCabin(oldFlightId, 'ECONOMY', 10);
+      const bookingId = await confirmedBooking(oldFlightId);
+
+      const wrongRouteId = await createFlight({
+        flightNumber: 'MS933',
+        departureAirport: 'JFK',
+        arrivalAirport: 'CAI',
+        departureLocalTime: '2090-12-04T10:00',
+        arrivalLocalTime: '2090-12-04T18:30',
+      });
+      await addCabin(wrongRouteId, 'ECONOMY', 10);
+
+      const otherAirlineId = await createFlight(
+        { flightNumber: 'BB934' },
+        returnModerator,
+      );
+      await addCabin(otherAirlineId, 'ECONOMY', 10);
+
+      const noCabinId = await createFlight({
+        flightNumber: 'MS935',
+        departureLocalTime: '2090-12-05T10:00',
+        arrivalLocalTime: '2090-12-05T18:30',
+      });
+      await addCabin(noCabinId, 'BUSINESS', 10);
+
+      await changeRequest(bookingId, { flightId: oldFlightId }).expect(409);
+      await changeRequest(bookingId, { flightId: wrongRouteId }).expect(409);
+      await changeRequest(bookingId, { flightId: otherAirlineId }).expect(409);
+      await changeRequest(bookingId, { flightId: noCabinId }).expect(404);
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CONFIRMED);
+      expect((await storedBooking(bookingId))?.flightId.toString()).toBe(
+        oldFlightId,
+      );
+      expect(await cabinOf(oldFlightId)).toMatchObject({
+        bookedSeats: 1,
+        heldSeats: 0,
+      });
+      expect(await cabinOf(wrongRouteId)).toMatchObject({ bookedSeats: 0 });
+      expect(await cabinOf(otherAirlineId)).toMatchObject({ bookedSeats: 0 });
+      expect(await cabinOf(noCabinId, 'BUSINESS')).toMatchObject({
+        bookedSeats: 0,
+      });
+    });
+
+    it('rejects a higher or lower fare with 409 and creates no payment or refund', async () => {
+      const oldFlightId = await createFlight({ flightNumber: 'MS936' });
+      const higherFlightId = await createFlight({
+        flightNumber: 'MS937',
+        departureLocalTime: '2090-12-04T10:00',
+        arrivalLocalTime: '2090-12-04T18:30',
+      });
+      const lowerFlightId = await createFlight({
+        flightNumber: 'MS938',
+        departureLocalTime: '2090-12-05T10:00',
+        arrivalLocalTime: '2090-12-05T18:30',
+      });
+      await addCabin(oldFlightId, 'ECONOMY', 10, 0, 0, 45000);
+      await addCabin(higherFlightId, 'ECONOMY', 10, 0, 0, 46000);
+      await addCabin(lowerFlightId, 'ECONOMY', 10, 0, 0, 44000);
+      const bookingId = await confirmedBooking(oldFlightId);
+
+      const higher = await changeRequest(bookingId, {
+        flightId: higherFlightId,
+      }).expect(409);
+      expect(higher.body.message).toContain('1000');
+
+      const lower = await changeRequest(bookingId, {
+        flightId: lowerFlightId,
+      }).expect(409);
+      expect(lower.body.message).toContain('-1000');
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CONFIRMED);
+      expect((await storedBooking(bookingId))?.flightId.toString()).toBe(
+        oldFlightId,
+      );
+      expect(await cabinOf(oldFlightId)).toMatchObject({ bookedSeats: 1 });
+      expect(await cabinOf(higherFlightId)).toMatchObject({ bookedSeats: 0 });
+      expect(await cabinOf(lowerFlightId)).toMatchObject({ bookedSeats: 0 });
+      expect(await connection.collection('payments').countDocuments()).toBe(0);
+      expect(await connection.collection('refunds').countDocuments()).toBe(0);
+      expect(stripeGateway.refunds.size).toBe(0);
+    });
+
+    it('rejects ineligible booking statuses and round trips without side effects', async () => {
+      const targetFlightId = await createFlight({ flightNumber: 'MS939' });
+      await addCabin(targetFlightId, 'ECONOMY', 10);
+
+      const pendingFlightId = await createFlight({ flightNumber: 'MS940' });
+      await addCabin(pendingFlightId, 'ECONOMY', 10);
+      const pendingId = await hold(pendingFlightId);
+      await changeRequest(pendingId, { flightId: targetFlightId }).expect(409);
+
+      const completedFlightId = await createFlight({ flightNumber: 'MS941' });
+      await addCabin(completedFlightId, 'ECONOMY', 10);
+      const completedId = await confirmedBooking(completedFlightId);
+      await lifecycle.transition(
+        BookingType.FLIGHT,
+        completedId,
+        BookingStatus.COMPLETED,
+      );
+      await changeRequest(completedId, {
+        flightId: targetFlightId,
+      }).expect(409);
+
+      const cancelledFlightId = await createFlight({ flightNumber: 'MS942' });
+      await addCabin(cancelledFlightId, 'ECONOMY', 10);
+      const cancelledId = await confirmedBooking(cancelledFlightId);
+      await lifecycle.transition(
+        BookingType.FLIGHT,
+        cancelledId,
+        BookingStatus.CANCELLED,
+      );
+      await changeRequest(cancelledId, {
+        flightId: targetFlightId,
+      }).expect(409);
+
+      const outboundId = await createFlight({ flightNumber: 'MS943' });
+      const returnId = await createFlight(
+        {
+          flightNumber: 'BB944',
+          departureAirport: 'JFK',
+          arrivalAirport: 'CAI',
+          departureLocalTime: '2090-12-02T10:00',
+          arrivalLocalTime: '2090-12-02T18:30',
+        },
+        returnModerator,
+      );
+      await addCabin(outboundId, 'ECONOMY', 10);
+      await addCabin(returnId, 'ECONOMY', 10);
+      const roundTrip = await http()
+        .post(BOOKING)
+        .set('Cookie', traveler)
+        .send({
+          segments: [
+            { flightId: outboundId, cabinClass: 'ECONOMY' },
+            { flightId: returnId, cabinClass: 'ECONOMY' },
+          ],
+          passengers: [
+            {
+              fullName: 'Amina Example',
+              dateOfBirth: '2078-12-01',
+              passportOrIdNumber: 'P1234567',
+            },
+          ],
+        })
+        .expect(201);
+      const roundTripId = roundTrip.body.id as string;
+      await lifecycle.confirmPaid(
+        BookingType.FLIGHT,
+        roundTripId,
+        uniquePaymentRef(),
+      );
+      const roundTripChange = await changeRequest(roundTripId, {
+        flightId: targetFlightId,
+      }).expect(409);
+      expect(roundTripChange.body.message).toMatch(/round-trip/i);
+
+      expect(await storedStatus(pendingId)).toBe(
+        BookingStatus.PENDING_PAYMENT,
+      );
+      expect(await storedStatus(completedId)).toBe(BookingStatus.COMPLETED);
+      expect(await storedStatus(cancelledId)).toBe(BookingStatus.CANCELLED);
+      expect(await cabinOf(pendingFlightId)).toMatchObject({ heldSeats: 1 });
+      expect(await cabinOf(completedFlightId)).toMatchObject({ bookedSeats: 1 });
+      expect(await cabinOf(cancelledFlightId)).toMatchObject({ bookedSeats: 0 });
+      expect(await cabinOf(outboundId)).toMatchObject({ bookedSeats: 1 });
+      expect(await cabinOf(returnId)).toMatchObject({ bookedSeats: 1 });
+      expect(await cabinOf(targetFlightId)).toMatchObject({ bookedSeats: 0 });
+    });
+
+    it('rejects a replacement flight that is cancelled or has departed', async () => {
+      const oldFlightId = await createFlight({ flightNumber: 'MS945' });
+      const cancelledFlightId = await createFlight({
+        flightNumber: 'MS946',
+        departureLocalTime: '2090-12-04T10:00',
+        arrivalLocalTime: '2090-12-04T18:30',
+      });
+      const departedFlightId = await createFlight({
+        flightNumber: 'MS947',
+        departureLocalTime: '2090-12-05T10:00',
+        arrivalLocalTime: '2090-12-05T18:30',
+      });
+      await addCabin(oldFlightId, 'ECONOMY', 10);
+      await addCabin(cancelledFlightId, 'ECONOMY', 10);
+      await addCabin(departedFlightId, 'ECONOMY', 10);
+      const bookingId = await confirmedBooking(oldFlightId);
+
+      await connection
+        .collection('flights')
+        .updateOne(
+          { _id: new Types.ObjectId(cancelledFlightId) },
+          { $set: { status: 'CANCELLED' } },
+        );
+      await connection.collection('flights').updateOne(
+        { _id: new Types.ObjectId(departedFlightId) },
+        {
+          $set: {
+            departureAt: new Date('2020-01-01T00:00:00.000Z'),
+            arrivalAt: new Date('2020-01-01T05:00:00.000Z'),
+          },
+        },
+      );
+
+      await changeRequest(bookingId, {
+        flightId: cancelledFlightId,
+      }).expect(409);
+      await changeRequest(bookingId, {
+        flightId: departedFlightId,
+      }).expect(409);
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CONFIRMED);
+      expect((await storedBooking(bookingId))?.flightId.toString()).toBe(
+        oldFlightId,
+      );
+      expect(await cabinOf(oldFlightId)).toMatchObject({ bookedSeats: 1 });
+      expect(await cabinOf(cancelledFlightId)).toMatchObject({ bookedSeats: 0 });
+      expect(await cabinOf(departedFlightId)).toMatchObject({ bookedSeats: 0 });
+    });
+
+    it('rechecks the replacement inside the transaction when it is cancelled just before the change', async () => {
+      const oldFlightId = await createFlight({ flightNumber: 'MS956' });
+      const targetFlightId = await createFlight({
+        flightNumber: 'MS957',
+        departureLocalTime: '2090-12-04T10:00',
+        arrivalLocalTime: '2090-12-04T18:30',
+      });
+      await addCabin(oldFlightId, 'ECONOMY', 10);
+      await addCabin(targetFlightId, 'ECONOMY', 10);
+      const bookingId = await confirmedBooking(oldFlightId);
+
+      const inventory = app.get(FlightInventoryService);
+      const loadBookableFlight = inventory.loadBookableFlight.bind(inventory);
+      // FLT-06 cancels the replacement after the pre-check passed and before the transaction reads
+      // it again, which is exactly the window the in-transaction re-read must close.
+      const cancelAfterPrecheck = jest
+        .spyOn(inventory, 'loadBookableFlight')
+        .mockImplementation(async (flightId, now) => {
+          const flight = await loadBookableFlight(flightId, now);
+          await connection
+            .collection('flights')
+            .updateOne(
+              { _id: new Types.ObjectId(flightId) },
+              { $set: { status: 'CANCELLED' } },
+            );
+          return flight;
+        });
+
+      let res;
+      try {
+        res = await changeRequest(bookingId, {
+          flightId: targetFlightId,
+        }).expect(409);
+      } finally {
+        cancelAfterPrecheck.mockRestore();
+      }
+      expect(res.body.message).toMatch(/not open for booking/i);
+      expect(res.body.message).toMatch(/CANCELLED/);
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CONFIRMED);
+      expect((await storedBooking(bookingId))?.flightId.toString()).toBe(
+        oldFlightId,
+      );
+      expect(await cabinOf(oldFlightId)).toMatchObject({
+        bookedSeats: 1,
+        heldSeats: 0,
+      });
+      expect(await cabinOf(targetFlightId)).toMatchObject({
+        bookedSeats: 0,
+        heldSeats: 0,
+      });
+      expect(await connection.collection('payments').countDocuments()).toBe(0);
+      expect(await connection.collection('refunds').countDocuments()).toBe(0);
+      expect(stripeGateway.refunds.size).toBe(0);
+      expect(
+        (
+          await connection.collection('flights').findOne({
+            _id: new Types.ObjectId(targetFlightId),
+          })
+        )?.status,
+      ).toBe('CANCELLED');
+    });
+
+    it('rejects a replacement with too few seats and leaves the original booking intact', async () => {
+      const oldFlightId = await createFlight({ flightNumber: 'MS948' });
+      const fullFlightId = await createFlight({
+        flightNumber: 'MS949',
+        departureLocalTime: '2090-12-04T10:00',
+        arrivalLocalTime: '2090-12-04T18:30',
+      });
+      await addCabin(oldFlightId, 'ECONOMY', 10);
+      // One total seat, already held by somebody else: zero available.
+      await addCabin(fullFlightId, 'ECONOMY', 1, 0, 1, 45000);
+      const bookingId = await confirmedBooking(oldFlightId);
+
+      const res = await changeRequest(bookingId, {
+        flightId: fullFlightId,
+      }).expect(409);
+      expect(res.body.message).toMatch(/seats/i);
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CONFIRMED);
+      expect((await storedBooking(bookingId))?.flightId.toString()).toBe(
+        oldFlightId,
+      );
+      expect(await cabinOf(oldFlightId)).toMatchObject({
+        bookedSeats: 1,
+        heldSeats: 0,
+      });
+      expect(await cabinOf(fullFlightId)).toMatchObject({
+        bookedSeats: 0,
+        heldSeats: 1,
+      });
+    });
+
+    it('lets only one of two concurrent changes win without overselling or releasing the old seats twice', async () => {
+      const oldFlightId = await createFlight({ flightNumber: 'MS950' });
+      const targetFlightId = await createFlight({
+        flightNumber: 'MS951',
+        departureLocalTime: '2090-12-04T10:00',
+        arrivalLocalTime: '2090-12-04T18:30',
+      });
+      await addCabin(oldFlightId, 'ECONOMY', 10);
+      await addCabin(targetFlightId, 'ECONOMY', 1);
+      const bookingId = await confirmedBooking(oldFlightId);
+
+      const results = await Promise.all([
+        changeRequest(bookingId, { flightId: targetFlightId }),
+        changeRequest(bookingId, { flightId: targetFlightId }),
+      ]);
+
+      expect(results.map((res) => res.status).sort()).toEqual([200, 409]);
+      const winner = results.find((res) => res.status === 200)!;
+      expect(winner.body).toMatchObject({
+        id: bookingId,
+        status: BookingStatus.CONFIRMED,
+        flight: { id: targetFlightId },
+      });
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CONFIRMED);
+      expect((await storedBooking(bookingId))?.flightId.toString()).toBe(
+        targetFlightId,
+      );
+      expect(await cabinOf(oldFlightId)).toMatchObject({
+        bookedSeats: 0,
+        heldSeats: 0,
+      });
+      expect(await cabinOf(targetFlightId)).toMatchObject({
+        bookedSeats: 1,
+        heldSeats: 0,
+      });
+      expect(
+        await connection.collection('flightBookings').countDocuments(),
+      ).toBe(1);
+      expect(await connection.collection('payments').countDocuments()).toBe(0);
+      expect(await connection.collection('refunds').countDocuments()).toBe(0);
+    });
+
+    it('keeps the change owner-only and role USER only', async () => {
+      const oldFlightId = await createFlight({ flightNumber: 'MS952' });
+      const targetFlightId = await createFlight({
+        flightNumber: 'MS953',
+        departureLocalTime: '2090-12-04T10:00',
+        arrivalLocalTime: '2090-12-04T18:30',
+      });
+      await addCabin(oldFlightId, 'ECONOMY', 10);
+      await addCabin(targetFlightId, 'ECONOMY', 10);
+      const bookingId = await confirmedBooking(oldFlightId);
+
+      await http()
+        .patch(CHANGE(bookingId))
+        .set('Cookie', otherTraveler)
+        .send({ flightId: targetFlightId })
+        .expect(404);
+      await changeRequest(new Types.ObjectId().toString(), {
+        flightId: targetFlightId,
+      }).expect(404);
+      await changeRequest('not-an-id', { flightId: targetFlightId }).expect(404);
+      await http()
+        .patch(CHANGE(bookingId))
+        .set('Cookie', admin)
+        .send({ flightId: targetFlightId })
+        .expect(403);
+      await http()
+        .patch(CHANGE(bookingId))
+        .send({ flightId: targetFlightId })
+        .expect(401);
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CONFIRMED);
+      expect((await storedBooking(bookingId))?.flightId.toString()).toBe(
+        oldFlightId,
+      );
+      expect(await cabinOf(oldFlightId)).toMatchObject({ bookedSeats: 1 });
+      expect(await cabinOf(targetFlightId)).toMatchObject({ bookedSeats: 0 });
+    });
+
+    it('validates flightId with one field-level detail per bad field', async () => {
+      const oldFlightId = await createFlight({ flightNumber: 'MS954' });
+      const targetFlightId = await createFlight({
+        flightNumber: 'MS955',
+        departureLocalTime: '2090-12-04T10:00',
+        arrivalLocalTime: '2090-12-04T18:30',
+      });
+      await addCabin(oldFlightId, 'ECONOMY', 10);
+      await addCabin(targetFlightId, 'ECONOMY', 10);
+      const bookingId = await confirmedBooking(oldFlightId);
+
+      const cases: Array<[Record<string, unknown>, string]> = [
+        [{}, 'flightId'],
+        [{ flightId: 'not-an-id' }, 'flightId'],
+        [{ flightId: targetFlightId, unexpected: true }, 'unexpected'],
+      ];
+      for (const [payload, field] of cases) {
+        const res = await changeRequest(bookingId, payload).expect(400);
+        expect(res.body.message).toBe('Validation failed');
+        expect(
+          (res.body.details as Array<{ field: string }>).some(
+            (detail) => detail.field === field,
+          ),
+        ).toBe(true);
+      }
+
+      expect(await storedStatus(bookingId)).toBe(BookingStatus.CONFIRMED);
+      expect((await storedBooking(bookingId))?.flightId.toString()).toBe(
+        oldFlightId,
+      );
+      expect(await cabinOf(oldFlightId)).toMatchObject({ bookedSeats: 1 });
+      expect(await cabinOf(targetFlightId)).toMatchObject({ bookedSeats: 0 });
+    });
+
+    it('documents the route, request schema, errors and equal-fare rule in Swagger', async () => {
+      const docs = await http().get('/api/docs-json').expect(200);
+      const operation =
+        docs.body.paths['/api/flight-bookings/{id}/change-flight'].patch;
+
+      expect(operation.operationId).toBe(
+        'FlightBookingsController_changeFlight',
+      );
+      expect(operation.description).toMatch(/round-trip/i);
+      expect(operation.description).toMatch(/no price difference/i);
+      expect(operation.description).toMatch(/old booked seats/i);
+      expect(operation.description).toMatch(/409/);
+      const requestRef =
+        operation.requestBody.content['application/json'].schema.$ref;
+      const requestSchema =
+        docs.body.components.schemas[requestRef.split('/').pop()];
+      expect(requestSchema.required).toEqual(
+        expect.arrayContaining(['flightId']),
+      );
+      expect(requestSchema.properties.flightId).toBeDefined();
+      for (const status of ['200', '400', '401', '403', '404', '409']) {
+        expect(operation.responses[status]).toBeDefined();
+      }
+    });
+  });
+
+  describe('flight booking completion sweep (GEN-11)', () => {
+    /** A Flight whose arrivalAt is already in the past, bypassing FLT-03's "no past departure" rule. */
+    async function arrivedFlight(flightNumber: string, arrivedDaysAgo = 1) {
+      const flightId = await createFlight({ flightNumber });
+      await addCabin(flightId, 'ECONOMY', 10);
+      await connection.collection('flights').updateOne(
+        { _id: new Types.ObjectId(flightId) },
+        {
+          $set: {
+            departureAt: new Date(Date.now() - (arrivedDaysAgo + 1) * 86_400_000),
+            arrivalAt: new Date(Date.now() - arrivedDaysAgo * 86_400_000),
+          },
+        },
+      );
+      return flightId;
+    }
+
+    /** A CONFIRMED booking inserted directly (bypassing FLT-22's hold flow) so its flight(s) can already have arrived. */
+    async function confirmedBookingFor(
+      segments: Array<{ flightId: string; airlineId?: string }>,
+    ) {
+      const id = new Types.ObjectId();
+      const segment = (flightId: string, airlineId: string) => ({
+        flightId: new Types.ObjectId(flightId),
+        airlineId: new Types.ObjectId(airlineId),
+        cabinClass: 'ECONOMY',
+        seats: 1,
+        farePerPassengerCents: 45000,
+        infantFareCents: 4500,
+        baggageFeeCents: 0,
+      });
+      await connection.collection('flightBookings').insertOne({
+        _id: id,
+        userId: new Types.ObjectId(travelerId),
+        airlineId: new Types.ObjectId(segments[0].airlineId ?? airline.id),
+        flightId: new Types.ObjectId(segments[0].flightId),
+        segments: segments.map((s) => segment(s.flightId, s.airlineId ?? airline.id)),
+        cabinClass: 'ECONOMY',
+        passengerCounts: { adults: 1, children: 0, infants: 0 },
+        seats: 1,
+        farePerPassengerCents: 45000,
+        infantFareCents: 4500,
+        totalCents: 45000,
+        currency: 'USD',
+        status: BookingStatus.CONFIRMED,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      return id;
+    }
+
+    const statusOf = async (id: Types.ObjectId) =>
+      (await connection.collection('flightBookings').findOne({ _id: id }))?.status;
+
+    it('completes a one-way booking once its only flight has arrived', async () => {
+      const flightId = await arrivedFlight('MS930');
+      const bookingId = await confirmedBookingFor([{ flightId }]);
+
+      const service = app.get(FlightBookingsService);
+      await expect(service.completePastFlights(new Date())).resolves.toBe(1);
+
+      expect(await statusOf(bookingId)).toBe(BookingStatus.COMPLETED);
+    });
+
+    it('leaves a booking CONFIRMED while its flight has not arrived yet', async () => {
+      const flightId = await createFlight({ flightNumber: 'MS931' });
+      await addCabin(flightId, 'ECONOMY', 10);
+      const bookingId = await confirmedBookingFor([{ flightId }]);
+
+      const service = app.get(FlightBookingsService);
+      await expect(service.completePastFlights(new Date())).resolves.toBe(0);
+
+      expect(await statusOf(bookingId)).toBe(BookingStatus.CONFIRMED);
+    });
+
+    it('completes a round trip only once its return leg (the last segment) has arrived, not the outbound alone', async () => {
+      const outboundId = await arrivedFlight('MS932', 5);
+      const notYetReturnId = await createFlight({ flightNumber: 'MS933' });
+      await addCabin(notYetReturnId, 'ECONOMY', 10);
+      const stillOutbound = await confirmedBookingFor([
+        { flightId: outboundId },
+        { flightId: notYetReturnId },
+      ]);
+
+      const arrivedReturnId = await arrivedFlight('MS934', 1);
+      const completedRoundTrip = await confirmedBookingFor([
+        { flightId: outboundId },
+        { flightId: arrivedReturnId },
+      ]);
+
+      const service = app.get(FlightBookingsService);
+      await expect(service.completePastFlights(new Date())).resolves.toBe(1);
+
+      expect(await statusOf(stillOutbound)).toBe(BookingStatus.CONFIRMED);
+      expect(await statusOf(completedRoundTrip)).toBe(BookingStatus.COMPLETED);
+    });
+
+    it('is idempotent and leaves non-CONFIRMED bookings alone', async () => {
+      const flightId = await arrivedFlight('MS935');
+      const bookingId = await confirmedBookingFor([{ flightId }]);
+
+      const service = app.get(FlightBookingsService);
+      await expect(service.completePastFlights(new Date())).resolves.toBe(1);
+      await expect(service.completePastFlights(new Date())).resolves.toBe(0);
+      expect(await statusOf(bookingId)).toBe(BookingStatus.COMPLETED);
+    });
+
+    it('completes a legacy booking with no segments array, via the top-level flightId fallback', async () => {
+      const flightId = await arrivedFlight('MS936');
+      const id = new Types.ObjectId();
+      await connection.collection('flightBookings').insertOne({
+        _id: id,
+        userId: new Types.ObjectId(travelerId),
+        airlineId: new Types.ObjectId(airline.id),
+        flightId: new Types.ObjectId(flightId),
+        // No `segments` field at all: pre-FLT-12 shape.
+        cabinClass: 'ECONOMY',
+        passengerCounts: { adults: 1, children: 0, infants: 0 },
+        seats: 1,
+        farePerPassengerCents: 45000,
+        infantFareCents: 4500,
+        totalCents: 45000,
+        currency: 'USD',
+        status: BookingStatus.CONFIRMED,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const service = app.get(FlightBookingsService);
+      await expect(service.completePastFlights(new Date())).resolves.toBe(1);
+
+      expect(await statusOf(id)).toBe(BookingStatus.COMPLETED);
+    });
+
+    it('leaves a CONFIRMED booking alone when its last flight was cancelled, even if its arrival has passed', async () => {
+      const flightId = await arrivedFlight('MS937');
+      await connection
+        .collection('flights')
+        .updateOne({ _id: new Types.ObjectId(flightId) }, { $set: { status: FlightStatus.CANCELLED } });
+      const bookingId = await confirmedBookingFor([{ flightId }]);
+
+      const service = app.get(FlightBookingsService);
+      await expect(service.completePastFlights(new Date())).resolves.toBe(0);
+
+      expect(await statusOf(bookingId)).toBe(BookingStatus.CONFIRMED);
+    });
+  });
+});

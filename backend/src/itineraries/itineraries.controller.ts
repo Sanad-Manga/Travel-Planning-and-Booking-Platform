@@ -1,0 +1,196 @@
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
+import {
+  ApiCreatedResponse,
+  ApiNoContentResponse,
+  ApiOkResponse,
+  ApiOperation,
+} from '@nestjs/swagger';
+import {
+  ApiPaginatedResponse,
+  AuthenticatedUser,
+  CurrentUser,
+  PaginationDto,
+} from '../common';
+import { CreateItineraryDayDto } from './dto/create-itinerary-day.dto';
+import { CreateItineraryDto } from './dto/create-itinerary.dto';
+import { ItineraryDayParamDto } from './dto/itinerary-day-param.dto';
+import { ItineraryDayDto } from './dto/itinerary-day.dto';
+import { ItineraryIdParamDto } from './dto/itinerary-id-param.dto';
+import { ItineraryResponseDto } from './dto/itinerary-response.dto';
+import { ItineraryRowDto } from './dto/itinerary-row.dto';
+import { ReorderDaysDto } from './dto/reorder-days.dto';
+import { UpdateItineraryDayDto } from './dto/update-itinerary-day.dto';
+import { UpdateItineraryDto } from './dto/update-itinerary.dto';
+import { ItinerariesService } from './itineraries.service';
+import {
+  ApiBadRequest,
+  ApiNotFound,
+  ITINERARY_NOT_FOUND,
+  ITINERARY_OR_DAY_NOT_FOUND,
+  UserRoutes,
+} from './itineraries.swagger';
+
+// Itineraries belong to registered users (ITN-01), so every route needs the USER role (see UserRoutes).
+// Ownership of a given itinerary is checked in the service. Public routes are in ItinerariesPublicController;
+// what is added to an itinerary (activities, budget, transport) is in ItineraryItemsController.
+@UserRoutes('itineraries')
+@Controller('itineraries')
+export class ItinerariesController {
+  constructor(private readonly itineraries: ItinerariesService) {}
+
+  @Post()
+  @ApiOperation({
+    summary: 'Create an itinerary (private by default) - ITN-01',
+  })
+  @ApiCreatedResponse({ type: ItineraryResponseDto })
+  @ApiBadRequest(
+    'Missing or too long title, no country, an unknown country code, an invalid start date, or an unknown field',
+  )
+  create(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: CreateItineraryDto,
+  ) {
+    return this.itineraries.create(user, dto);
+  }
+
+  @Get()
+  @ApiOperation({
+    summary:
+      'List my itineraries, most recently updated first (page size 10 by default) - ITN-03',
+  })
+  @ApiPaginatedResponse(ItineraryRowDto)
+  @ApiBadRequest('Invalid page or limit')
+  listMine(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: PaginationDto,
+  ) {
+    return this.itineraries.listMine(user, query);
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Open one of my itineraries - ITN-03' })
+  @ApiOkResponse({ type: ItineraryResponseDto })
+  @ApiBadRequest('id is not a valid id')
+  @ApiNotFound(ITINERARY_NOT_FOUND)
+  findMine(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: ItineraryIdParamDto,
+  ) {
+    return this.itineraries.findMine(user, params.id);
+  }
+
+  @Patch(':id')
+  @ApiOperation({
+    summary:
+      'Edit my itinerary: title, countries and/or start date (ITN-01), visibility PUBLIC or PRIVATE (ITN-20)',
+  })
+  @ApiOkResponse({ type: ItineraryResponseDto })
+  @ApiBadRequest(
+    'Invalid id, title, countries, start date or visibility, an unknown field, or an empty body',
+  )
+  @ApiNotFound(ITINERARY_NOT_FOUND)
+  update(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: ItineraryIdParamDto,
+    @Body() dto: UpdateItineraryDto,
+  ) {
+    return this.itineraries.update(user, params.id, dto);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary:
+      'Delete my itinerary (the client asks for confirmation first). Clones made by others stay - ITN-01',
+  })
+  @ApiNoContentResponse({ description: 'Deleted' })
+  @ApiBadRequest('id is not a valid id')
+  @ApiNotFound(ITINERARY_NOT_FOUND)
+  remove(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: ItineraryIdParamDto,
+  ) {
+    return this.itineraries.remove(user, params.id);
+  }
+
+  @Post(':id/days')
+  @ApiOperation({
+    summary:
+      'Add a day at the end of my itinerary: city and notes; number and date are derived (max 60 days) - ITN-05',
+  })
+  @ApiCreatedResponse({ type: ItineraryDayDto })
+  @ApiBadRequest(
+    'Invalid id, missing or unknown city, notes too long, an unknown field, or the itinerary already has 60 days',
+  )
+  @ApiNotFound(ITINERARY_NOT_FOUND)
+  addDay(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: ItineraryIdParamDto,
+    @Body() dto: CreateItineraryDayDto,
+  ) {
+    return this.itineraries.addDay(user, params.id, dto);
+  }
+
+  // Declared before ':id/days/:dayId' so "reorder" is not read as a day id (which would answer 400).
+  @Patch(':id/days/reorder')
+  @ApiOperation({
+    summary:
+      'Move one day of my itinerary to a new position; the days are renumbered and re-dated and the city groups follow - ITN-08',
+  })
+  @ApiOkResponse({ type: ItineraryResponseDto })
+  @ApiBadRequest(
+    'Invalid id or dayId, a position that is missing, not a whole number, below 1 or after the last day, or an unknown field',
+  )
+  @ApiNotFound(ITINERARY_OR_DAY_NOT_FOUND)
+  reorderDay(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: ItineraryIdParamDto,
+    @Body() dto: ReorderDaysDto,
+  ) {
+    return this.itineraries.reorderDay(user, params.id, dto);
+  }
+
+  @Patch(':id/days/:dayId')
+  @ApiOperation({
+    summary: 'Edit a day of my itinerary: city and/or notes - ITN-05',
+  })
+  @ApiOkResponse({ type: ItineraryDayDto })
+  @ApiBadRequest(
+    'Invalid id or dayId, unknown city, notes too long, an unknown field, or an empty body',
+  )
+  @ApiNotFound(ITINERARY_OR_DAY_NOT_FOUND)
+  updateDay(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: ItineraryDayParamDto,
+    @Body() dto: UpdateItineraryDayDto,
+  ) {
+    return this.itineraries.updateDay(user, params.id, params.dayId, dto);
+  }
+
+  @Delete(':id/days/:dayId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary:
+      'Delete a day of my itinerary (the client asks for confirmation first). The other days are renumbered and re-dated by themselves - ITN-07',
+  })
+  @ApiNoContentResponse({ description: 'Deleted' })
+  @ApiBadRequest('id or dayId is not a valid id')
+  @ApiNotFound(ITINERARY_OR_DAY_NOT_FOUND)
+  removeDay(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: ItineraryDayParamDto,
+  ) {
+    return this.itineraries.removeDay(user, params.id, params.dayId);
+  }
+}

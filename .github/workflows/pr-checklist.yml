@@ -1,0 +1,36 @@
+name: PR checklist
+
+# Fails while any "- [ ]" box is left unticked in the PR description.
+# Make the "checklist" job a required status check on develop (branch protection).
+on:
+  pull_request:
+    branches: [develop]
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+jobs:
+  checklist:
+    name: checklist
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every checklist item to be ticked
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # Ignore HTML comments (the template's hints), then look for unticked boxes.
+          body="$(printf '%s' "$PR_BODY" | tr -d '\r' | perl -0pe 's/<!--.*?-->//gs')"
+          if [ -z "$(printf '%s' "$body" | tr -d '[:space:]')" ]; then
+            echo "::error::PR description is empty. Use the PR template."
+            exit 1
+          fi
+          if ! printf '%s\n' "$body" | grep -qiE '^\s*[-*] \[[xX]\]'; then
+            echo "::error::No ticked checklist found. Keep the checklist from the PR template."
+            exit 1
+          fi
+          unchecked="$(printf '%s\n' "$body" | grep -E '^\s*[-*] \[ \]' || true)"
+          if [ -n "$unchecked" ]; then
+            echo "::error::Unticked checklist items remain. Tick them (after really checking) before review:"
+            printf '%s\n' "$unchecked"
+            exit 1
+          fi
+          echo "All checklist items are ticked."

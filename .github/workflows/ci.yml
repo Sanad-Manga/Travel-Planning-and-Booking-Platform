@@ -1,0 +1,122 @@
+name: CI
+
+# Runs on every pull request into develop AND on every push to develop (a merge). Same steps as the manual
+# review: clean install from the lock file, build, lint, unit tests, e2e tests.
+# The push run is the alarm: a merge that breaks develop shows up as a red run on develop within minutes.
+# No secrets needed: the tests use an in-memory MongoDB (mongodb-memory-server).
+on:
+  pull_request:
+    branches: [develop]
+  push:
+    branches: [develop]
+
+# A newer push to the same PR cancels the older run. Runs on develop are never cancelled: each merge is checked.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Decides in a few seconds whether the backend needs its ~5 minute build + test run. A pull request that only
+  # touches frontend/, docs/ or Markdown files skips it. The `backend` check below is still reported (a job skipped by
+  # its own `if` counts as passed for a required status check), so the branch rule is satisfied either way.
+  # Every push to develop (a merge) always runs everything: the develop alarm never skips.
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+    steps:
+      # On a pull request the checked-out commit is the merge of the PR into develop, so its first parent is develop
+      # and `git diff HEAD^1 HEAD` is exactly what this PR changes.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - id: filter
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(git diff --name-only HEAD^1 HEAD)
+          echo "$changed"
+          # Anything outside frontend/, docs/, *.md and AI_PROMPTS.txt (every PR edits it) may affect the backend (code, lock file, workflows, hooks).
+          if echo "$changed" | grep -qvE '^(frontend/|docs/|AI_PROMPTS\.txt$)|\.md$'; then
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "backend=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  backend:
+    name: backend
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      # mongodb-memory-server downloads a ~100 MB mongod binary on first use; keep it between runs.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}-${{ hashFiles('backend/package-lock.json') }}
+          restore-keys: mongodb-binaries-${{ runner.os }}-
+
+      - name: Install (fails if package-lock.json is out of sync)
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
+      - name: E2E tests
+        run: npm run test:e2e
+
+  # Frontend (Milestone 2): same idea as the backend job. Clean install from the lock file, then lint,
+  # typecheck, unit tests and a production build. No backend or database is needed: the tests do not call the API.
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install (fails if package-lock.json is out of sync)
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build

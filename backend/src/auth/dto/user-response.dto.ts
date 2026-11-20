@@ -1,0 +1,63 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { AccountStatus, Role } from '../../common';
+import { UserDocument } from '../../users/schemas/user.schema';
+
+/** What the API returns for a user. Never includes the password hash. `_id` is exposed as `id`. */
+export class UserResponseDto {
+  @ApiProperty({ example: '6730a1f2c3d4e5f607182930' })
+  id: string;
+
+  @ApiPropertyOptional({ description: 'True only for a restricted session requiring password replacement. Only me, change-password and logout are permitted; refresh is rejected.' })
+  mustChangePassword?: boolean;
+
+  @ApiProperty({ example: 'Ali Hassan' })
+  name: string;
+
+  @ApiProperty({ example: 'ali@example.com' })
+  email: string;
+
+  @ApiProperty({ enum: Role, example: Role.USER })
+  role: Role;
+
+  @ApiProperty({ enum: AccountStatus, example: AccountStatus.ACTIVE })
+  status: AccountStatus;
+
+  @ApiProperty({ example: true, description: 'False only while the registration email link has not been used yet; booking is blocked until then. Accounts without the flag count as verified.' })
+  emailVerified: boolean;
+
+  @ApiPropertyOptional({ description: 'Only for airline moderators.' })
+  airlineId?: string;
+
+  @ApiPropertyOptional({ description: 'Only for hotel moderators.' })
+  hotelId?: string;
+
+  @ApiProperty({ example: 'USD' })
+  preferredCurrency: string;
+
+  @ApiPropertyOptional({ example: '+201001234567', description: 'Only present once the user has set a phone number.' })
+  phone?: string;
+
+  @ApiProperty({ example: '2026-11-03T10:00:00.000Z' })
+  consentAcceptedAt: string;
+
+  @ApiProperty({ example: '2026-11-03T10:00:00.000Z' })
+  createdAt: string;
+
+  static from(user: UserDocument): UserResponseDto {
+    return {
+      id: user.id,
+      ...(user.mustChangePassword ? { mustChangePassword: true } : {}),
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      status: user.status,
+      emailVerified: user.emailVerified !== false,
+      ...(user.airlineId ? { airlineId: user.airlineId.toString() } : {}),
+      ...(user.hotelId ? { hotelId: user.hotelId.toString() } : {}),
+      preferredCurrency: user.preferredCurrency,
+      ...(user.phone ? { phone: user.phone } : {}),
+      consentAcceptedAt: user.consentAcceptedAt.toISOString(),
+      createdAt: (user.createdAt ?? new Date()).toISOString(),
+    };
+  }
+}
