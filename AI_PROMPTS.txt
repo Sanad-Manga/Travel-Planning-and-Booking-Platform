@@ -2371,6 +2371,15 @@ Prompt:
 Fix the GEN-10 bug found in review: PATCH /api/admin/reports/:id marks the report resolved first and then hides or deletes the content, so if the content step fails the report stays resolved with the content still live and a retry answers 409. Prove it with a failing test first. Also remove the stale "REVIEW answers 501" Swagger text, since hotel reviews are handled.
 How the output was used:
 Added unit tests for the failure cases, then changed ReportsAdminService.resolve so a failed hide or delete puts the report back to OPEN and rethrows, while content that is already gone (404) keeps the report resolved. Updated the two controllers' Swagger text. I reviewed the code and ran build, lint, the admin unit tests and the GEN-10 e2e spec.
+
+Date: 2026-11-19
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: Milestone 2 setup (frontend scaffold, groundwork for GEN-03 and GEN-04)
+Prompt:
+Scaffold the Next.js app in frontend/ so the Milestone 2 tickets (starting with GEN-03 confirm before destructive actions and GEN-04 friendly empty states) have somewhere to go: App Router and TypeScript, exact pinned versions like the backend, lint and typecheck scripts, and the backend API reachable from the same origin so the httpOnly auth cookies work.
+How the output was used:
+Created frontend/ with Next.js 16, React 19 and TypeScript 5.9 (pinned), a root layout and home page, a flat ESLint config, an /api/* rewrite to the backend (BACKEND_URL, default http://localhost:3001), .env.example and a README. I ran npm install, lint, typecheck and build myself; no ticket features are in this PR.
 Date: 2026-11-20
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
