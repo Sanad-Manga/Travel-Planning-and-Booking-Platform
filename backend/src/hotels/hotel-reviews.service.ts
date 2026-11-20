@@ -19,6 +19,7 @@ import { UsersService } from '../users/users.service';
 import { CreateHotelReviewDto } from './dto/create-hotel-review.dto';
 import { HotelReviewItemDto } from './dto/hotel-details-response.dto';
 import { HotelReviewsResponseDto } from './dto/hotel-reviews-page.dto';
+import { ReplyToHotelReviewDto } from './dto/reply-to-hotel-review.dto';
 import { UpdateHotelReviewDto } from './dto/update-hotel-review.dto';
 import { HotelBookingsService } from './hotel-bookings.service';
 import {
@@ -44,6 +45,8 @@ interface HotelReviewAggregation {
     comment: string;
     authorName: string;
     createdAt: Date;
+    reply?: string;
+    repliedAt?: Date;
   }>;
 }
 
@@ -309,6 +312,8 @@ export class HotelReviewsService {
                     ],
                   },
                   createdAt: 1,
+                  reply: 1,
+                  repliedAt: 1,
                 },
               },
             ],
@@ -327,6 +332,8 @@ export class HotelReviewsService {
         comment: review.comment,
         authorName: review.authorName,
         createdAt: review.createdAt.toISOString(),
+        reply: review.reply,
+        repliedAt: review.repliedAt?.toISOString(),
       })),
     };
   }
@@ -435,6 +442,8 @@ export class HotelReviewsService {
       comment: review.comment ?? '',
       authorName,
       createdAt: review.createdAt.toISOString(),
+      reply: review.reply,
+      repliedAt: review.repliedAt?.toISOString(),
     };
   }
 
@@ -451,6 +460,41 @@ export class HotelReviewsService {
           ? 'Deleted user'
           : author.name,
       createdAt: review.createdAt.toISOString(),
+      reply: review.reply,
+      repliedAt: review.repliedAt?.toISOString(),
     };
+  }
+
+  /**
+   * HTL-26: the hotel moderator of the reviewed hotel replies to (or edits) the reply on a review.
+   * Wrong hotel is 403, not 404 (docs/contracts.md section on ownership: the review is already public,
+   * so there is nothing to hide about its existence - only the write is restricted).
+   */
+  async reply(
+    id: string,
+    actor: AuthenticatedUser,
+    dto: ReplyToHotelReviewDto,
+  ): Promise<HotelReviewItemDto> {
+    if (actor.role !== Role.HOTEL_MODERATOR) {
+      throw new ForbiddenException('Only a hotel moderator can reply to a review');
+    }
+    const reviewId = this.parseReviewId(id);
+    const current = await this.reviews.findById(reviewId).lean<HotelReviewLean>().exec();
+    if (!current) throw new NotFoundException('Review not found');
+    if (!actor.hotelId || current.hotelId.toString() !== actor.hotelId) {
+      throw new ForbiddenException('You can only reply to reviews of your own hotel');
+    }
+
+    const updated = await this.reviews
+      .findByIdAndUpdate(
+        reviewId,
+        { $set: { reply: dto.reply, repliedAt: new Date() } },
+        { new: true, runValidators: true },
+      )
+      .lean<HotelReviewLean>()
+      .exec();
+    if (!updated) throw new NotFoundException('Review not found');
+
+    return this.toItem(updated, await this.authorName(updated.authorId.toString()));
   }
 }

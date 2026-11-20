@@ -2463,6 +2463,34 @@ nobody uses gives an empty page. Added the three routes to the GEN-05 pagination
 
 
 Date: 2026-11-20
+Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code)
+Related Requirement: SCRUM-115 [BONUS HTL-26] Hotel moderator replies to a review
+Prompt:
+Picked up SCRUM-115 (assigned to me, bonus, blocked-by HTL-23 already Done): a hotel moderator replies to a review of
+their own hotel via POST /api/reviews/:id/reply. Touches Hessain's HotelReview schema (flagged per the ticket's own
+checklist). Plan it, then implement with real tests.
+How the output was used:
+Added optional reply/repliedAt fields to HotelReview (Hessain's schema, additive only). Added
+ReplyToHotelReviewDto (required, trimmed, non-empty, max 1000 chars - new HOTEL_REVIEW_REPLY_MAX_LENGTH constant) and
+POST /api/reviews/:id/reply (role HOTEL_MODERATOR) in HotelReviewsController/Service. Ownership: wrong-hotel moderator
+is 403, not 404 (the review is already public via GET /api/hotels/:id and its /reviews page, so there is nothing to
+hide about its existence - matches docs/contracts.md's rule that a moderator touching another provider's public
+resource gets 403). Replying again replaces the previous reply (edit, not append) since the ticket's acceptance
+criteria has no "already replied" rejection. The reply is surfaced publicly: added reply/repliedAt to
+HotelReviewItemDto and populated them in toItem/toPublicItem (create/update/reply responses, GET /api/hotels/:id/reviews)
+and the getSummary aggregation's $project (GET /api/hotels/:id) - both public read paths, not just one.
+Added two e2e cases to hotel-bookings.e2e-spec.ts (which already owns the review fixtures and traveler/admin cookies):
+a hotel moderator replies to and then edits a reply on their own hotel's review, visible through both public read
+paths; and 403 for the wrong hotel's moderator/a traveler/an admin, 404 for an unknown review, 400 for an
+empty/whitespace-only or over-1000-character reply. Added moderatorCookie/otherHotelModeratorCookie fixtures (same
+pattern as the existing traveler/admin cookies) to that file's beforeAll.
+Verification: npx tsc --noEmit -p ., npx eslint (changed files), npm run build and npm run lint (full) all clean.
+npx jest src/hotels --silent 65/65 passed. npx jest --config ./test/jest-e2e.json test/hotel-bookings.e2e-spec.ts
+--maxWorkers=1 25/25 passed (including both new HTL-26 cases) and test/hotel-reviews.e2e-spec.ts (public review list,
+unaffected) 5/5 passed. Not done: no docs/contracts.md update (reviews are not in its cross-module signature tables);
+no manual Swagger click-through against Atlas (covered by the e2e Swagger-documentation convention this module
+already follows for its other review endpoints).
 Student: Ahmed Sanad
 Tool: Claude Code (Claude Sonnet 5.5)
 Related Requirement: FLT-28 (SCRUM-114, seat selection, bonus)
