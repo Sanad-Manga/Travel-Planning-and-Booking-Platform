@@ -2452,3 +2452,32 @@ How the output was used:
 Added three read-only controllers in the reference-data module, ordered by the official code, mapping to small response DTOs so no
 MongoDB fields leak. countryCode is trimmed and upper-cased and must be two letters (field-level 400 otherwise); a well-formed code
 nobody uses gives an empty page. Added the three routes to the GEN-05 pagination table and a new e2e spec (11 tests).
+
+Date: 2026-11-20
+Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code)
+Related Requirement: SCRUM-112 (BONUS GEN-01-B) Email notifications via SMTP — reopened to To Do
+Prompt:
+GEN-01-B was reopened: the SMTP side (EmailService, NotificationsService's own email side-effect) was already done (#123),
+but the requirement also says moderator invitations are sent by email. ModeratorAccountsService.create() creates the
+account with an admin-typed temporaryPassword and never emails it; email.service.ts's own doc comment names exactly this
+as the intended use for EmailService (a one-off transactional email that must never go through notify(), which would
+persist the plaintext password into the readable notifications collection). Wire the invitation email in, without
+breaking account creation if the email fails, and no real addresses sent in development; tell Ziad when the API is ready.
+How the output was used:
+Added EmailModule to AdminModule's imports and EmailService to ModeratorAccountsService's constructor. After account
+creation AND its audit log both succeed (not before — a failed audit write already tells the admin "do not create it
+again, tell the lead", so nothing should be emailed for an account whose own creation record is in a bad state), a
+private sendInvite() sends the moderator's name, email and the plaintext temporary password through EmailService.send(),
+wrapped in its own try/catch that only logs and never rethrows, so a down SMTP server cannot fail account creation.
+No new "no real addresses in development" work was needed: SmtpEmailSender (GEN-01-B's own existing code) already falls
+back to a throwaway Ethereal test inbox whenever SMTP_HOST isn't configured, and NODE_ENV=test already swaps in
+NoopEmailSender for every e2e spec — both pre-existing safeguards, confirmed by reading email-sender.ts and
+email.module.ts, not re-implemented here.
+Added three cases to moderator-accounts.service.spec.ts: the invitation is sent through EmailService (not notify()) with
+the temporary password in its body; a failed send is swallowed and the account is still created; no invitation is sent
+when the audit write fails (the whole operation already answers 500).
+Verification: npx tsc --noEmit -p ., npx eslint (changed files), npm run build all clean; npx jest src/admin --silent
+163/163 passed; npx jest --config ./test/jest-e2e.json test/admin-moderators.e2e-spec.ts --maxWorkers=1 --silent 16/16
+passed. Not done: no full local e2e/unit suite run (CI covers that); no manual Swagger click-through against Atlas (no
+Swagger-visible change — the invite is an internal side-effect of an existing endpoint).

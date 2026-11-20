@@ -54,6 +54,7 @@ describe('ModeratorAccountsService (ACC-13, collaborators are test doubles)', ()
   let airlines: { exists: jest.Mock };
   let hotels: { getPolicies: jest.Mock };
   let audit: { log: jest.Mock };
+  let email: { send: jest.Mock };
   let service: ModeratorAccountsService;
 
   beforeEach(() => {
@@ -72,11 +73,13 @@ describe('ModeratorAccountsService (ACC-13, collaborators are test doubles)', ()
     airlines = { exists: jest.fn().mockResolvedValue(true) };
     hotels = { getPolicies: jest.fn().mockResolvedValue({}) };
     audit = { log: jest.fn().mockResolvedValue(undefined) };
+    email = { send: jest.fn().mockResolvedValue(undefined) };
     service = new ModeratorAccountsService(
       users as never,
       airlines as never,
       hotels as never,
       audit as never,
+      email as never,
     );
   });
 
@@ -122,6 +125,27 @@ describe('ModeratorAccountsService (ACC-13, collaborators are test doubles)', ()
       details: { role: Role.HOTEL_MODERATOR, hotelId },
     });
     expect(JSON.stringify(entry)).not.toContain(temporaryPassword);
+  });
+
+  it('sends an invitation email with the temporary password, through EmailService, not notify()', async () => {
+    await run();
+    expect(email.send).toHaveBeenCalledTimes(1);
+    const sent = email.send.mock.calls[0][0] as { to: string; subject: string; text: string };
+    expect(sent.to).toBe('hala@example.test');
+    expect(sent.text).toContain(temporaryPassword);
+  });
+
+  it('still creates the account and does not throw when the invitation email fails', async () => {
+    email.send.mockRejectedValue(new Error('SMTP down'));
+    const res = await run();
+    expect(res.id).toEqual(expect.any(String));
+    expect(email.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends no invitation email when the audit record fails (creation itself answers 500)', async () => {
+    audit.log.mockRejectedValue(new Error('audit down'));
+    await failure(run());
+    expect(email.send).not.toHaveBeenCalled();
   });
 
   it.each([

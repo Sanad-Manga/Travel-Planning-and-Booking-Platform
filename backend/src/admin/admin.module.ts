@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { Airline, AirlineSchema } from '../airlines/schemas/airline.schema';
 import { AuditModule } from '../audit/audit.module';
 import { BlogModule } from '../blog/blog.module';
+import { EmailModule } from '../email';
 import {
   FlightBooking,
   FlightBookingSchema,
@@ -64,6 +65,7 @@ import { TemporaryPasswordService } from './temporary-password.service';
     ]),
     AuditModule,
     NotificationsModule,
+    EmailModule,
     AirlinesModule,
     HotelsModule,
     // GEN-10: ReportsService + the Report model (and Post/Itinerary again, harmlessly, via its
