@@ -343,6 +343,33 @@ describe('GEN-10 admin resolves reports: dismiss, hide, delete (actual AppModule
       expect(hotel!.reviewCount).toBe(1);
     });
 
+    it('deletes an itinerary together with its activities, budget entries, transport costs and linked bookings', async () => {
+      const itineraryId = new Types.ObjectId();
+      const otherItineraryId = new Types.ObjectId();
+      await db.collection('itineraries').insertMany([
+        { _id: itineraryId, authorId, title: 'Doomed', days: [], isHidden: false },
+        { _id: otherItineraryId, authorId, title: 'Survivor', days: [], isHidden: false },
+      ]);
+      for (const collection of ['activities', 'budgets', 'transportCosts', 'itineraryBookings']) {
+        await db.collection(collection).insertMany([{ itineraryId }, { itineraryId: otherItineraryId }]);
+      }
+
+      await http().delete(`/api/admin/content/ITINERARY/${itineraryId}`).set('Cookie', admin()).expect(204);
+
+      expect(await db.collection('itineraries').findOne({ _id: itineraryId })).toBeNull();
+      for (const collection of ['activities', 'budgets', 'transportCosts', 'itineraryBookings']) {
+        expect(await db.collection(collection).countDocuments({ itineraryId })).toBe(0);
+        expect(await db.collection(collection).countDocuments({ itineraryId: otherItineraryId })).toBe(1);
+      }
+      expect(await db.collection('itineraries').findOne({ _id: otherItineraryId })).not.toBeNull();
+      const logged = await db.collection('auditLogs').findOne({ action: 'CONTENT_DELETED', targetId: String(itineraryId) });
+      expect(logged).not.toBeNull();
+    });
+
+    it('answers 404 for an unknown itinerary', async () => {
+      await http().delete(`/api/admin/content/ITINERARY/${new Types.ObjectId()}`).set('Cookie', admin()).expect(404);
+    });
+
     it('answers 400 for an invalid content type', async () => {
       await http().delete(`/api/admin/content/NOPE/${new Types.ObjectId()}`).set('Cookie', admin()).expect(400);
     });

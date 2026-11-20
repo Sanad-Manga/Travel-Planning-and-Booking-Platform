@@ -8,6 +8,7 @@ import { Comment } from '../blog/schemas/comment.schema';
 import { Post } from '../blog/schemas/post.schema';
 import { Hotel } from '../hotels/schemas/hotel.schema';
 import { HotelReview } from '../hotels/schemas/hotel-review.schema';
+import { ItinerariesService } from '../itineraries/itineraries.service';
 import { Itinerary } from '../itineraries/schemas/itinerary.schema';
 
 /**
@@ -42,6 +43,7 @@ export class AdminContentService {
     @InjectModel(Post.name) private readonly posts: Model<Post>,
     @InjectConnection() private readonly connection: Connection,
     private readonly audit: AuditService,
+    private readonly itinerariesService: ItinerariesService,
   ) {}
 
   /** Every call here is independently audit-logged (CONTENT_HIDDEN), whether reached directly or
@@ -82,13 +84,7 @@ export class AdminContentService {
         await this.deleteComment(id);
         break;
       case ContentType.ITINERARY: {
-        // KNOWN GAP: activities/transportCosts/budgets belonging to this itinerary are NOT
-        // cascaded here (ItinerariesModule exports only ItinerariesService, which is ownership-
-        // scoped to the caller and has no admin-capable remove path, and no admin-safe variant is
-        // published) — flagged in the PR description for Yassin, same as the REVIEW gap for the
-        // eventual reviews module owner.
-        const result = await this.itineraries.deleteOne({ _id: id }).exec();
-        if (result.deletedCount === 0) throw new NotFoundException('Itinerary not found');
+        await this.itinerariesService.removeAsAdmin(id);
         break;
       }
       case ContentType.REVIEW:

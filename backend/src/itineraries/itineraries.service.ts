@@ -164,9 +164,28 @@ export class ItinerariesService {
     if (result.deletedCount === 0) {
       throw new NotFoundException('Itinerary not found');
     }
-    await this.activities.removeForItinerary(new Types.ObjectId(id));
-    await this.transportCosts.removeForItinerary(new Types.ObjectId(id));
-    await this.budgets.removeForItinerary(new Types.ObjectId(id));
+    await this.removeDependents(new Types.ObjectId(id));
+  }
+
+  /**
+   * GEN-10: an administrator deletes any itinerary (no ownership filter). The same cleanup as the owner's
+   * delete: activities (and their images), transport costs, budget entries and linked bookings go with it.
+   */
+  async removeAsAdmin(id: string): Promise<void> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new NotFoundException('Itinerary not found');
+    }
+    const result = await this.model.deleteOne({ _id: id }).exec();
+    if (result.deletedCount === 0) {
+      throw new NotFoundException('Itinerary not found');
+    }
+    await this.removeDependents(new Types.ObjectId(id));
+  }
+
+  private async removeDependents(itineraryId: Types.ObjectId): Promise<void> {
+    await this.activities.removeForItinerary(itineraryId);
+    await this.transportCosts.removeForItinerary(itineraryId);
+    await this.budgets.removeForItinerary(itineraryId);
   }
 
   /**
