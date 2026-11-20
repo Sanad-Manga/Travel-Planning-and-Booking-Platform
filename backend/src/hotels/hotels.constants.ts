@@ -43,3 +43,6 @@ export const ROOM_STATUS_MAX_DAYS = 62;
 export const HOTEL_REVIEW_MIN_RATING = 1;
 export const HOTEL_REVIEW_MAX_RATING = 5;
 export const HOTEL_REVIEW_MAX_LENGTH = 1000;
+
+// HTL-26 moderator reply limit.
+export const HOTEL_REVIEW_REPLY_MAX_LENGTH = 1000;

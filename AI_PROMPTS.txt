@@ -2463,6 +2463,34 @@ nobody uses gives an empty page. Added the three routes to the GEN-05 pagination
 
 
 Date: 2026-11-20
+Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code)
+Related Requirement: SCRUM-115 [BONUS HTL-26] Hotel moderator replies to a review
+Prompt:
+Picked up SCRUM-115 (assigned to me, bonus, blocked-by HTL-23 already Done): a hotel moderator replies to a review of
+their own hotel via POST /api/reviews/:id/reply. Touches Hessain's HotelReview schema (flagged per the ticket's own
+checklist). Plan it, then implement with real tests.
+How the output was used:
+Added optional reply/repliedAt fields to HotelReview (Hessain's schema, additive only). Added
+ReplyToHotelReviewDto (required, trimmed, non-empty, max 1000 chars - new HOTEL_REVIEW_REPLY_MAX_LENGTH constant) and
+POST /api/reviews/:id/reply (role HOTEL_MODERATOR) in HotelReviewsController/Service. Ownership: wrong-hotel moderator
+is 403, not 404 (the review is already public via GET /api/hotels/:id and its /reviews page, so there is nothing to
+hide about its existence - matches docs/contracts.md's rule that a moderator touching another provider's public
+resource gets 403). Replying again replaces the previous reply (edit, not append) since the ticket's acceptance
+criteria has no "already replied" rejection. The reply is surfaced publicly: added reply/repliedAt to
+HotelReviewItemDto and populated them in toItem/toPublicItem (create/update/reply responses, GET /api/hotels/:id/reviews)
+and the getSummary aggregation's $project (GET /api/hotels/:id) - both public read paths, not just one.
+Added two e2e cases to hotel-bookings.e2e-spec.ts (which already owns the review fixtures and traveler/admin cookies):
+a hotel moderator replies to and then edits a reply on their own hotel's review, visible through both public read
+paths; and 403 for the wrong hotel's moderator/a traveler/an admin, 404 for an unknown review, 400 for an
+empty/whitespace-only or over-1000-character reply. Added moderatorCookie/otherHotelModeratorCookie fixtures (same
+pattern as the existing traveler/admin cookies) to that file's beforeAll.
+Verification: npx tsc --noEmit -p ., npx eslint (changed files), npm run build and npm run lint (full) all clean.
+npx jest src/hotels --silent 65/65 passed. npx jest --config ./test/jest-e2e.json test/hotel-bookings.e2e-spec.ts
+--maxWorkers=1 25/25 passed (including both new HTL-26 cases) and test/hotel-reviews.e2e-spec.ts (public review list,
+unaffected) 5/5 passed. Not done: no docs/contracts.md update (reviews are not in its cross-module signature tables);
+no manual Swagger click-through against Atlas (covered by the e2e Swagger-documentation convention this module
+already follows for its other review endpoints).
 Student: Ahmed Sanad
 Tool: Claude Code (Claude Sonnet 5.5)
 Related Requirement: FLT-28 (SCRUM-114, seat selection, bonus)
@@ -2637,7 +2665,6 @@ ACC-02 is back to To Do: RequireVerifiedEmail is used on no booking route. Add @
 How the output was used:
 Added the decorator to POST /api/flight-bookings (a round trip is the same route with two segments), POST /api/flight-bookings/hold and POST /api/hotel-bookings. Added booking-requires-verified-email.e2e-spec.ts, which runs the real AppModule and checks 403 "Verify your email before booking" for emailVerified=false, no 403 for verified and field-less users, and 401 for guests. Updated the route table in docs/api/email-verification.md and the Swagger text in auth.controller.ts. Payments are left unguarded on purpose (a booking already needs a verified user).
 
-================================================
 
 Date: 2026-11-20
 Student: Ahmed Sanad
@@ -2650,3 +2677,62 @@ How the output was used:
 Added seatSelections to the booking summary and GET /api/flight-bookings/:id/seat-map (every seat of the cabin as FREE, TAKEN or YOURS,
 computed from live claims only, so a cancelled booking's seats show as free; optional flightId for a round trip). 5 more e2e tests
 (21 in the file). The seat chart is a bounded structure, not a paged list.
+Related Requirement: Test stability follow-up to issue #119 (no requirement ID)
+Prompt:
+Diagnose the "Upload storage or indexes could not be initialized" failure that hit all tests of one e2e suite once under a parallel
+Jest run and then passed on the next run. Do not call it flaky without a cause.
+How the output was used:
+The error was thrown from a bare catch, so the real reason was lost. I tried to reproduce the concurrent-directory theory with a
+stress script (300 rounds of 6 parallel initialisations: no failure) and then kept the same error message but attached the original
+error as its cause, so the next occurrence names the real failure. No behaviour change.
+Date: 2026-11-20
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GEN-17 (GitHub issue #150), plus the frontend CI job
+Prompt:
+Build the shared design tokens and form/card/table styles for the frontend on the existing .btn, .btn-primary and .btn-danger classes in globals.css without changing the confirm-dialog or empty-state styles, add a labelled TextField (hint, field-level error, aria) and a Card with tests, and add a frontend CI job (install, lint, typecheck, test, build).
+How the output was used:
+Appended a GEN-17 section to globals.css (colour, type and spacing tokens with dark-mode values, .btn-sm/.btn-block, .field-*, .card, .table, reduced-motion) and left every existing rule untouched. Added TextField and Card components with tests (21 frontend tests pass; lint, typecheck pass). Added a "frontend" job to ci.yml.
+
+Date: 2026-11-20
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GEN-16
+Prompt:
+Build clear feedback for user actions (Spinner, Skeleton, Alert with optional Try again action, a toast provider with useToast) and a helper that turns the API error shape and network/401/403/404/409/429 (Retry-After)/5xx failures into a friendly message, recovery hint and field-error map; add mobile-first responsive CSS (about 40rem and 64rem breakpoints, scrolling tables, 44px touch targets). Tests first, frontend only, no new dependencies, extend globals.css without changing existing rules.
+How the output was used:
+Added Spinner, Skeleton, Alert, ToastProvider/useToast and lib/apiError (toFriendlyError, failureFromResponse) with tests written first, appended a GEN-16 section to globals.css, and mounted ToastProvider inside ConfirmProvider in layout.tsx.
+
+Date: 2026-11-20
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GEN-14
+Prompt:
+Build the app shell with clear information architecture in the frontend: a skip link as the first focusable element, a Header with the site name and primary nav (Home, Flights, Hotels, Itineraries, Blog, Login, Register) with aria-current on the current page, a mobile menu button with aria-expanded and aria-controls that closes on route change and Escape, a main landmark with id main-content and tabIndex -1, a Footer, and coming-soon placeholder pages so no link 404s. Tests first, no new dependencies, extend globals.css only.
+How the output was used:
+Added SkipLink, Header, Footer, AppShell and ComingSoon components plus placeholder pages for flights, hotels, itineraries, blog, login and register, with tests written first. Appended a GEN-14 section to globals.css, wrapped the layout children in AppShell, and removed the page-level main from the home page so there is a single main landmark.
+
+Date: 2026-11-20
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GEN-15
+Prompt:
+Build reusable usability pieces for the frontend: PageHeader (h1, description, one primary action slot), Breadcrumbs (nav aria-label Breadcrumb, last item aria-current page), FormActions (primary button first, visible cancel, primary disabled with a Spinner while submitting) and Steps (aria-current step). Use them on the GEN-14 placeholder pages, add a short Wording and flow guide to frontend/README.md, tests first, no new dependencies, extend globals.css only.
+How the output was used:
+Added the four components with tests written first, appended a GEN-15 section to globals.css, rebuilt ComingSoon on PageHeader and Breadcrumbs with a description per placeholder page, and added the Wording and flow guide to the frontend README.
+
+Date: 2026-11-20
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-10
+Prompt:
+Build the frontend API client (same-origin /api, credentials include, JSON, ApiError from the backend error shape, one refresh and one retry on 401, then redirect to login with returnTo), AuthProvider/useAuth (me, login, logout, loading), RequireAuth, a /login page with field-level errors and an Alert, a strict safeReturnTo (same-site single-slash path only, decoded before checking), and a sessionStorage record of only a path and action name to resume an action after login. Header shows Login/Register for guests and Account/Logout when logged in. Tests first, no new dependencies, frontend only, nothing sensitive in web storage.
+How the output was used:
+Added lib/returnTo, lib/pendingAction and lib/api with tests (hostile returnTo inputs, ApiError mapping, single shared refresh and retry), AuthProvider, RequireAuth and LoginForm with tests, the login, account and forgot-password pages, Header account links with logout, and AuthProvider in the layout. Updated the GEN-14 header and shell tests for the new auth dependency and the placeholder test (login is a real page now).
+Student: Ahmed Sanad
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: CI tooling (no ticket)
+Prompt:
+Why are the frontend PRs waiting for the backend CI check? Make the CI skip the backend job when a PR only changes frontend or docs.
+How the output was used:
+Added a small `changes` job to .github/workflows/ci.yml that lists the files a pull request changes (git diff HEAD^1 HEAD on the merge commit). The `backend` job now needs it and runs only when something outside frontend/, docs/, *.md and AI_PROMPTS.txt changed (every PR edits AI_PROMPTS.txt, so it must not count). A job skipped by its own `if` is reported as passed to the required `backend` check, so branch protection still works. Pushes to develop always run everything. Checked the YAML parses and tested the path rule on sample file lists; the real proof is this PR's own run (it touches ci.yml, so backend runs) and a frontend-only PR afterwards.

@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Param,
   Patch,
+  Post,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
@@ -26,6 +27,7 @@ import {
   Roles,
 } from '../common';
 import { HotelReviewItemDto } from './dto/hotel-details-response.dto';
+import { ReplyToHotelReviewDto } from './dto/reply-to-hotel-review.dto';
 import { UpdateHotelReviewDto } from './dto/update-hotel-review.dto';
 import { HotelReviewsService } from './hotel-reviews.service';
 
@@ -88,5 +90,34 @@ export class HotelReviewsController {
     @Param('id') id: string,
   ): Promise<void> {
     await this.reviews.delete(id, user);
+  }
+
+  @Post(':id/reply')
+  @Roles(Role.HOTEL_MODERATOR)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reply to a review of your hotel (HTL-26)',
+    description:
+      'Only the moderator of the reviewed hotel can reply. Sending a reply again replaces the previous one.',
+  })
+  @ApiOkResponse({ type: HotelReviewItemDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: 'Reply is empty or too long',
+  })
+  @ApiForbiddenResponse({
+    type: ErrorResponseDto,
+    description: 'Only a hotel moderator can reply, and only to their own hotel\'s reviews',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'Review not found',
+  })
+  reply(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: ReplyToHotelReviewDto,
+  ): Promise<HotelReviewItemDto> {
+    return this.reviews.reply(id, user, dto);
   }
 }

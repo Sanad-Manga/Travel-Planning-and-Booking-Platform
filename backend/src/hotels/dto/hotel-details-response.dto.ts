@@ -19,6 +19,16 @@ export class HotelReviewItemDto {
 
   @ApiProperty({ example: '2026-11-20T14:30:00.000Z' })
   createdAt: string;
+
+  @ApiProperty({
+    required: false,
+    example: 'Thank you for staying with us!',
+    description: 'The hotel moderator\'s reply, if any (HTL-26).',
+  })
+  reply?: string;
+
+  @ApiProperty({ required: false, example: '2026-11-21T09:00:00.000Z' })
+  repliedAt?: string;
 }
 
 /** Public hotel details page (HTL-02). Only an ACTIVE hotel is returned. */
