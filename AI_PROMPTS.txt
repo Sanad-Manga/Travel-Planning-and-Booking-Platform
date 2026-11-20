@@ -2321,6 +2321,14 @@ Added cancellationRefundCents/cancellationRequestedAt to the flight booking sche
 Verification: npm run build passed; npm run lint passed; focused unit npx jest --runInBand "src/flights" "src/refunds" "src/payments/refund-calculator" 64/64 passed; npx jest --config ./test/jest-e2e.json flight-bookings-hold --runInBand 86/86 passed (19 FLT-26); refunds-concurrency 1/1 passed.
 
 Date: 2026-11-19
+Student: Abdulrahman Mohamad Hosny
+Tool: OpenCode (DeepSeek V4.1 Flash Free)
+Related Requirement: FLT-27 (BONUS: change a confirmed flight booking; Flights-owned equal-fare slice)
+Prompt:
+Implement only the Flights-owned part of FLT-27 on PATCH /api/flight-bookings/:id/change-flight: owner-only USER access, only CONFIRMED one-way bookings, another same-route/same-cabin/same-airline flight, seats and replacement status validated, old seats released only on success, and any fare difference answered 409. The lead-approved decisions are to reject round trips with 409 for now and allow only the same airline. Do not touch Payments, Refunds, common/, Airlines or any other owner's production code. Record the still-missing Payments contract for a change charge with its own reference/idempotency key and for several refunds per payment in docs/contracts.md as future work. Add focused unit/E2E/Swagger coverage, append this entry, then build, lint, run the focused Flights/Payments/refund/pagination suites, commit and push.
+How the output was used:
+Added ChangeFlightBookingDto ({ flightId }, Mongo id) and PATCH /api/flight-bookings/:id/change-flight with role USER, ownership through the existing service-side assertOwner/404 convention, and Swagger for 200/400/401/403/404/409. FlightBookingsService.changeFlight rejects any non-CONFIRMED booking, round trips, the same flight, a departed booked flight, and a replacement that is not bookable, changes route or airline, lacks the booked cabin, cannot carry the booked baggage or lacks seats. It recomputes the replacement total from the stored passenger counts, stored segment baggage fee and current replacement cabin fare; only an unchanged total is accepted, and higher/lower differences are 409 with the difference. No payment or refund is created. One MongoDB transaction conditionally reserves the replacement's booked seats with the shared availability filter, updates the booking only while it is still CONFIRMED on the old flight, writes the new segment/top-level pricing, then returns the old booked seats; a failure or concurrent winner aborts the transaction, so old seats are never released early or twice and the replacement cannot be oversold. The booking id, reference, passengers, payment reference and status are preserved and the shared summary response returns the updated confirmed booking. Added a pure replacementTotalCents/fareDifferenceCents helper with unit tests. Documented the equal-fare Flights contract and the deferred Payments createBookingCharge/getBookingCharge and multi-refund/issueAdjustment contracts (explicitly not implemented). Added 10 E2E tests: equal-fare change with baggage and preserved reference, wrong route/airline/same flight/missing cabin, higher and lower fare 409, ineligible statuses and round trip, cancelled/departed replacement, seat shortage, two concurrent changes, owner/role isolation, field validation and Swagger. No Payments, Refunds, common/, Airlines or other production code changed.
+Verification: npm run build passed; npm run lint passed; npx jest --runInBand "src/flights" "src/refunds" "src/payments/refund-calculator" 67/67 passed; npx jest --config ./test/jest-e2e.json flight-bookings-hold --runInBand 96/96 passed (10 FLT-27); npx jest --config ./test/jest-e2e.json payments-webhook payments-concurrency refunds-concurrency pagination --runInBand 243/243 passed.
 Student: Abdelrahman ElGabarty
 Tool: Claude (Claude Code)
 Related Requirement: GEN-10 (SCRUM-100) Admin resolves reports: dismiss, hide or delete content
@@ -2453,7 +2461,91 @@ Added three read-only controllers in the reference-data module, ordered by the o
 MongoDB fields leak. countryCode is trimmed and upper-cased and must be two letters (field-level 400 otherwise); a well-formed code
 nobody uses gives an empty page. Added the three routes to the GEN-05 pagination table and a new e2e spec (11 tests).
 
+
 Date: 2026-11-20
+Student: Abdelrahman ElGabarty
+Tool: Claude (Claude Code)
+Related Requirement: SCRUM-115 [BONUS HTL-26] Hotel moderator replies to a review
+Prompt:
+Picked up SCRUM-115 (assigned to me, bonus, blocked-by HTL-23 already Done): a hotel moderator replies to a review of
+their own hotel via POST /api/reviews/:id/reply. Touches Hessain's HotelReview schema (flagged per the ticket's own
+checklist). Plan it, then implement with real tests.
+How the output was used:
+Added optional reply/repliedAt fields to HotelReview (Hessain's schema, additive only). Added
+ReplyToHotelReviewDto (required, trimmed, non-empty, max 1000 chars - new HOTEL_REVIEW_REPLY_MAX_LENGTH constant) and
+POST /api/reviews/:id/reply (role HOTEL_MODERATOR) in HotelReviewsController/Service. Ownership: wrong-hotel moderator
+is 403, not 404 (the review is already public via GET /api/hotels/:id and its /reviews page, so there is nothing to
+hide about its existence - matches docs/contracts.md's rule that a moderator touching another provider's public
+resource gets 403). Replying again replaces the previous reply (edit, not append) since the ticket's acceptance
+criteria has no "already replied" rejection. The reply is surfaced publicly: added reply/repliedAt to
+HotelReviewItemDto and populated them in toItem/toPublicItem (create/update/reply responses, GET /api/hotels/:id/reviews)
+and the getSummary aggregation's $project (GET /api/hotels/:id) - both public read paths, not just one.
+Added two e2e cases to hotel-bookings.e2e-spec.ts (which already owns the review fixtures and traveler/admin cookies):
+a hotel moderator replies to and then edits a reply on their own hotel's review, visible through both public read
+paths; and 403 for the wrong hotel's moderator/a traveler/an admin, 404 for an unknown review, 400 for an
+empty/whitespace-only or over-1000-character reply. Added moderatorCookie/otherHotelModeratorCookie fixtures (same
+pattern as the existing traveler/admin cookies) to that file's beforeAll.
+Verification: npx tsc --noEmit -p ., npx eslint (changed files), npm run build and npm run lint (full) all clean.
+npx jest src/hotels --silent 65/65 passed. npx jest --config ./test/jest-e2e.json test/hotel-bookings.e2e-spec.ts
+--maxWorkers=1 25/25 passed (including both new HTL-26 cases) and test/hotel-reviews.e2e-spec.ts (public review list,
+unaffected) 5/5 passed. Not done: no docs/contracts.md update (reviews are not in its cross-module signature tables);
+no manual Swagger click-through against Atlas (covered by the e2e Swagger-documentation convention this module
+already follows for its other review endpoints).
+Student: Ahmed Sanad
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: FLT-28 (SCRUM-114, seat selection, bonus)
+Prompt:
+Build FLT-28, PATCH /api/flight-bookings/:id/seat: the seat must exist in the booked cabin and be free, two users cannot take the
+same seat also under parallel requests (atomic), only the booking's owner may choose, Swagger updated, tests including a
+parallel-request test. The schema change for the booking is to be agreed with the flights owner.
+How the output was used:
+Seat labels are derived from the cabin's totalSeats (rows of six, 1A..), so no cabin schema change. A new collection
+flightSeatClaims with a unique index on flight + cabin + seat decides who gets a seat with one insert (no read-then-write);
+the booking gets an optional seatSelections array, updated by one pipeline update. Claims of bookings that are no longer
+CONFIRMED are treated as free, so no cancellation path has to release seats. Round trips choose per flight; infants take no seat.
+16 e2e tests (incl. 2 parallel ones) and 3 unit tests. The tests were written after the code, not before.
+Date: 2026-11-20
+Student: Abdulrahman Mohamad Hosny
+Tool: OpenCode (DeepSeek V4.1 Flash Free)
+Related Requirement: FLT-27 follow-up review (recheck the replacement inside the change transaction)
+Prompt:
+Address the lead's review on FLT-27: loadBookableFlight checks SCHEDULED/not departed before the transaction, so a FLT-06 cancellation between that check and the booking update could move the booking onto a CANCELLED flight that is never refunded. Re-read the replacement inside the transaction with the same session and require it to still be SCHEDULED and before departure. Add an E2E test where the replacement is cancelled right before the change (409, nothing changed, old seats kept). Also state in docs/contracts.md that the stored baggage fee is kept as is and is not repriced on the replacement. Then build, lint, test, commit and push.
+How the output was used:
+Added FlightInventoryService.loadBookableFlightInSession(flightId, now, session), which applies the same effectiveFlightStatus rule as loadBookableFlight (SCHEDULED and not effectively departed). FlightBookingsService.changeFlight calls it first inside the MongoDB transaction, before reserving seats, so a replacement cancelled or departed after the pre-check aborts the whole transaction and nothing moves. Swagger and docs/contracts.md document the in-transaction re-read and that the stored segment baggage fee is carried over unchanged and never repriced. Added a FLT-27 E2E test that cancels the replacement after loadBookableFlight returns but before the transaction reads it: the request answers 409 "not open for booking (it is CANCELLED)", the booking stays CONFIRMED on the old flight, the old booked seats are kept, the replacement cabin has no seats, and no payment or refund exists.
+Verification: npm run build passed; npm run lint passed; npx jest --runInBand "src/flights" "src/refunds" "src/payments/refund-calculator" 67/67 passed; npx jest --config ./test/jest-e2e.json flight-bookings-hold --runInBand 97/97 passed (11 FLT-27); npx jest --config ./test/jest-e2e.json payments-webhook payments-concurrency refunds-concurrency pagination --runInBand 243/243 passed.
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: SCRUM-118 / BON-01
+Prompt:
+Implement the read-only admin analytics endpoint within the supplied allowlist.
+Verify booking and revenue totals, UTC date bounds, refund handling, and the
+admin guard. Run feature tests, an adversarial pass, and the exact local CI
+sequence before publishing the feature branch for independent review.
+How the output was used:
+Verified SCRUM-118 and the merged ACC-17 dependency. Started
+feature/BON-01-admin-analytics at 63da298a797711a2fb46e2dfe2325d5999172a14
+in its dedicated worktree and passed 36 ACC-17 baseline E2E tests.
+Added GET /api/admin/analytics with shared auth, calendar-date validation,
+and Swagger response and errors. MongoDB filters and groups flight and hotel
+bookings by UTC creation dates, type and provider. Counts include all statuses
+and a separate CONFIRMED count. Only CONFIRMED bookings produce revenue.
+Settled same-currency refunds reduce those bookings' totals. Payment retries,
+nonconfirmed bookings and unsettled refunds do not increase or subtract revenue.
+Used exact integer cents and per-currency totals, preserving nullable names for
+deleted providers. The report has no writes and exposes no customer data.
+Focused verification passed 9/9 unit and 14/14 E2E tests initially. A separate
+10-case adversarial pass exercised ID collisions, payment attempts, tied totals,
+partial/full refunds, cancelled bookings, UTC boundaries, mixed currencies,
+unsafe cents, malformed requests and database errors. It caught a missing
+provider ID returning an invalid row. Added a guard and verified 9/9 unit and
+24/24 E2E afterward, including all 10 adversarial tests.
+Node 22.23.5 and npm 10.9.9 on Windows with disposable MongoDB 8.2.6.
+Exact npm ci, build, lint, npm test (1,300/1,300, 93 suites) and
+npm run test:e2e (1,938/1,938, 76 suites) passed. No failed or skipped tests.
+The additional TypeScript and Git whitespace checks passed. npm reported
+existing lockfile advisories and E2E emitted listener-count warnings.
+Admin README updated only for BON-01. Shared pagination tests and all
+protected files were preserved.
 Student: Hessain Elrefaey
 Tool: OpenCode (DeepSeek V4.1 Flash Free)
 Related Requirement: HTL-12 (hotel search price and rating filters, sorting)
@@ -2573,7 +2665,6 @@ ACC-02 is back to To Do: RequireVerifiedEmail is used on no booking route. Add @
 How the output was used:
 Added the decorator to POST /api/flight-bookings (a round trip is the same route with two segments), POST /api/flight-bookings/hold and POST /api/hotel-bookings. Added booking-requires-verified-email.e2e-spec.ts, which runs the real AppModule and checks 403 "Verify your email before booking" for emailVerified=false, no 403 for verified and field-less users, and 401 for guests. Updated the route table in docs/api/email-verification.md and the Swagger text in auth.controller.ts. Payments are left unguarded on purpose (a booking already needs a verified user).
 
-================================================
 
 Date: 2026-11-20
 Student: Ahmed Sanad
@@ -2586,3 +2677,54 @@ How the output was used:
 The error was thrown from a bare catch, so the real reason was lost. I tried to reproduce the concurrent-directory theory with a
 stress script (300 rounds of 6 parallel initialisations: no failure) and then kept the same error message but attached the original
 error as its cause, so the next occurrence names the real failure. No behaviour change.
+Date: 2026-11-20
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GEN-17 (GitHub issue #150), plus the frontend CI job
+Prompt:
+Build the shared design tokens and form/card/table styles for the frontend on the existing .btn, .btn-primary and .btn-danger classes in globals.css without changing the confirm-dialog or empty-state styles, add a labelled TextField (hint, field-level error, aria) and a Card with tests, and add a frontend CI job (install, lint, typecheck, test, build).
+How the output was used:
+Appended a GEN-17 section to globals.css (colour, type and spacing tokens with dark-mode values, .btn-sm/.btn-block, .field-*, .card, .table, reduced-motion) and left every existing rule untouched. Added TextField and Card components with tests (21 frontend tests pass; lint, typecheck pass). Added a "frontend" job to ci.yml.
+
+Date: 2026-11-20
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GEN-16
+Prompt:
+Build clear feedback for user actions (Spinner, Skeleton, Alert with optional Try again action, a toast provider with useToast) and a helper that turns the API error shape and network/401/403/404/409/429 (Retry-After)/5xx failures into a friendly message, recovery hint and field-error map; add mobile-first responsive CSS (about 40rem and 64rem breakpoints, scrolling tables, 44px touch targets). Tests first, frontend only, no new dependencies, extend globals.css without changing existing rules.
+How the output was used:
+Added Spinner, Skeleton, Alert, ToastProvider/useToast and lib/apiError (toFriendlyError, failureFromResponse) with tests written first, appended a GEN-16 section to globals.css, and mounted ToastProvider inside ConfirmProvider in layout.tsx.
+
+Date: 2026-11-20
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GEN-14
+Prompt:
+Build the app shell with clear information architecture in the frontend: a skip link as the first focusable element, a Header with the site name and primary nav (Home, Flights, Hotels, Itineraries, Blog, Login, Register) with aria-current on the current page, a mobile menu button with aria-expanded and aria-controls that closes on route change and Escape, a main landmark with id main-content and tabIndex -1, a Footer, and coming-soon placeholder pages so no link 404s. Tests first, no new dependencies, extend globals.css only.
+How the output was used:
+Added SkipLink, Header, Footer, AppShell and ComingSoon components plus placeholder pages for flights, hotels, itineraries, blog, login and register, with tests written first. Appended a GEN-14 section to globals.css, wrapped the layout children in AppShell, and removed the page-level main from the home page so there is a single main landmark.
+
+Date: 2026-11-20
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GEN-15
+Prompt:
+Build reusable usability pieces for the frontend: PageHeader (h1, description, one primary action slot), Breadcrumbs (nav aria-label Breadcrumb, last item aria-current page), FormActions (primary button first, visible cancel, primary disabled with a Spinner while submitting) and Steps (aria-current step). Use them on the GEN-14 placeholder pages, add a short Wording and flow guide to frontend/README.md, tests first, no new dependencies, extend globals.css only.
+How the output was used:
+Added the four components with tests written first, appended a GEN-15 section to globals.css, rebuilt ComingSoon on PageHeader and Breadcrumbs with a description per placeholder page, and added the Wording and flow guide to the frontend README.
+
+Date: 2026-11-20
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-10
+Prompt:
+Build the frontend API client (same-origin /api, credentials include, JSON, ApiError from the backend error shape, one refresh and one retry on 401, then redirect to login with returnTo), AuthProvider/useAuth (me, login, logout, loading), RequireAuth, a /login page with field-level errors and an Alert, a strict safeReturnTo (same-site single-slash path only, decoded before checking), and a sessionStorage record of only a path and action name to resume an action after login. Header shows Login/Register for guests and Account/Logout when logged in. Tests first, no new dependencies, frontend only, nothing sensitive in web storage.
+How the output was used:
+Added lib/returnTo, lib/pendingAction and lib/api with tests (hostile returnTo inputs, ApiError mapping, single shared refresh and retry), AuthProvider, RequireAuth and LoginForm with tests, the login, account and forgot-password pages, Header account links with logout, and AuthProvider in the layout. Updated the GEN-14 header and shell tests for the new auth dependency and the placeholder test (login is a real page now).
+Student: Ahmed Sanad
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: CI tooling (no ticket)
+Prompt:
+Why are the frontend PRs waiting for the backend CI check? Make the CI skip the backend job when a PR only changes frontend or docs.
+How the output was used:
+Added a small `changes` job to .github/workflows/ci.yml that lists the files a pull request changes (git diff HEAD^1 HEAD on the merge commit). The `backend` job now needs it and runs only when something outside frontend/, docs/, *.md and AI_PROMPTS.txt changed (every PR edits AI_PROMPTS.txt, so it must not count). A job skipped by its own `if` is reported as passed to the required `backend` check, so branch protection still works. Pushes to develop always run everything. Checked the YAML parses and tested the path rule on sample file lists; the real proof is this PR's own run (it touches ci.yml, so backend runs) and a frontend-only PR afterwards.

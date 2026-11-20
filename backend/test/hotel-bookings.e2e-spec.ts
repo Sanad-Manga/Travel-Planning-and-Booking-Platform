@@ -32,6 +32,8 @@ describe('hotel bookings (HTL-16) over HTTP', () => {
   let otherTravelerCookie: string;
   let otherTravelerId: string;
   let adminCookie: string;
+  let moderatorCookie: string;
+  let otherHotelModeratorCookie: string;
   let lifecycle: BookingLifecycle;
 
   const roomIds = {
@@ -201,6 +203,46 @@ describe('hotel bookings (HTL-16) over HTTP', () => {
       .send({ email: 'hotel-admin@example.com', password: PASSWORD })
       .expect(200);
     adminCookie = (adminLogin.headers['set-cookie'] as unknown as string[])
+      .map((cookie) => cookie.split(';')[0])
+      .join('; ');
+
+    await db.collection('users').insertOne({
+      name: 'Alpha Moderator',
+      email: 'alpha-moderator@example.com',
+      passwordHash: hashSync(PASSWORD, 4),
+      role: Role.HOTEL_MODERATOR,
+      hotelId,
+      status: 'ACTIVE',
+      consentAcceptedAt: new Date(),
+      preferredCurrency: 'USD',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const moderatorLogin = await http()
+      .post('/api/auth/login')
+      .send({ email: 'alpha-moderator@example.com', password: PASSWORD })
+      .expect(200);
+    moderatorCookie = (moderatorLogin.headers['set-cookie'] as unknown as string[])
+      .map((cookie) => cookie.split(';')[0])
+      .join('; ');
+
+    await db.collection('users').insertOne({
+      name: 'Beta Moderator',
+      email: 'beta-moderator@example.com',
+      passwordHash: hashSync(PASSWORD, 4),
+      role: Role.HOTEL_MODERATOR,
+      hotelId: otherHotelId,
+      status: 'ACTIVE',
+      consentAcceptedAt: new Date(),
+      preferredCurrency: 'USD',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const otherModeratorLogin = await http()
+      .post('/api/auth/login')
+      .send({ email: 'beta-moderator@example.com', password: PASSWORD })
+      .expect(200);
+    otherHotelModeratorCookie = (otherModeratorLogin.headers['set-cookie'] as unknown as string[])
       .map((cookie) => cookie.split(';')[0])
       .join('; ');
   }, 180_000);
@@ -739,6 +781,87 @@ describe('hotel bookings (HTL-16) over HTTP', () => {
       authorName: 'Deleted user',
       comment: 'Visible review',
     });
+  });
+
+  it('lets the hotel moderator reply to (and edit) a review of their own hotel, visible publicly (HTL-26)', async () => {
+    const stay = await completedStayFixture(day(-1), 1);
+    const review = await http()
+      .post(`/api/hotel-bookings/${stay.toHexString()}/review`)
+      .set('Cookie', travelerCookie)
+      .send({ rating: 4, comment: 'Lovely stay' })
+      .expect(201);
+
+    const replied = await http()
+      .post(`/api/reviews/${review.body.id}/reply`)
+      .set('Cookie', moderatorCookie)
+      .send({ reply: 'Thank you for staying with us!' })
+      .expect(200);
+    expect(replied.body).toMatchObject({
+      id: review.body.id,
+      reply: 'Thank you for staying with us!',
+    });
+    expect(typeof replied.body.repliedAt).toBe('string');
+
+    const details = await http().get(`/api/hotels/${hotelId.toHexString()}`).expect(200);
+    expect(details.body.reviews[0]).toMatchObject({
+      id: review.body.id,
+      reply: 'Thank you for staying with us!',
+    });
+    const summary = await http().get(`/api/hotels/${hotelId.toHexString()}/reviews`).expect(200);
+    expect(summary.body.reviews.items[0]).toMatchObject({
+      id: review.body.id,
+      reply: 'Thank you for staying with us!',
+    });
+
+    const edited = await http()
+      .post(`/api/reviews/${review.body.id}/reply`)
+      .set('Cookie', moderatorCookie)
+      .send({ reply: 'Edited: thanks again!' })
+      .expect(200);
+    expect(edited.body.reply).toBe('Edited: thanks again!');
+  });
+
+  it('rejects a reply from the wrong hotel moderator, a non-moderator, an unknown review, or an empty/over-long reply (HTL-26)', async () => {
+    const stay = await completedStayFixture(day(-1), 1);
+    const review = await http()
+      .post(`/api/hotel-bookings/${stay.toHexString()}/review`)
+      .set('Cookie', travelerCookie)
+      .send({ rating: 3 })
+      .expect(201);
+
+    await http()
+      .post(`/api/reviews/${review.body.id}/reply`)
+      .set('Cookie', otherHotelModeratorCookie)
+      .send({ reply: 'Not your hotel' })
+      .expect(403);
+    await http()
+      .post(`/api/reviews/${review.body.id}/reply`)
+      .set('Cookie', travelerCookie)
+      .send({ reply: 'A traveler cannot reply' })
+      .expect(403);
+    await http()
+      .post(`/api/reviews/${review.body.id}/reply`)
+      .set('Cookie', adminCookie)
+      .send({ reply: 'Admin cannot reply either' })
+      .expect(403);
+    await http()
+      .post(`/api/reviews/${new Types.ObjectId().toHexString()}/reply`)
+      .set('Cookie', moderatorCookie)
+      .send({ reply: 'No such review' })
+      .expect(404);
+    await http()
+      .post(`/api/reviews/${review.body.id}/reply`)
+      .set('Cookie', moderatorCookie)
+      .send({ reply: '   ' })
+      .expect(400);
+    await http()
+      .post(`/api/reviews/${review.body.id}/reply`)
+      .set('Cookie', moderatorCookie)
+      .send({ reply: 'x'.repeat(1001) })
+      .expect(400);
+
+    const unreplied = await http().get(`/api/hotels/${hotelId.toHexString()}`).expect(200);
+    expect(unreplied.body.reviews[0].reply).toBeUndefined();
   });
 
   it('expires an overdue pending hold when its owner reads the booking', async () => {
