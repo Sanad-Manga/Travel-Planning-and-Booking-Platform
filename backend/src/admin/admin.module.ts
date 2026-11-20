@@ -19,7 +19,10 @@ import { HotelsModule } from '../hotels/hotels.module';
 import { Itinerary, ItinerarySchema } from '../itineraries/schemas/itinerary.schema';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ReportsModule } from '../reports/reports.module';
+import { Refund, RefundSchema } from '../refunds/schemas/refund.schema';
 import { User, UserSchema } from '../users/schemas/user.schema';
+import { AdminAnalyticsController } from './admin-analytics.controller';
+import { AdminAnalyticsService } from './admin-analytics.service';
 import { AdminBookingsController } from './admin-bookings.controller';
 import { AdminBookingsService } from './admin-bookings.service';
 import { AdminController } from './admin.controller';
@@ -53,6 +56,7 @@ import { TemporaryPasswordService } from './temporary-password.service';
       { name: FlightBooking.name, schema: FlightBookingSchema },
       { name: HotelBooking.name, schema: HotelBookingSchema },
       { name: Flight.name, schema: FlightSchema },
+      { name: Refund.name, schema: RefundSchema },
       {
         name: AccountStatusOperation.name,
         schema: AccountStatusOperationSchema,
@@ -75,6 +79,7 @@ import { TemporaryPasswordService } from './temporary-password.service';
   controllers: [
     AdminController,
     AdminBookingsController,
+    AdminAnalyticsController,
     AccountStatusController,
     AdminPasswordResetController,
     ProviderStatusController,
@@ -85,6 +90,7 @@ import { TemporaryPasswordService } from './temporary-password.service';
   providers: [
     AdminService,
     AdminBookingsService,
+    AdminAnalyticsService,
     AccountStatusService,
     AdminPasswordResetService,
     ProviderStatusService,
