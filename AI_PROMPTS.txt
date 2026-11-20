@@ -2419,3 +2419,25 @@ Prompt:
 Follow-up on issue #153 on the same branch: Sanad pointed out that only the hotel bookings service registers an UpcomingBookingsChecker, so upcoming flight bookings do not block DELETE /api/users/me. Register a flight checker like the hotel one (true for a CONFIRMED booking with any leg departing at or after now, indexed query, throws on database errors), add unit and e2e tests, update docs/api/account-deactivation.md. No PR, no issue comments.
 How the output was used:
 Added hasUpcomingConfirmedBookings to FlightBookingProvider and registered it in UpcomingBookingsRegistry on module init (one aggregation from the userId index, joined to the flights by id, covering round-trip legs and legacy bookings without segments), imported UsersModule in FlightsModule, wrote a unit spec on an in-memory MongoDB and an e2e suite that uses the real checkers through DELETE /api/users/me, and updated the account deactivation doc.
+
+Date: 2026-11-20
+Student: Ahmed Sanad
+Tool: Claude (Claude Code)
+Related Requirement: GEN-09 (report content: comments and reviews, issue #161)
+Prompt:
+Fix issue #161: ContentLookupService.isReportable only accepts POST and ITINERARY, so reporting a COMMENT or a REVIEW answers 400 "cannot be reported yet". Make a visible comment (not hidden, on a published and not hidden post) and a non-hidden hotel review reportable, once per user per item, with 404 for unknown or hidden targets, and write the tests first.
+How the output was used:
+Rewrote the old test that expected 400 for COMMENT/REVIEW and added the new cases to reports.e2e-spec.ts first (10 failed on the old code). Then added COMMENT and REVIEW branches to ContentLookupService (read-only lookups through the Comment and HotelReview models, registered in ReportsModule). The spec passes 32/32; build and lint pass. Nothing was written to the comments or reviews collections.
+
+Date: 2026-11-20
+Student: Ahmed Sanad
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GEN-12 (GitHub issue #162)
+Prompt:
+Add the public, paginated reference-data lookups from the GEN-12 issue: GET /api/countries (code, name, currency), GET /api/cities
+with an optional countryCode filter, and GET /api/currencies, using the shared pagination envelope and Swagger docs, readable by guests.
+Tests first; do not change the seed or schemas.
+How the output was used:
+Added three read-only controllers in the reference-data module, ordered by the official code, mapping to small response DTOs so no
+MongoDB fields leak. countryCode is trimmed and upper-cased and must be two letters (field-level 400 otherwise); a well-formed code
+nobody uses gives an empty page. Added the three routes to the GEN-05 pagination table and a new e2e spec (11 tests).

@@ -74,6 +74,38 @@ describe('Report content (GEN-09)', () => {
     return _id.toHexString();
   }
 
+  async function newComment(postId: string, overrides: object = {}) {
+    const _id = new Types.ObjectId();
+    await db.collection('comments').insertOne({
+      _id,
+      postId: new Types.ObjectId(postId),
+      authorId: new Types.ObjectId(),
+      body: 'A comment',
+      isHidden: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      ...overrides,
+    });
+    return _id.toHexString();
+  }
+
+  async function newReview(overrides: object = {}) {
+    const _id = new Types.ObjectId();
+    await db.collection('hotelReviews').insertOne({
+      _id,
+      bookingId: new Types.ObjectId(),
+      hotelId: new Types.ObjectId(),
+      authorId: new Types.ObjectId(),
+      rating: 4,
+      comment: 'Nice stay',
+      isHidden: false,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      ...overrides,
+    });
+    return _id.toHexString();
+  }
+
   async function newItinerary(overrides: object = {}) {
     const _id = new Types.ObjectId();
     await db.collection('itineraries').insertOne({
@@ -118,6 +150,8 @@ describe('Report content (GEN-09)', () => {
 
   afterEach(async () => {
     await reports().deleteMany({});
+    await db.collection('comments').deleteMany({});
+    await db.collection('hotelReviews').deleteMany({});
   });
 
   describe('happy path', () => {
@@ -331,7 +365,7 @@ describe('Report content (GEN-09)', () => {
       },
     );
 
-    it('COMMENT and REVIEW are valid types but cannot be reported yet: 400 on targetType', async () => {
+    it('a comment or review that does not exist is a 404, nothing stored', async () => {
       const user = await newUser();
       for (const targetType of ['COMMENT', 'REVIEW']) {
         const res = await post(
@@ -342,13 +376,95 @@ describe('Report content (GEN-09)', () => {
           },
           user.cookie,
         );
-        expect(res.status).toBe(400);
-        expect(res.body).toMatchObject({
-          message: 'Validation failed',
-          details: [{ field: 'targetType' }],
-        });
+        expect(res.status).toBe(404);
       }
       expect(await reports().countDocuments()).toBe(0);
+    });
+  });
+
+  describe('comments and reviews (GEN-09, issue #161)', () => {
+    it('reports a visible comment on a published post: 201, OPEN, once per user', async () => {
+      const user = await newUser();
+      const commentId = await newComment(await newPost());
+      const body = {
+        targetType: 'COMMENT',
+        targetId: commentId,
+        reason: 'Abusive',
+      };
+
+      const res = await post(body, user.cookie);
+      expect(res.status).toBe(201);
+      expect(res.body).toMatchObject({
+        targetType: 'COMMENT',
+        targetId: commentId,
+        status: ReportStatus.OPEN,
+      });
+      expect((await post(body, user.cookie)).status).toBe(409);
+      expect(await reports().countDocuments()).toBe(1);
+    });
+
+    it('reports a visible hotel review: 201, OPEN, once per user', async () => {
+      const user = await newUser();
+      const reviewId = await newReview();
+      const body = {
+        targetType: 'REVIEW',
+        targetId: reviewId,
+        reason: 'Fake review',
+      };
+
+      const res = await post(body, user.cookie);
+      expect(res.status).toBe(201);
+      expect(res.body).toMatchObject({
+        targetType: 'REVIEW',
+        targetId: reviewId,
+        status: ReportStatus.OPEN,
+      });
+      expect((await post(body, user.cookie)).status).toBe(409);
+      expect(await reports().countDocuments()).toBe(1);
+    });
+
+    it.each([
+      [
+        'a hidden comment',
+        async () => newComment(await newPost(), { isHidden: true }),
+        'COMMENT',
+      ],
+      [
+        'a comment on a draft post',
+        async () => newComment(await newPost({ status: PostStatus.DRAFT })),
+        'COMMENT',
+      ],
+      [
+        'a comment on a hidden post',
+        async () => newComment(await newPost({ isHidden: true })),
+        'COMMENT',
+      ],
+      ['a hidden review', async () => newReview({ isHidden: true }), 'REVIEW'],
+      ['a post id reported as a comment', async () => newPost(), 'COMMENT'],
+      [
+        'a comment id reported as a review',
+        async () => newComment(await newPost()),
+        'REVIEW',
+      ],
+    ])(
+      'cannot be used to probe %s: 404, nothing stored',
+      async (_name, make: () => Promise<string>, targetType) => {
+        const user = await newUser();
+        const res = await post(
+          { targetType, targetId: await make(), reason: 'x' },
+          user.cookie,
+        );
+        expect(res.status).toBe(404);
+        expect(await reports().countDocuments()).toBe(0);
+      },
+    );
+
+    it('two different users can each report the same comment', async () => {
+      const commentId = await newComment(await newPost());
+      const body = { targetType: 'COMMENT', targetId: commentId, reason: 'x' };
+      expect((await post(body, (await newUser()).cookie)).status).toBe(201);
+      expect((await post(body, (await newUser()).cookie)).status).toBe(201);
+      expect(await reports().countDocuments()).toBe(2);
     });
   });
 
