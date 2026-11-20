@@ -2736,3 +2736,12 @@ Prompt:
 Why are the frontend PRs waiting for the backend CI check? Make the CI skip the backend job when a PR only changes frontend or docs.
 How the output was used:
 Added a small `changes` job to .github/workflows/ci.yml that lists the files a pull request changes (git diff HEAD^1 HEAD on the merge commit). The `backend` job now needs it and runs only when something outside frontend/, docs/, *.md and AI_PROMPTS.txt changed (every PR edits AI_PROMPTS.txt, so it must not count). A job skipped by its own `if` is reported as passed to the required `backend` check, so branch protection still works. Pushes to develop always run everything. Checked the YAML parses and tested the path rule on sample file lists; the real proof is this PR's own run (it touches ci.yml, so backend runs) and a frontend-only PR afterwards.
+
+Date: 2026-11-20
+Student: Ahmed Sanad
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: BON-01 (final audit H3)
+Prompt:
+Final audit: admin analytics revenue counts only CONFIRMED bookings, so a booking drops out of revenue when the nightly GEN-11 sweep makes it COMPLETED. Count CONFIRMED and COMPLETED bookings in revenue and in the confirmed count, update the Swagger text, and add tests.
+How the output was used:
+Changed the paid flag in admin-analytics.service.ts to status CONFIRMED or COMPLETED, updated the controller and DTO descriptions, updated the existing fixture expectations (the COMPLETED 700 booking now counts) and added an e2e case that moves a booking from CONFIRMED to COMPLETED and checks the report is identical. Left cancelled bookings at zero revenue: an existing test documents that as a deliberate rule, so a partial-refund policy would be a product decision.

@@ -15,7 +15,7 @@ class AnalyticsSummaryDto {
   @ApiProperty({
     type: 'integer',
     description:
-      'Bookings currently CONFIRMED, including those that net to zero.',
+      'Bookings currently CONFIRMED or COMPLETED, including those that net to zero.',
   })
   confirmedBookings: number;
 }
@@ -52,14 +52,14 @@ class AnalyticsProviderDto {
 
   @ApiProperty({
     type: 'integer',
-    description: 'Bookings currently CONFIRMED.',
+    description: 'Bookings currently CONFIRMED or COMPLETED.',
   })
   confirmedBookingCount: number;
 
   @ApiProperty({
     type: [AnalyticsRevenueDto],
     description:
-      'One net total per confirmed booking currency, ordered by code. Empty when there are no confirmed bookings. Counts belong to the provider, not the currency rows.',
+      'One net total per CONFIRMED or COMPLETED booking currency, ordered by code. Empty when there are no such bookings. Counts belong to the provider, not the currency rows.',
   })
   revenueByCurrency: AnalyticsRevenueDto[];
 }
