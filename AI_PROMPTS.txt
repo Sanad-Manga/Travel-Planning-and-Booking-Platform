@@ -2736,3 +2736,12 @@ Prompt:
 Why are the frontend PRs waiting for the backend CI check? Make the CI skip the backend job when a PR only changes frontend or docs.
 How the output was used:
 Added a small `changes` job to .github/workflows/ci.yml that lists the files a pull request changes (git diff HEAD^1 HEAD on the merge commit). The `backend` job now needs it and runs only when something outside frontend/, docs/, *.md and AI_PROMPTS.txt changed (every PR edits AI_PROMPTS.txt, so it must not count). A job skipped by its own `if` is reported as passed to the required `backend` check, so branch protection still works. Pushes to develop always run everything. Checked the YAML parses and tested the path rule on sample file lists; the real proof is this PR's own run (it touches ci.yml, so backend runs) and a frontend-only PR afterwards.
+
+Date: 2026-11-20
+Student: Ahmed Sanad
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GEN-12 / PAY-01 (final audit H1, H2, L5)
+Prompt:
+Final audit of develop found the README does not explain npm run seed, the demo setup order, or how to get a booking CONFIRMED from Swagger (the Stripe webhook is hidden and only a signed payment_intent.succeeded confirms). Add a Demo setup section and a Demo a payment section using the Stripe CLI, and fix the contracts sentence saying flights complete when DEPARTED (the code completes on arrival in a nightly sweep).
+How the output was used:
+Added the seed script row, the setup order, the stripe listen and payment_intents confirm steps and a note that reviews need pre-prepared past stays to README.md; corrected the GEN-11 flight completion sentence in docs/contracts.md. Checked each step against the controllers and cookie settings. Docs only.
