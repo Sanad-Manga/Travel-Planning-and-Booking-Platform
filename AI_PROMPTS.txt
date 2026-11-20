@@ -2454,7 +2454,7 @@ MongoDB fields leak. countryCode is trimmed and upper-cased and must be two lett
 nobody uses gives an empty page. Added the three routes to the GEN-05 pagination table and a new e2e spec (11 tests).
 
 Date: 2026-11-20
-Student: Ziad Mohsen
+Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
 Related Requirement: ACC-02 (reopened by the scrum master: unverified user could still book)
 Prompt:
