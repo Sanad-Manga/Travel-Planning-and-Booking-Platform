@@ -44,7 +44,9 @@ import { FlightBookingListRowDto } from './dto/flight-booking-list-row.dto';
 import { FlightBookingSummaryResponseDto } from './dto/flight-booking-summary-response.dto';
 import { HoldFlightBookingDto } from './dto/hold-flight-booking.dto';
 import { MyFlightBookingsQueryDto } from './dto/my-flight-bookings-query.dto';
+import { SelectSeatDto, SelectSeatResponseDto } from './dto/select-seat.dto';
 import { FlightBookingsService } from './flight-bookings.service';
+import { FlightSeatSelectionService } from './flight-seat-selection.service';
 
 @ApiTags('flight-bookings')
 @ApiCookieAuth()
@@ -54,7 +56,10 @@ import { FlightBookingsService } from './flight-bookings.service';
 })
 @Controller('flight-bookings')
 export class FlightBookingsController {
-  constructor(private readonly bookings: FlightBookingsService) {}
+  constructor(
+    private readonly bookings: FlightBookingsService,
+    private readonly seats: FlightSeatSelectionService,
+  ) {}
 
   @Get()
   @Roles(Role.USER)
@@ -190,6 +195,27 @@ export class FlightBookingsController {
     type: ErrorResponseDto,
     description:
       'The booking or the replacement flight is unknown, belongs to another traveler, or the replacement has no such cabin',
+  @Patch(':id/seat')
+  @Roles(Role.USER)
+  @ApiOperation({
+    summary:
+      'Choose a seat for a passenger of my confirmed flight booking - FLT-28',
+    description:
+      "Owner-only. The seat (row number + letter A-F, rows of six, e.g. `12A`) must exist in the booked cabin (derived from the cabin's total seats) and be free. Two travelers asking for the same seat at the same moment cannot both get it: the seat is taken with one insert under a unique index, the loser answers 409. `passengerIndex` (default 0) picks the passenger; `flightId` picks the leg of a round trip (default outbound). Choosing again moves the passenger to the new seat and frees the old one. Seats of cancelled bookings become free again. Only a CONFIRMED booking on a scheduled, not yet departed flight; infants take no seat.",
+  })
+  @ApiOkResponse({ type: SelectSeatResponseDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description:
+      'Missing or malformed seat, a seat that does not exist in the booked cabin, an unknown passengerIndex or flightId, an infant, or an unknown body field',
+  })
+  @ApiForbiddenResponse({
+    type: ErrorResponseDto,
+    description: 'Only travelers (role USER) can choose seats',
+  })
+  @ApiNotFoundResponse({
+    type: ErrorResponseDto,
+    description: 'The booking is unknown or belongs to another traveler',
   })
   @ApiConflictResponse({
     type: ErrorResponseDto,
@@ -202,6 +228,14 @@ export class FlightBookingsController {
     @Body() dto: ChangeFlightBookingDto,
   ) {
     return this.bookings.changeFlight(user, id, dto);
+      'The seat is already taken, the booking is not CONFIRMED, it has no passenger details, or the flight departed or is no longer scheduled',
+  })
+  selectSeat(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: SelectSeatDto,
+  ): Promise<SelectSeatResponseDto> {
+    return this.seats.selectSeat(user, id, dto);
   }
 
   @Post(':id/cancel')
