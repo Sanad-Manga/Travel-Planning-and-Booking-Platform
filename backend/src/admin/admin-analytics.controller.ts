@@ -31,7 +31,7 @@ export class AdminAnalyticsController {
   @ApiOperation({
     summary: 'Summarize bookings and net revenue by provider (ADMIN only)',
     description:
-      'Counts all statuses by createdAt using both inclusive UTC calendar dates. Revenue uses current CONFIRMED bookings only and subtracts completed refunds in the same currency. Payment attempts, pending refunds and failed refunds do not affect these totals.',
+      'Counts all statuses by createdAt using both inclusive UTC calendar dates. Revenue uses current CONFIRMED and COMPLETED bookings (a completed stay or flight stays revenue) and cancelled bookings are not counted and subtracts completed refunds in the same currency. Payment attempts, pending refunds and failed refunds do not affect these totals.',
   })
   @ApiOkResponse({ type: AdminAnalyticsResponseDto })
   @ApiBadRequestResponse({

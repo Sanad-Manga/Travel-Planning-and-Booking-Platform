@@ -87,7 +87,7 @@ NotificationType: BOOKING_CONFIRMED | BOOKING_CANCELLED | REFUND_UPDATE | FLIGHT
 
 State transitions of `BookingStatus` go through `BookingLifecycle.transition()` (owned by Payments). Nobody sets `status` directly.
 
-**Completion (`CONFIRMED -> COMPLETED`):** hotel bookings are completed after check-out (HTL-23, Hotels B). Flight bookings are completed by Flights A: when a flight is marked `DEPARTED`, it calls `BookingLifecycle.transition(FLIGHT, bookingId, COMPLETED)` for each of that flight's `CONFIRMED` bookings. Cancelled flights never complete; their bookings follow the cancellation path.
+**Completion (`CONFIRMED -> COMPLETED`):** hotel bookings are completed after check-out (HTL-23, Hotels B). Flight bookings are completed by Flights A: a nightly sweep (UTC midnight) calls `BookingLifecycle.transition(FLIGHT, bookingId, COMPLETED)` for each `CONFIRMED` booking whose last flight (the return leg of a round trip) has arrived. Cancelled flights never complete; their bookings follow the cancellation path.
 
 ## 6. Business constants (in `common/constants.ts`, read from env where noted)
 

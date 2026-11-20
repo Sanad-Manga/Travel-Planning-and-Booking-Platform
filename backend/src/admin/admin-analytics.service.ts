@@ -192,7 +192,10 @@ export class AdminAnalyticsService {
       {
         $project: {
           providerId: '$' + providerField,
-          confirmed: { $eq: ['$status', BookingStatus.CONFIRMED] },
+          // A paid booking stays revenue after the nightly sweep completes it (GEN-11).
+          confirmed: {
+            $in: ['$status', [BookingStatus.CONFIRMED, BookingStatus.COMPLETED]],
+          },
           amount: checkedCents('$totalCents'),
           currency: { $toUpper: '$currency' },
         },
