@@ -251,7 +251,7 @@ describe('BON-01 admin analytics in the real AppModule', () => {
     },
   );
 
-  it('returns the exact ordered cross-provider report with inclusive UTC bounds and net confirmed cents', async () => {
+  it('returns the exact ordered cross-provider report with inclusive UTC bounds and net confirmed and completed cents', async () => {
     const result = await analytics().expect(200);
     expect(result.body).toEqual({
       period,
@@ -259,7 +259,7 @@ describe('BON-01 admin analytics in the real AppModule', () => {
         totalBookings: 10,
         flightBookings: 7,
         hotelBookings: 3,
-        confirmedBookings: 4,
+        confirmedBookings: 5,
       },
       providers: [
         {
@@ -267,9 +267,9 @@ describe('BON-01 admin analytics in the real AppModule', () => {
           providerId: String(airlineA),
           providerName: 'Airline A',
           bookingCount: 6,
-          confirmedBookingCount: 2,
+          confirmedBookingCount: 3,
           revenueByCurrency: [
-            { currency: 'EGP', revenueCents: 1000 },
+            { currency: 'EGP', revenueCents: 1700 },
             { currency: 'USD', revenueCents: 275 },
           ],
         },
@@ -508,6 +508,30 @@ describe('BON-01 admin analytics in the real AppModule', () => {
           revenueByCurrency: [{ currency: 'EGP', revenueCents: 0 }],
         },
       ]);
+    });
+
+    it('keeps a booking in revenue when the nightly sweep moves it from CONFIRMED to COMPLETED', async () => {
+      const at = atDay(6);
+      const stay = booking(HOTEL, hotelA, CONFIRMED, 450, { at });
+      await db.collection('hotelBookings').insertOne(stay);
+      const before = await analytics(onDay(6)).expect(200);
+      expect(before.body.providers).toEqual([
+        {
+          type: HOTEL,
+          providerId: String(hotelA),
+          providerName: 'Hotel A',
+          bookingCount: 1,
+          confirmedBookingCount: 1,
+          revenueByCurrency: [{ currency: 'EGP', revenueCents: 450 }],
+        },
+      ]);
+
+      await db
+        .collection('hotelBookings')
+        .updateOne({ _id: stay._id }, { $set: { status: COMPLETED } });
+      const after = await analytics(onDay(6)).expect(200);
+      expect(after.body).toEqual(before.body);
+      expect(after.body.summary.confirmedBookings).toBe(1);
     });
 
     it('normalizes legacy currency casing, nets exact large cents and keeps currency units separate', async () => {
