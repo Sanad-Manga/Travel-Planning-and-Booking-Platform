@@ -1,7 +1,8 @@
 import { ConflictException, HttpException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { AuthenticatedUser, BookingStatus, BookingType } from '../common';
+import { AuthenticatedUser, BookingStatus, BookingType, NotificationType } from '../common';
+import { NotificationsService } from '../notifications';
 import { BookingLifecycle, RefundCalculator } from '../payments';
 import { RefundsService } from '../refunds';
 import { HotelBookingResponseDto } from './dto/hotel-booking-response.dto';
@@ -25,6 +26,7 @@ export class HotelBookingCancellationService {
     private readonly hotelsService: HotelsService,
     private readonly bookingLifecycle: BookingLifecycle,
     private readonly refunds: RefundsService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   /** What cancelling would refund right now. Changes nothing. */
@@ -59,7 +61,26 @@ export class HotelBookingCancellationService {
 
     // 409 if another request changed the reservation since the write above.
     await this.bookingLifecycle.transition(BookingType.HOTEL, id, BookingStatus.CANCELLED);
+    await this.notifyCancelled(booking);
     return this.refund(id, plan.refundCents);
+  }
+
+  /**
+   * GEN-01: a distinct cancellation notice, separate from the refund notification (RefundsService
+   * fires that, and only when the refund is positive — a 0% tier would otherwise notify nothing).
+   * `NotificationsService.notify` already swallows its own failures, so a notification problem
+   * never blocks the cancellation.
+   */
+  private async notifyCancelled(booking: HotelBookingLean): Promise<void> {
+    await this.notifications.notify({
+      userId: booking.userId.toString(),
+      type: NotificationType.BOOKING_CANCELLED,
+      title: 'Hotel reservation cancelled',
+      message: booking.bookingReference
+        ? `Your hotel reservation ${booking.bookingReference} has been cancelled.`
+        : 'Your hotel reservation has been cancelled.',
+      link: `/hotel-bookings/${booking._id.toString()}`,
+    });
   }
 
   /** The reservation is already CANCELLED: issue the refund its cancellation recorded, if it has not been issued yet. */
