@@ -2740,6 +2740,11 @@ Added a small `changes` job to .github/workflows/ci.yml that lists the files a p
 Date: 2026-11-20
 Student: Ahmed Sanad
 Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: PAY-01 / FLT-22 (final audit M1.3)
+Prompt:
+Final audit: getPayable for flight bookings checks only owner, status and hold time, so a pending hold can still be paid after its flight departed. Refuse payment in that case without breaking reads of confirmed bookings, and add tests.
+How the output was used:
+Added assertFlightsStillOpen to FlightBookingProvider.getPayable: only for PENDING_PAYMENT bookings it loads the booking's legs and throws 409 when a leg's effective status is not SCHEDULED (reuses effectiveFlightStatus). Confirmed bookings stay readable. Left hotels and airline deactivation alone because deactivation and flight cancellation already release pending holds. Added an e2e case covering both behaviours.
 Related Requirement: BON-01 (final audit H3)
 Prompt:
 Final audit: admin analytics revenue counts only CONFIRMED bookings, so a booking drops out of revenue when the nightly GEN-11 sweep makes it COMPLETED. Count CONFIRMED and COMPLETED bookings in revenue and in the confirmed count, update the Swagger text, and add tests.
@@ -2764,3 +2769,8 @@ Prompt:
 Final audit: if one passenger asks for two different seats at the same moment on a confirmed booking, both seat claims are inserted, the booking keeps only one, and the other claim blocks that seat for every other traveler. Fix it without a unique index that would break normal seat changes.
 How the output was used:
 Made the booking update in FlightSeatSelectionService a compare-and-set: its filter requires the passenger's seat to still be the one read at the start (or still absent). The loser deletes its own new claim and answers 409 asking to retry, so no claim is orphaned. Added an e2e case with two parallel PATCHes for one passenger; it fails on the old code (verified by running the new spec against the old service) and passes now.
+Related Requirement: GEN-10 (final audit M2)
+Prompt:
+Final audit: when an admin deletes an itinerary through DELETE /api/admin/content/ITINERARY/:id only the itinerary document is removed; its activities, budget entries, transport costs, booking links and activity images stay behind (marked KNOWN GAP in the code). Make the admin delete do the same cleanup as the owner's delete.
+How the output was used:
+Extracted the owner delete's cleanup into ItinerariesService.removeDependents and added removeAsAdmin (no ownership filter, 404 for unknown or malformed id). AdminContentService now calls it (ItinerariesModule imported into AdminModule), keeping the audit entry. Updated the unit spec and added an e2e case with a surviving second itinerary to prove only the deleted one's children go.

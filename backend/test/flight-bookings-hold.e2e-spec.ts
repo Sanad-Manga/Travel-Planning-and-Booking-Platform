@@ -1,4 +1,4 @@
-import { INestApplication } from '@nestjs/common';
+import { ConflictException, INestApplication } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import {
   getConnectionToken,
@@ -554,6 +554,47 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
         expect(
           await connection.collection('flightBookings').countDocuments(),
         ).toBe(0);
+      });
+
+      it('a pending hold on a flight that has departed meanwhile can no longer be paid, but a confirmed booking stays readable', async () => {
+        const flightId = await createFlight();
+        await addCabin(flightId, 'ECONOMY', 10);
+        const pending = await http()
+          .post(HOLD)
+          .set('Cookie', traveler)
+          .send(body(flightId))
+          .expect(201);
+        const confirmed = await http()
+          .post(HOLD)
+          .set('Cookie', traveler)
+          .send(body(flightId))
+          .expect(201);
+        await lifecycle.confirmPaid(
+          BookingType.FLIGHT,
+          confirmed.body.id,
+          'pi_departed_confirmed',
+        );
+        await expect(
+          bookingProvider.getPayable(pending.body.id, travelerId),
+        ).resolves.toMatchObject({ status: 'PENDING_PAYMENT' });
+
+        await connection
+          .collection('flights')
+          .updateOne(
+            { _id: new Types.ObjectId(flightId) },
+            { $set: { departureAt: new Date(Date.now() - 60_000) } },
+          );
+
+        await expect(
+          bookingProvider.getPayable(pending.body.id, travelerId),
+        ).rejects.toBeInstanceOf(ConflictException);
+        await expect(
+          bookingProvider.getPayable(confirmed.body.id, travelerId),
+        ).resolves.toMatchObject({ status: 'CONFIRMED' });
+        await http()
+          .get(`${BOOKING}/${confirmed.body.id}`)
+          .set('Cookie', traveler)
+          .expect(200);
       });
 
       it('a deactivated airline cannot be booked: 409', async () => {

@@ -17,6 +17,7 @@ import { Hotel, HotelSchema } from '../hotels/schemas/hotel.schema';
 import { HotelReview, HotelReviewSchema } from '../hotels/schemas/hotel-review.schema';
 import { AirlinesModule } from '../airlines/airlines.module';
 import { HotelsModule } from '../hotels/hotels.module';
+import { ItinerariesModule } from '../itineraries/itineraries.module';
 import { Itinerary, ItinerarySchema } from '../itineraries/schemas/itinerary.schema';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ReportsModule } from '../reports/reports.module';
@@ -77,6 +78,8 @@ import { TemporaryPasswordService } from './temporary-password.service';
     // Post/Comment models.
     ReportsModule,
     BlogModule,
+    // GEN-10: ItinerariesService.removeAsAdmin cascades an admin-deleted itinerary's children.
+    ItinerariesModule,
   ],
   controllers: [
     AdminController,
