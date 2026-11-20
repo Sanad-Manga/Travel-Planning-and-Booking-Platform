@@ -370,6 +370,112 @@ describe('Flight seat selection (FLT-28) over HTTP (e2e)', () => {
     expect(await claims('5A')).toBe(1);
   });
 
+  describe('seat map and summary (follow-up)', () => {
+    const map = (id: string, cookie = userA, qs = '') =>
+      http()
+        .get(`/api/flight-bookings/${id}/seat-map${qs}`)
+        .set('Cookie', cookie);
+
+    it('shows every seat of the cabin as FREE, TAKEN or YOURS, and reveals nobody', async () => {
+      const mine = await booking(idA);
+      const other = await booking(idB);
+      await pick(mine, { seat: '6A' }).expect(200);
+      await pick(other, { seat: '6B' }, userB).expect(200);
+      const res = await map(mine).expect(200);
+      expect(res.body).toMatchObject({
+        bookingId: mine,
+        flightId: flightId.toString(),
+        cabinClass: 'ECONOMY',
+      });
+      expect(res.body.seats).toHaveLength(60);
+      expect(res.body.seats[0]).toEqual({
+        seat: '1A',
+        status: expect.any(String),
+      });
+      const at = (seat: string) =>
+        res.body.seats.find((x: { seat: string }) => x.seat === seat).status;
+      expect(at('6A')).toBe('YOURS');
+      expect(at('6B')).toBe('TAKEN');
+      expect(at('6C')).toBe('FREE');
+      for (const entry of res.body.seats) {
+        expect(Object.keys(entry).sort()).toEqual(['seat', 'status']);
+      }
+    });
+
+    it('a cancelled booking frees its seats on the map', async () => {
+      const gone = await booking(idB);
+      const mine = await booking(idA);
+      await pick(gone, { seat: '7A' }, userB).expect(200);
+      await db
+        .collection('flightBookings')
+        .updateOne(
+          { _id: new Types.ObjectId(gone) },
+          { $set: { status: BookingStatus.CANCELLED } },
+        );
+      const res = await map(mine).expect(200);
+      expect(
+        res.body.seats.find((x: { seat: string }) => x.seat === '7A').status,
+      ).toBe('FREE');
+    });
+
+    it('a round trip shows the chosen leg', async () => {
+      const id = await booking(
+        idA,
+        {},
+        ['ADULT', 'ADULT'],
+        [flightId, returnFlightId],
+      );
+      await pick(id, {
+        seat: '8A',
+        flightId: returnFlightId.toString(),
+      }).expect(200);
+      const back = await map(id, userA, `?flightId=${returnFlightId}`).expect(
+        200,
+      );
+      expect(back.body.flightId).toBe(returnFlightId.toString());
+      expect(
+        back.body.seats.find((x: { seat: string }) => x.seat === '8A').status,
+      ).toBe('YOURS');
+      const out = await map(id).expect(200);
+      expect(
+        out.body.seats.find((x: { seat: string }) => x.seat === '8A').status,
+      ).toBe('FREE');
+      await map(id, userA, `?flightId=${new Types.ObjectId()}`).expect(400);
+      await map(id, userA, '?flightId=nope').expect(400);
+    });
+
+    it('owner only and confirmed only: other traveler 404, guest 401, moderator 403, pending 409', async () => {
+      const id = await booking(idA);
+      await map(id, userB).expect(404);
+      await http().get(`/api/flight-bookings/${id}/seat-map`).expect(401);
+      await map(id, moderator).expect(403);
+      await map('not-an-id').expect(404);
+      const pending = await booking(idA, {
+        status: BookingStatus.PENDING_PAYMENT,
+      });
+      await map(pending).expect(409);
+    });
+
+    it('the chosen seats appear on the booking summary', async () => {
+      const id = await booking(idA, {
+        bookingReference: `FLT-${new Types.ObjectId()}`,
+      });
+      const before = await http()
+        .get(`/api/flight-bookings/${id}`)
+        .set('Cookie', userA);
+      if (before.status === 200)
+        expect(before.body.seatSelections).toBeUndefined();
+      await pick(id, { seat: '9A' }).expect(200);
+      const after = await http()
+        .get(`/api/flight-bookings/${id}`)
+        .set('Cookie', userA)
+        .expect(200);
+      expect(after.body.seatSelections).toEqual([
+        { flightId: flightId.toString(), passengerIndex: 0, seat: '9A' },
+      ]);
+    });
+  });
+
   it('is documented in Swagger', async () => {
     const docs = await http().get('/api/docs-json').expect(200);
     const op = docs.body.paths['/api/flight-bookings/{id}/seat']?.patch;
@@ -377,5 +483,8 @@ describe('Flight seat selection (FLT-28) over HTTP (e2e)', () => {
     expect(Object.keys(op.responses)).toEqual(
       expect.arrayContaining(['200', '400', '401', '403', '404', '409']),
     );
+    expect(
+      docs.body.paths['/api/flight-bookings/{id}/seat-map']?.get,
+    ).toBeDefined();
   });
 });

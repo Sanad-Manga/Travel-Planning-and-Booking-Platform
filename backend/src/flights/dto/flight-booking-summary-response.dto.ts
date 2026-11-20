@@ -11,6 +11,7 @@ import {
   PassengerCountsDto,
 } from './flight-booking-response.dto';
 import { FlightResponseDto } from './flight-response.dto';
+import { SeatSelectionDto } from './select-seat.dto';
 
 export class FlightBookingSummarySegmentDto extends FlightBookingSegmentResponseDto {
   @ApiProperty({ type: FlightResponseDto })
@@ -102,6 +103,13 @@ export class FlightBookingSummaryResponseDto {
       'Unique booking reference, present once the booking is confirmed. Absent while pending payment and for historical confirmed bookings created before FLT-23.',
   })
   bookingReference?: string;
+
+  @ApiPropertyOptional({
+    type: [SeatSelectionDto],
+    description:
+      'Seats the traveler chose (FLT-28), at most one per passenger per flight. Absent until a seat is chosen.',
+  })
+  seatSelections?: SeatSelectionDto[];
 
   @ApiPropertyOptional({
     type: FlightBookingRefundDto,

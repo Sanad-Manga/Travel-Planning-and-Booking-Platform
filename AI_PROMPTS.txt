@@ -2588,3 +2588,17 @@ Prompt:
 ACC-02 is back to To Do: RequireVerifiedEmail is used on no booking route. Add @RequireVerifiedEmail() to flight-bookings (create, hold, round trip) and hotel-bookings create, fix the docs that say booking is blocked, and add a test showing an unverified user gets 403 on booking.
 How the output was used:
 Added the decorator to POST /api/flight-bookings (a round trip is the same route with two segments), POST /api/flight-bookings/hold and POST /api/hotel-bookings. Added booking-requires-verified-email.e2e-spec.ts, which runs the real AppModule and checks 403 "Verify your email before booking" for emailVerified=false, no 403 for verified and field-less users, and 401 for guests. Updated the route table in docs/api/email-verification.md and the Swagger text in auth.controller.ts. Payments are left unguarded on purpose (a booking already needs a verified user).
+
+================================================
+
+Date: 2026-11-20
+Student: Ahmed Sanad
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: FLT-28 follow-up (seat chart and seats on the booking summary)
+Prompt:
+Follow-up on FLT-28 on the same branch: show the chosen seats on the booking summary and add a read endpoint for the seat chart of the
+booked cabin, so a UI can grey out taken seats. Owner only, confirmed bookings only, reveal nobody.
+How the output was used:
+Added seatSelections to the booking summary and GET /api/flight-bookings/:id/seat-map (every seat of the cabin as FREE, TAKEN or YOURS,
+computed from live claims only, so a cancelled booking's seats show as free; optional flightId for a round trip). 5 more e2e tests
+(21 in the file). The seat chart is a bounded structure, not a paged list.
