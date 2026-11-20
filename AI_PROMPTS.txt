@@ -2461,3 +2461,12 @@ Prompt:
 Build the shared design tokens and form/card/table styles for the frontend on the existing .btn, .btn-primary and .btn-danger classes in globals.css without changing the confirm-dialog or empty-state styles, add a labelled TextField (hint, field-level error, aria) and a Card with tests, and add a frontend CI job (install, lint, typecheck, test, build).
 How the output was used:
 Appended a GEN-17 section to globals.css (colour, type and spacing tokens with dark-mode values, .btn-sm/.btn-block, .field-*, .card, .table, reduced-motion) and left every existing rule untouched. Added TextField and Card components with tests (21 frontend tests pass; lint, typecheck pass). Added a "frontend" job to ci.yml.
+
+Date: 2026-11-20
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GEN-16
+Prompt:
+Build clear feedback for user actions (Spinner, Skeleton, Alert with optional Try again action, a toast provider with useToast) and a helper that turns the API error shape and network/401/403/404/409/429 (Retry-After)/5xx failures into a friendly message, recovery hint and field-error map; add mobile-first responsive CSS (about 40rem and 64rem breakpoints, scrolling tables, 44px touch targets). Tests first, frontend only, no new dependencies, extend globals.css without changing existing rules.
+How the output was used:
+Added Spinner, Skeleton, Alert, ToastProvider/useToast and lib/apiError (toFriendlyError, failureFromResponse) with tests written first, appended a GEN-16 section to globals.css, and mounted ToastProvider inside ConfirmProvider in layout.tsx.

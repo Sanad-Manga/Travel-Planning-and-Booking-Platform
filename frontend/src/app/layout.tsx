@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { ConfirmProvider } from '@/components/ConfirmProvider';
+import { ToastProvider } from '@/components/ToastProvider';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -12,7 +13,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <body>
-        <ConfirmProvider>{children}</ConfirmProvider>
+        <ConfirmProvider>
+          <ToastProvider>{children}</ToastProvider>
+        </ConfirmProvider>
       </body>
     </html>
   );
