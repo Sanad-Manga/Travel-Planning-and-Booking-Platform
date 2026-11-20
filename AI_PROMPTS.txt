@@ -2645,3 +2645,10 @@ Prompt:
 Build the shared design tokens and form/card/table styles for the frontend on the existing .btn, .btn-primary and .btn-danger classes in globals.css without changing the confirm-dialog or empty-state styles, add a labelled TextField (hint, field-level error, aria) and a Card with tests, and add a frontend CI job (install, lint, typecheck, test, build).
 How the output was used:
 Appended a GEN-17 section to globals.css (colour, type and spacing tokens with dark-mode values, .btn-sm/.btn-block, .field-*, .card, .table, reduced-motion) and left every existing rule untouched. Added TextField and Card components with tests (21 frontend tests pass; lint, typecheck pass). Added a "frontend" job to ci.yml.
+Student: Ahmed Sanad
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: CI tooling (no ticket)
+Prompt:
+Why are the frontend PRs waiting for the backend CI check? Make the CI skip the backend job when a PR only changes frontend or docs.
+How the output was used:
+Added a small `changes` job to .github/workflows/ci.yml that lists the files a pull request changes (git diff HEAD^1 HEAD on the merge commit). The `backend` job now needs it and runs only when something outside frontend/, docs/, *.md and AI_PROMPTS.txt changed (every PR edits AI_PROMPTS.txt, so it must not count). A job skipped by its own `if` is reported as passed to the required `backend` check, so branch protection still works. Pushes to develop always run everything. Checked the YAML parses and tested the path rule on sample file lists; the real proof is this PR's own run (it touches ci.yml, so backend runs) and a frontend-only PR afterwards.
