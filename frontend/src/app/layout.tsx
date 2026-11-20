@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
+import { AuthProvider } from '@/components/AuthProvider';
 import { AppShell } from '@/components/AppShell';
 import { ConfirmProvider } from '@/components/ConfirmProvider';
 import { ToastProvider } from '@/components/ToastProvider';
@@ -16,7 +17,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body>
         <ConfirmProvider>
           <ToastProvider>
-            <AppShell>{children}</AppShell>
+            <AuthProvider>
+              <AppShell>{children}</AppShell>
+            </AuthProvider>
           </ToastProvider>
         </ConfirmProvider>
       </body>

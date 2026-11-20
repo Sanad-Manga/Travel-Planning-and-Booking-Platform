@@ -1,8 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
+import { toFriendlyError } from '@/lib/apiError';
+import { useAuth } from './AuthProvider';
+import { useToast } from './ToastProvider';
 
 const NAV_ID = 'primary-nav';
 
@@ -14,8 +17,7 @@ const mainLinks = [
   { label: 'Blog', href: '/blog' },
 ];
 
-// Account and Logout replace these once the session exists (ACC-10).
-const accountLinks = [
+const guestLinks = [
   { label: 'Login', href: '/login' },
   { label: 'Register', href: '/register' },
 ];
@@ -31,6 +33,9 @@ function isCurrent(pathname: string, href: string): boolean {
  */
 export function Header() {
   const pathname = usePathname();
+  const router = useRouter();
+  const toast = useToast();
+  const { user, loading, logout } = useAuth();
   // Remember which page the menu was opened on: navigating elsewhere closes it without an effect.
   const [openOn, setOpenOn] = useState<string | null>(null);
   const open = openOn === pathname;
@@ -47,6 +52,16 @@ export function Header() {
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [open]);
+
+  async function onLogout() {
+    try {
+      await logout();
+      router.push('/');
+    } catch (error) {
+      const { message, hint } = toFriendlyError(error);
+      toast.error(message + ' ' + hint);
+    }
+  }
 
   function renderLinks(links: typeof mainLinks) {
     return links.map((link) => (
@@ -80,7 +95,22 @@ export function Header() {
         </button>
         <nav id={NAV_ID} aria-label="Primary" className={open ? 'site-nav site-nav-open' : 'site-nav'}>
           <ul className="site-nav-list">{renderLinks(mainLinks)}</ul>
-          <ul className="site-nav-list site-nav-account">{renderLinks(accountLinks)}</ul>
+          {loading ? null : (
+            <ul className="site-nav-list site-nav-account">
+              {user ? (
+                <>
+                  {renderLinks([{ label: 'Account', href: '/account' }])}
+                  <li>
+                    <button type="button" className="site-nav-link site-nav-button" onClick={() => void onLogout()}>
+                      Logout
+                    </button>
+                  </li>
+                </>
+              ) : (
+                renderLinks(guestLinks)
+              )}
+            </ul>
+          )}
         </nav>
       </div>
     </header>
