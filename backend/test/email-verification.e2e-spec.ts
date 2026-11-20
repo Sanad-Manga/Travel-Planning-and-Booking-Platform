@@ -13,7 +13,7 @@ import { FakeEmailSender } from '../src/email/fake-email-sender';
 import { setupApp } from '../src/setup-app';
 import { TEST_ACCESS_SECRET, TEST_REFRESH_SECRET } from './helpers/auth-test-app';
 
-// Test-only stand-in for a booking-creation route (the real routes are not changed by ACC-02).
+// Test-only stand-in for a booking-creation route (the real routes are covered by booking-requires-verified-email.e2e-spec.ts).
 @Controller('test-bookings')
 class TestBookingController {
   @Post()
