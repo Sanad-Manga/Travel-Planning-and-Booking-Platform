@@ -37,6 +37,19 @@ Requires Node 22 or newer.
 
 The app refuses to start if `MONGODB_URI` is missing or still the placeholder.
 
+### Environment variables (`backend/.env`, see `.env.example`)
+| Variable | Needed for |
+|---|---|
+| `MONGODB_URI` | **Required.** The team MongoDB Atlas connection string; the API will not start without it. Atlas must allow your IP address (Network Access) |
+| `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` | **Required.** Two different long random strings; the API refuses to start if they are missing, equal or weak |
+| `PORT`, `FRONTEND_URL`, `COOKIE_SECURE=false` | Defaults for local development (`3001`, `http://localhost:3000`) |
+| `ADMIN_SEED_EMAIL`, `ADMIN_SEED_PASSWORD`, `ADMIN_SEED_NAME` | Only for `npm run seed:admin` |
+| `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Only for the payment demo below (Stripe test mode) |
+| `FX_API_KEY`, `PLATFORM_CURRENCY` | Currency conversion for itineraries (a free FXRatesAPI key is enough) |
+| `HOLD_MINUTES` | How long a booking hold lasts (default 10) |
+| `SMTP_*` | Optional. Without them a throwaway test inbox is used and each email's preview link is printed in the backend log |
+
+
 ### Useful scripts (run inside `backend/`)
 | Command | What it does |
 |---|---|
