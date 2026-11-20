@@ -158,12 +158,13 @@ requires removing an existing image first; atomic replacement is not provided.
 
 ## Owner-managed integrations
 
-- **Ahmed / airlines:** existing `logoUrl` accepts HTTP(S) only and has no stored
-  upload ID. Update that stub in the airline-owned integration; relative returned
-  paths are currently incompatible with its DTO.
-- **Yusuf / hotels and blog:** existing `{ id, url }` arrays accept these relative
-  paths. Add authorized multipart endpoints, trusted attachment, removal and
-  cleanup when entities are deleted/references replaced.
+- **Airlines (done, GEN-08):** `POST /api/airlines/:id/logo` (multipart field `image`) and `DELETE /api/airlines/:id/logo`,
+  airline moderator of that airline only. The logo is the single `airline` slot; a second upload is 409 until the first is
+  removed (no atomic replacement). The airline stores `logoId` (upload id) and `logoUrl`; `logoUrl` is no longer accepted
+  in the create/edit body.
+- **Hotels (done, GEN-08):** `POST /api/hotels/:id/photos` and `DELETE /api/hotels/:id/photos/:photoId`, hotel moderator of
+  that hotel only, up to 5 photos. `photos` is no longer accepted in the create/edit body, so a client cannot point a hotel
+  at someone else's upload. **Yusuf / blog:** BLG-10 uses the same pattern for posts.
 - **Yassin / itineraries:** activity schema and ITN-12 image integration remain
   itinerary-owned work. Authorize through the activity's parent itinerary.
 - Existing unmanaged IDs/URLs are not automatically registered, counted or

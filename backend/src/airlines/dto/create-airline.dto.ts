@@ -1,10 +1,8 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
   IsNotEmpty,
-  IsOptional,
   IsString,
-  IsUrl,
   Matches,
   MaxLength,
   MinLength,
@@ -15,7 +13,7 @@ const trim = ({ value }: { value: unknown }) =>
 const trimUpper = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim().toUpperCase() : value;
 
-/** Body of POST /api/airlines. `isActive` and ids are not accepted: the server sets them. */
+/** Body of POST /api/airlines. `isActive`, ids and the logo are not accepted: the server sets them, and the logo is uploaded through POST /api/airlines/:id/logo (GEN-08). */
 export class CreateAirlineDto {
   @ApiProperty({ example: 'EgyptAir', minLength: 2, maxLength: 100 })
   @Transform(trim)
@@ -35,18 +33,4 @@ export class CreateAirlineDto {
     message: 'code must be 2 or 3 letters or digits (A-Z, 0-9)',
   })
   code: string;
-
-  @ApiPropertyOptional({
-    example: 'https://example.com/logos/ms.png',
-    description:
-      'Temporary: an http(s) URL. Replaced by a file upload once the upload service (GEN-08) is merged.',
-  })
-  @IsOptional()
-  @Transform(trim)
-  @IsUrl(
-    { protocols: ['http', 'https'], require_protocol: true },
-    { message: 'logoUrl must be a valid http(s) URL' },
-  )
-  @MaxLength(2048, { message: 'logoUrl must be at most 2048 characters' })
-  logoUrl?: string;
 }

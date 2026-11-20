@@ -48,7 +48,7 @@ export class AirlinesController {
   @ApiCreatedResponse({ type: AirlineResponseDto })
   @ApiBadRequestResponse({
     type: ErrorResponseDto,
-    description: 'Invalid name, code or logoUrl, or an unknown field',
+    description: 'Invalid name or code, or an unknown field (the logo is uploaded through POST /airlines/:id/logo)',
   })
   @ApiForbiddenResponse({
     type: ErrorResponseDto,
@@ -82,13 +82,13 @@ export class AirlinesController {
   @Roles(Role.AIRLINE_MODERATOR)
   @ApiOperation({
     summary:
-      "Edit my airline's name, code or logo (airline moderator of that airline only) - FLT-01",
+      "Edit my airline's name or code (airline moderator of that airline only) - FLT-01",
   })
   @ApiOkResponse({ type: AirlineResponseDto })
   @ApiBadRequestResponse({
     type: ErrorResponseDto,
     description:
-      'Invalid id, name, code or logoUrl, an unknown field, or an empty body',
+      'Invalid id, name or code, an unknown field, or an empty body',
   })
   @ApiForbiddenResponse({
     type: ErrorResponseDto,

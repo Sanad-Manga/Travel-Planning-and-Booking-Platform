@@ -2405,3 +2405,20 @@ Prompt:
 Follow-up on issue #153 on the same branch: Sanad pointed out that only the hotel bookings service registers an UpcomingBookingsChecker, so upcoming flight bookings do not block DELETE /api/users/me. Register a flight checker like the hotel one (true for a CONFIRMED booking with any leg departing at or after now, indexed query, throws on database errors), add unit and e2e tests, update docs/api/account-deactivation.md. No PR, no issue comments.
 How the output was used:
 Added hasUpcomingConfirmedBookings to FlightBookingProvider and registered it in UpcomingBookingsRegistry on module init (one aggregation from the userId index, joined to the flights by id, covering round-trip legs and legacy bookings without segments), imported UsersModule in FlightsModule, wrote a unit spec on an in-memory MongoDB and an e2e suite that uses the real checkers through DELETE /api/users/me, and updated the account deactivation doc.
+
+================================================
+
+Date: 2026-11-20
+Student: Ahmed Sanad
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GEN-08 (GitHub issue #160)
+Prompt:
+Check develop for GEN-08 and fix what is still missing: only activities (and, since BLG-10, posts) had an upload route. Add hotel
+photo upload (JPG/PNG, 5 MB, max 5, hotel moderator of that hotel only) and the airline logo upload (1 logo, airline moderator of
+that airline only), reusing UploadService, with tests for the limits and the ownership. Tests first for the limits.
+How the output was used:
+Added POST/DELETE /api/hotels/:id/photos and POST/DELETE /api/airlines/:id/logo following the BLG-10 pattern: ownership check
+(403 for anyone else), UploadService validates and holds the numbered slot, then one conditional update stores the reference, and the
+file is removed again if that fails. A second logo is 409 until the first is removed (no atomic replacement). Followed BLG-10 and removed
+the free-text photos and logoUrl fields from the hotel and airline create/edit bodies, so a client cannot point at an upload it does
+not own; updated the older hotel and airline tests that sent them. 19 new e2e tests (hotel-airline-images).

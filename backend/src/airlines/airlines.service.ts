@@ -62,7 +62,6 @@ export class AirlinesService {
       const created = await this.model.create({
         name: dto.name,
         code: dto.code,
-        ...(dto.logoUrl ? { logoUrl: dto.logoUrl } : {}),
       });
       return toAirlineResponse(created.toObject<AirlineLean>());
     } catch (error) {
@@ -77,7 +76,7 @@ export class AirlinesService {
   }
 
   /**
-   * FLT-01: an airline moderator edits their OWN airline (name, code, logo).
+   * FLT-01: an airline moderator edits their OWN airline (name, code; the logo has its own upload route).
    * Ownership is checked here, before touching the database: the principal's `airlineId` must equal the
    * airline being edited. That is a 403 (not a 404) because the airline profile is not private.
    */
@@ -90,17 +89,16 @@ export class AirlinesService {
       throw new ForbiddenException('You can only edit your own airline');
     }
 
-    const changes: Partial<Pick<Airline, 'name' | 'code' | 'logoUrl'>> = {};
+    const changes: Partial<Pick<Airline, 'name' | 'code'>> = {};
     if (dto.name !== undefined) changes.name = dto.name;
     if (dto.code !== undefined) changes.code = dto.code;
-    if (dto.logoUrl !== undefined) changes.logoUrl = dto.logoUrl;
     if (Object.keys(changes).length === 0) {
       throw new BadRequestException({
         message: 'Nothing to update',
         details: [
           {
             field: 'body',
-            message: 'send at least one of name, code, logoUrl',
+            message: 'send at least one of name, code',
           },
         ],
       });
