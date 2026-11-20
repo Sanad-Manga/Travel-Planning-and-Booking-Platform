@@ -34,8 +34,12 @@ export class UploadRecoveryService implements OnModuleInit, OnModuleDestroy {
       await this.storage.initialize();
       // Do not accept traffic until the capacity constraint exists, even with autoIndex disabled.
       await this.files.createIndexes();
-    } catch {
-      throw new Error('Upload storage or indexes could not be initialized');
+    } catch (cause) {
+      // Same message as before, but the real reason (a Mongo error, a directory error) now travels with it: a
+      // start-up failure seen once under parallel test runs could not be explained because it was swallowed here.
+      throw new Error('Upload storage or indexes could not be initialized', {
+        cause,
+      });
     }
     await this.sweep();
     this.timer = setInterval(() => {

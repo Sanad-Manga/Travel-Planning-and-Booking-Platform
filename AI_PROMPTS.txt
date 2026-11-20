@@ -2665,6 +2665,18 @@ ACC-02 is back to To Do: RequireVerifiedEmail is used on no booking route. Add @
 How the output was used:
 Added the decorator to POST /api/flight-bookings (a round trip is the same route with two segments), POST /api/flight-bookings/hold and POST /api/hotel-bookings. Added booking-requires-verified-email.e2e-spec.ts, which runs the real AppModule and checks 403 "Verify your email before booking" for emailVerified=false, no 403 for verified and field-less users, and 401 for guests. Updated the route table in docs/api/email-verification.md and the Swagger text in auth.controller.ts. Payments are left unguarded on purpose (a booking already needs a verified user).
 
+
+Date: 2026-11-20
+Student: Ahmed Sanad
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: Test stability follow-up to issue #119 (no requirement ID)
+Prompt:
+Diagnose the "Upload storage or indexes could not be initialized" failure that hit all tests of one e2e suite once under a parallel
+Jest run and then passed on the next run. Do not call it flaky without a cause.
+How the output was used:
+The error was thrown from a bare catch, so the real reason was lost. I tried to reproduce the concurrent-directory theory with a
+stress script (300 rounds of 6 parallel initialisations: no failure) and then kept the same error message but attached the original
+error as its cause, so the next occurrence names the real failure. No behaviour change.
 Date: 2026-11-20
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
