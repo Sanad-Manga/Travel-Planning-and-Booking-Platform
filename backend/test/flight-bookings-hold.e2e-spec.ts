@@ -2310,10 +2310,49 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       });
       expect(stripeGateway.refunds.size).toBe(1);
 
+      // GEN-01: a distinct cancellation notice, separate from the refund notification below.
+      expect(
+        await connection.collection('notifications').countDocuments({
+          userId: new Types.ObjectId(travelerId),
+          type: 'BOOKING_CANCELLED',
+          link: `/flight-bookings/${bookingId}`,
+        }),
+      ).toBe(1);
+      expect(
+        await connection.collection('notifications').countDocuments({
+          userId: new Types.ObjectId(travelerId),
+          type: 'REFUND_UPDATE',
+        }),
+      ).toBeGreaterThan(0);
+
+      // Not just a DB write: the traveler can actually see the cancellation through the real
+      // GET /api/notifications endpoint, same as any other notification.
+      const notificationsPage = await http()
+        .get('/api/notifications')
+        .set('Cookie', traveler)
+        .expect(200);
+      expect(notificationsPage.body.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: 'BOOKING_CANCELLED',
+            title: 'Flight booking cancelled',
+            link: `/flight-bookings/${bookingId}`,
+          }),
+        ]),
+      );
+
       // The booking is no longer CONFIRMED: a repeated cancellation is a 409 and changes nothing.
       await cancelRequest(bookingId, { confirm: false }).expect(409);
       expect(await connection.collection('refunds').countDocuments()).toBe(1);
       expect(stripeGateway.refunds.size).toBe(1);
+      // The retry (409, nothing cancelled) sends no additional cancellation notice.
+      expect(
+        await connection.collection('notifications').countDocuments({
+          userId: new Types.ObjectId(travelerId),
+          type: 'BOOKING_CANCELLED',
+          link: `/flight-bookings/${bookingId}`,
+        }),
+      ).toBe(1);
     });
 
     it('rejects a changed refund amount (409 with the current amount) and changes nothing until a fresh preview', async () => {
@@ -2536,6 +2575,16 @@ describe('flight seat hold (FLT-22) over HTTP (e2e)', () => {
       });
       expect(await connection.collection('refunds').countDocuments()).toBe(0);
       expect(stripeGateway.refunds.size).toBe(0);
+
+      // GEN-01: even with nothing to refund (so RefundsService never fires), the traveler still
+      // gets a cancellation notice.
+      expect(
+        await connection.collection('notifications').countDocuments({
+          userId: new Types.ObjectId(travelerId),
+          type: 'BOOKING_CANCELLED',
+          link: `/flight-bookings/${bookingId}`,
+        }),
+      ).toBe(1);
     });
 
     it('cancels a round trip as a whole with the outbound airline tier and returns both segments', async () => {

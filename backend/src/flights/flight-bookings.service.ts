@@ -21,6 +21,7 @@ import {
   FlightStatus,
   HOLD_MINUTES,
   isCalendarDate,
+  NotificationType,
   PaginatedResponse,
   PassengerType,
   PLATFORM_CURRENCY,
@@ -32,6 +33,7 @@ import {
   bookingVisibilityFilter,
 } from '../common/ownership';
 import { AirlinesService } from '../airlines';
+import { NotificationsService } from '../notifications';
 import {
   BookingLifecycle,
   CancellationTier,
@@ -176,6 +178,7 @@ export class FlightBookingsService {
     private readonly bookingLifecycle: BookingLifecycle,
     private readonly etickets: FlightETicketService,
     private readonly refunds: RefundsService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   /** FLT-19: derive passenger types from date of birth and create the pending booking with baggage details. */
@@ -711,11 +714,31 @@ export class FlightBookingsService {
       BookingStatus.CANCELLED,
     );
 
+    await this.notifyCancelled(fresh.booking);
+
     const refund = await this.issueRecordedRefund(
       id,
       fresh.refundAmountCents,
     );
     return this.toCancellationResponse(fresh, true, refund);
+  }
+
+  /**
+   * GEN-01: a distinct cancellation notice, separate from the refund notification (RefundsService
+   * fires that, and only when the refund is positive — a 0% tier would otherwise notify nothing).
+   * `NotificationsService.notify` already swallows its own failures, so a notification problem
+   * never blocks the cancellation.
+   */
+  private async notifyCancelled(booking: FlightBookingLean): Promise<void> {
+    await this.notifications.notify({
+      userId: booking.userId.toString(),
+      type: NotificationType.BOOKING_CANCELLED,
+      title: 'Flight booking cancelled',
+      message: booking.bookingReference
+        ? `Your flight booking ${booking.bookingReference} has been cancelled.`
+        : 'Your flight booking has been cancelled.',
+      link: `/flight-bookings/${booking._id.toString()}`,
+    });
   }
 
   /**
