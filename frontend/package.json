@@ -11,7 +11,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "next": "16.4.6",
@@ -19,11 +20,18 @@
     "react-dom": "19.3.1"
   },
   "devDependencies": {
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/jest-dom": "8.0.0",
+    "@testing-library/react": "16.3.3",
+    "@testing-library/user-event": "14.6.13",
     "@types/node": "22.20.5",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.3.0",
     "eslint": "9.39.5",
     "eslint-config-next": "16.4.6",
-    "typescript": "5.9.3"
+    "jsdom": "26.1.0",
+    "typescript": "5.9.3",
+    "vitest": "5.1.1"
   }
 }
