@@ -604,6 +604,27 @@ describe('hotel bookings (HTL-16) over HTTP', () => {
     expect((await db.collection('hotelBookings').findOne({ _id: lazy }))?.status).toBe(BookingStatus.COMPLETED);
   });
 
+  it('keeps completing later stays when one booking fails unexpectedly in the sweep', async () => {
+    const failing = await completedStayFixture(day(-2));
+    const later = await completedStayFixture(day(-2));
+    const bookings = app.get(HotelBookingsService);
+    const transition = jest
+      .spyOn(lifecycle, 'transition')
+      .mockRejectedValueOnce(new Error('database blip'));
+    try {
+      await expect(bookings.completePastStays(new Date())).resolves.toBe(1);
+    } finally {
+      transition.mockRestore();
+    }
+
+    expect((await db.collection('hotelBookings').findOne({ _id: failing }))?.status).toBe(BookingStatus.CONFIRMED);
+    expect((await db.collection('hotelBookings').findOne({ _id: later }))?.status).toBe(BookingStatus.COMPLETED);
+
+    // The failed stay is picked up by the next run.
+    await expect(bookings.completePastStays(new Date())).resolves.toBe(1);
+    expect((await db.collection('hotelBookings').findOne({ _id: failing }))?.status).toBe(BookingStatus.COMPLETED);
+  });
+
   it('requires an authenticated traveler for review mutations', async () => {
     const stay = await completedStayFixture();
     const unauthorized = await http()
