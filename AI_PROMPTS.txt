@@ -2452,3 +2452,12 @@ How the output was used:
 Added three read-only controllers in the reference-data module, ordered by the official code, mapping to small response DTOs so no
 MongoDB fields leak. countryCode is trimmed and upper-cased and must be two letters (field-level 400 otherwise); a well-formed code
 nobody uses gives an empty page. Added the three routes to the GEN-05 pagination table and a new e2e spec (11 tests).
+
+Date: 2026-11-20
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GEN-17 (GitHub issue #150), plus the frontend CI job
+Prompt:
+Build the shared design tokens and form/card/table styles for the frontend on the existing .btn, .btn-primary and .btn-danger classes in globals.css without changing the confirm-dialog or empty-state styles, add a labelled TextField (hint, field-level error, aria) and a Card with tests, and add a frontend CI job (install, lint, typecheck, test, build).
+How the output was used:
+Appended a GEN-17 section to globals.css (colour, type and spacing tokens with dark-mode values, .btn-sm/.btn-block, .field-*, .card, .table, reduced-motion) and left every existing rule untouched. Added TextField and Card components with tests (21 frontend tests pass; lint, typecheck pass). Added a "frontend" job to ci.yml.
