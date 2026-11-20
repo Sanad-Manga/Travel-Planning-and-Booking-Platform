@@ -87,3 +87,36 @@ jobs:
 
       - name: E2E tests
         run: npm run test:e2e
+
+  # Frontend (Milestone 2): same idea as the backend job. Clean install from the lock file, then lint,
+  # typecheck, unit tests and a production build. No backend or database is needed: the tests do not call the API.
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install (fails if package-lock.json is out of sync)
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build

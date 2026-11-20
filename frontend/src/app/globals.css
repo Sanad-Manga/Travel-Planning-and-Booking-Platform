@@ -131,3 +131,163 @@ a.btn {
   display: inline-block;
   text-decoration: none;
 }
+
+/* ---------------------------------------------------------------------------------------------
+   GEN-17: design tokens and shared components. Additive: the .btn, .btn-primary, .btn-danger,
+   confirm-* and empty-state-* rules above are unchanged; everything here builds on them.
+   --------------------------------------------------------------------------------------------- */
+:root {
+  /* Colour roles. --foreground and --background above stay the base. */
+  --surface: #f6f7fa;
+  --border: color-mix(in srgb, var(--foreground) 18%, transparent);
+  --muted: color-mix(in srgb, var(--foreground) 68%, transparent);
+  --primary: #2563eb;
+  --danger: #b91c1c;
+  --danger-text: #b91c1c;
+  --success-text: #166534;
+  --success-bg: #ecfdf3;
+  --info-bg: #eff6ff;
+  --danger-bg: #fef2f2;
+  --warning-bg: #fffbeb;
+
+  /* Type scale */
+  --font-size-sm: 0.875rem;
+  --font-size-base: 1rem;
+  --font-size-lg: 1.25rem;
+  --font-size-xl: 1.75rem;
+
+  /* Spacing scale (4px steps) */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+
+  --radius: 0.5rem;
+  --focus-ring: 3px solid #2563eb;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #171c26;
+    --danger-text: #fca5a5;
+    --success-text: #86efac;
+    --success-bg: #11261a;
+    --info-bg: #14223d;
+    --danger-bg: #2a1416;
+    --warning-bg: #2b2210;
+  }
+}
+
+h1, h2, h3 {
+  line-height: 1.25;
+  margin: 0 0 var(--space-3);
+}
+h1 { font-size: var(--font-size-xl); }
+h2 { font-size: var(--font-size-lg); }
+h3 { font-size: var(--font-size-base); }
+
+a {
+  color: var(--primary);
+}
+@media (prefers-color-scheme: dark) {
+  a { color: #93b4ff; }
+}
+a:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Buttons: size and width variants of the existing .btn */
+.btn-sm {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--font-size-sm);
+}
+.btn-block {
+  display: block;
+  width: 100%;
+  text-align: center;
+}
+
+/* Form fields */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+}
+.field-label {
+  font-weight: 600;
+}
+.field-required {
+  color: var(--danger-text);
+  margin-left: var(--space-1);
+}
+.field-hint {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--muted);
+}
+.field-error {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--danger-text);
+}
+.field-input {
+  font: inherit;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: inherit;
+  width: 100%;
+}
+.field-input:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+.field-input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+.field-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Cards */
+.card {
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.card > :last-child {
+  margin-bottom: 0;
+}
+.card-title {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-lg);
+}
+
+/* Tables */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.table th,
+.table td {
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+.table th {
+  font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
