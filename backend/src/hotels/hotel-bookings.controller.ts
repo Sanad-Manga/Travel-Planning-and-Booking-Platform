@@ -12,6 +12,7 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { ApiPaginatedResponse, AuthenticatedUser, CurrentUser, ErrorResponseDto, PaginatedResponse, Role, Roles } from '../common';
+import { RequireVerifiedEmail } from '../auth';
 import { CreateHotelBookingDto } from './dto/create-hotel-booking.dto';
 import { CreateHotelReviewDto } from './dto/create-hotel-review.dto';
 import { HotelBookingDetailsDto } from './dto/hotel-booking-details.dto';
@@ -75,6 +76,7 @@ export class HotelBookingsController {
 
   @Post()
   @Roles(Role.USER)
+  @RequireVerifiedEmail()
   @ApiOperation({
     summary: 'Create a hotel reservation with an all-or-nothing room hold (HTL-18)',
     description:
