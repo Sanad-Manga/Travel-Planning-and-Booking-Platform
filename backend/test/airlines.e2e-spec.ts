@@ -120,13 +120,11 @@ describe('airlines (FLT-01) over HTTP (e2e)', () => {
         .send({
           name: '  EgyptAir ',
           code: 'ms',
-          logoUrl: 'https://example.com/ms.png',
         })
         .expect(201);
       expect(res.body).toMatchObject({
         name: 'EgyptAir',
         code: 'MS',
-        logoUrl: 'https://example.com/ms.png',
         isActive: true,
       });
       expect(res.body.id).toMatch(/^[0-9a-f]{24}$/);
@@ -158,15 +156,15 @@ describe('airlines (FLT-01) over HTTP (e2e)', () => {
         .expect(401);
     });
 
-    it('validates name, code and logo with field-level details', async () => {
+    it('validates name and code with field-level details', async () => {
       const res = await http()
         .post('/api/airlines')
         .set('Cookie', admin)
-        .send({ name: 'A', code: 'TOOLONG', logoUrl: 'javascript:alert(1)' })
+        .send({ name: 'A', code: 'TOOLONG' })
         .expect(400);
       const fields = res.body.details.map((d: { field: string }) => d.field);
       expect(fields).toEqual(
-        expect.arrayContaining(['name', 'code', 'logoUrl']),
+        expect.arrayContaining(['name', 'code']),
       );
     });
 
@@ -234,21 +232,19 @@ describe('airlines (FLT-01) over HTTP (e2e)', () => {
   });
 
   describe('PATCH /api/airlines/:id', () => {
-    it('the moderator of that airline edits name, code and logo', async () => {
+    it('the moderator of that airline edits name and code', async () => {
       const res = await http()
         .patch(`/api/airlines/${airlineA.id}`)
         .set('Cookie', modOfA)
         .send({
           name: 'Airline A Renamed',
           code: 'AX',
-          logoUrl: 'https://example.com/a.png',
         })
         .expect(200);
       expect(res.body).toMatchObject({
         id: airlineA.id,
         name: 'Airline A Renamed',
         code: 'AX',
-        logoUrl: 'https://example.com/a.png',
       });
     });
 
@@ -289,10 +285,10 @@ describe('airlines (FLT-01) over HTTP (e2e)', () => {
       const res = await http()
         .patch(`/api/airlines/${airlineB.id}`)
         .set('Cookie', modOfB)
-        .send({ code: '!!', logoUrl: 'ftp://example.com/x.png' })
+        .send({ code: '!!' })
         .expect(400);
       const fields = res.body.details.map((d: { field: string }) => d.field);
-      expect(fields).toEqual(expect.arrayContaining(['code', 'logoUrl']));
+      expect(fields).toEqual(expect.arrayContaining(['code']));
     });
 
     it('rejects isActive (only the Admin module may change it) and an empty body', async () => {

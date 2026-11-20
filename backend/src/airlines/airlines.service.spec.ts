@@ -57,15 +57,6 @@ describe('AirlinesService with an isolated MongoDB', () => {
       );
     });
 
-    it('stores the logo url when given', async () => {
-      const airline = await service.create({
-        name: 'EgyptAir',
-        code: 'MS',
-        logoUrl: 'https://example.com/ms.png',
-      });
-      expect(airline.logoUrl).toBe('https://example.com/ms.png');
-    });
-
     it('rejects a duplicate code with 409 and a field detail', async () => {
       await service.create({ name: 'EgyptAir', code: 'MS' });
       await expect(
@@ -97,7 +88,7 @@ describe('AirlinesService with an isolated MongoDB', () => {
   });
 
   describe('update (ownership in the service)', () => {
-    it('lets the moderator of that airline change name, code and logo', async () => {
+    it('lets the moderator of that airline change name and code', async () => {
       const created = await service.create({ name: 'EgyptAir', code: 'MS' });
       const updated = await service.update(
         moderatorOf(created.id),
@@ -105,23 +96,17 @@ describe('AirlinesService with an isolated MongoDB', () => {
         {
           name: 'Egypt Air',
           code: 'MX',
-          logoUrl: 'https://example.com/new.png',
         },
       );
       expect(updated).toMatchObject({
         id: created.id,
         name: 'Egypt Air',
         code: 'MX',
-        logoUrl: 'https://example.com/new.png',
       });
     });
 
     it('only changes the fields that were sent', async () => {
-      const created = await service.create({
-        name: 'EgyptAir',
-        code: 'MS',
-        logoUrl: 'https://example.com/ms.png',
-      });
+      const created = await service.create({ name: 'EgyptAir', code: 'MS' });
       const updated = await service.update(
         moderatorOf(created.id),
         created.id,
@@ -132,7 +117,6 @@ describe('AirlinesService with an isolated MongoDB', () => {
       expect(updated).toMatchObject({
         name: 'Renamed',
         code: 'MS',
-        logoUrl: 'https://example.com/ms.png',
       });
     });
 

@@ -2432,6 +2432,17 @@ Rewrote the old test that expected 400 for COMMENT/REVIEW and added the new case
 Date: 2026-11-20
 Student: Ahmed Sanad
 Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GEN-08 (GitHub issue #160)
+Prompt:
+Check develop for GEN-08 and fix what is still missing: only activities (and, since BLG-10, posts) had an upload route. Add hotel
+photo upload (JPG/PNG, 5 MB, max 5, hotel moderator of that hotel only) and the airline logo upload (1 logo, airline moderator of
+that airline only), reusing UploadService, with tests for the limits and the ownership. Tests first for the limits.
+How the output was used:
+Added POST/DELETE /api/hotels/:id/photos and POST/DELETE /api/airlines/:id/logo following the BLG-10 pattern: ownership check
+(403 for anyone else), UploadService validates and holds the numbered slot, then one conditional update stores the reference, and the
+file is removed again if that fails. A second logo is 409 until the first is removed (no atomic replacement). Followed BLG-10 and removed
+the free-text photos and logoUrl fields from the hotel and airline create/edit bodies, so a client cannot point at an upload it does
+not own; updated the older hotel and airline tests that sent them. 19 new e2e tests (hotel-airline-images).
 Related Requirement: GEN-12 (GitHub issue #162)
 Prompt:
 Add the public, paginated reference-data lookups from the GEN-12 issue: GET /api/countries (code, name, currency), GET /api/cities

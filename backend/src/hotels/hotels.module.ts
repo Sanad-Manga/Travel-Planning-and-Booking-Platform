@@ -4,6 +4,7 @@ import { NotificationsModule } from '../notifications';
 import { PaymentsModule } from '../payments';
 import { RefundsModule } from '../refunds';
 import { ReferenceDataModule } from '../reference-data/reference-data.module';
+import { UploadsModule } from '../uploads';
 import { UsersModule } from '../users/users.module';
 import { HotelBookingCancellationController } from './hotel-booking-cancellation.controller';
 import { HotelBookingCancellationService } from './hotel-booking-cancellation.service';
@@ -16,6 +17,8 @@ import { HotelFreeRoomsController } from './hotel-free-rooms.controller';
 import { HotelFreeRoomsService } from './hotel-free-rooms.service';
 import { HotelRoomStatusController } from './hotel-room-status.controller';
 import { HotelRoomStatusService } from './hotel-room-status.service';
+import { HotelPhotosController } from './hotel-photos.controller';
+import { HotelPhotosService } from './hotel-photos.service';
 import { HotelReservationsController } from './hotel-reservations.controller';
 import { HotelReviewsController } from './hotel-reviews.controller';
 import { HotelReviewsService } from './hotel-reviews.service';
@@ -44,6 +47,7 @@ import { Room, RoomSchema } from './schemas/room.schema';
     RefundsModule, // HTL-21: RefundsService.issue (PAY-03) for the refund of a cancelled reservation
     NotificationsModule,
     UsersModule,
+    UploadsModule, // GEN-08: hotel photos
   ],
   // HotelSearchController first: the fixed route (search) must be matched before GET :id (HotelDetailsController).
   controllers: [
@@ -56,10 +60,12 @@ import { Room, RoomSchema } from './schemas/room.schema';
     HotelBookingCancellationController,
     HotelReviewsController,
     HotelsController,
+    HotelPhotosController,
     RoomsController,
   ],
   providers: [
     HotelsService,
+    HotelPhotosService,
     HotelDetailsService,
     RoomsService,
     HotelAvailabilityService,

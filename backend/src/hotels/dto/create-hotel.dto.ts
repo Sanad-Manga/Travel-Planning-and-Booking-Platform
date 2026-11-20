@@ -1,20 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform, Type } from 'class-transformer';
+import { Transform } from 'class-transformer';
 import {
   ArrayMaxSize,
-  ArrayUnique,
   IsArray,
   IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
-  Matches,
   Max,
   MaxLength,
   Min,
-  ValidateNested,
 } from 'class-validator';
-import { MAX_IMAGES_PER_ENTITY } from '../../common';
 import {
   HOTEL_ADDRESS_MAX_LENGTH,
   HOTEL_AMENITY_MAX_LENGTH,
@@ -42,22 +38,12 @@ const cleanAmenities = ({ value }: { value: unknown }) => {
     });
 };
 
+/** A hotel photo as returned by the API. Response only: photos are added through POST /hotels/:id/photos (GEN-08). */
 export class HotelPhotoDto {
   @ApiProperty({ description: 'Id returned by the Upload service (GEN-08).', example: '6730a1f2c3d4e5f607182931' })
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(100)
   id: string;
 
-  @ApiProperty({
-    description: 'Url returned by the Upload service (GEN-08). Must be an upload path (/uploads/...) until the service exists.',
-    example: '/uploads/hotels/6730a1f2.jpg',
-  })
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(500)
-  // Stub until the Upload service (GEN-08) can vouch for ids: only a local /uploads/ path, no scheme, host or "..".
-  @Matches(/^\/uploads\/(?!.*\.\.)[\w\-./]+$/, { message: 'url must be an upload path such as /uploads/hotels/photo.jpg' })
+  @ApiProperty({ description: 'Backend-relative url of the stored image.', example: '/uploads/6730a1f2c3d4e5f607182931.jpg' })
   url: string;
 }
 
@@ -104,17 +90,4 @@ export class CreateHotelDto {
   @IsString({ each: true })
   @MaxLength(HOTEL_AMENITY_MAX_LENGTH, { each: true })
   amenities?: string[];
-
-  @ApiPropertyOptional({
-    type: [HotelPhotoDto],
-    maxItems: MAX_IMAGES_PER_ENTITY,
-    description: 'Photos already uploaded through the Upload service (JPG/PNG, 5 MB, max 5 per hotel).',
-  })
-  @IsOptional()
-  @IsArray()
-  @ArrayMaxSize(MAX_IMAGES_PER_ENTITY)
-  @ValidateNested({ each: true })
-  @Type(() => HotelPhotoDto)
-  @ArrayUnique((p: HotelPhotoDto) => p.id)
-  photos?: HotelPhotoDto[];
 }
