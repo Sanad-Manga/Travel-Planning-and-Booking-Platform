@@ -77,6 +77,8 @@ export class CommentsService {
           _id: new Types.ObjectId(postId),
           status: PostStatus.PUBLISHED,
           isHidden: false,
+          // ACC-12: a deactivated author's post is not public, so it cannot be commented on.
+          authorId: { $nin: await this.users.findDeactivatedIds() },
         },
         { $inc: { commentCount: 1 } },
         { session },
@@ -128,6 +130,11 @@ export class CommentsService {
     const isPostAuthor = post.authorId.toString() === viewer?.userId;
 
     if (post.isHidden && !isAdmin && !isPostAuthor) {
+      throw new NotFoundException('Post not found');
+    }
+
+    // ACC-12: the comments of a deactivated author's post are hidden with the post (admins still see them).
+    if (!isAdmin && (await this.users.isDeactivated(post.authorId.toString()))) {
       throw new NotFoundException('Post not found');
     }
 

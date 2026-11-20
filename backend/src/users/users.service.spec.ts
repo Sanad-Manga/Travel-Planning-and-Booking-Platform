@@ -78,6 +78,48 @@ describe('UsersService', () => {
     });
   });
 
+  describe('ACC-12 deactivated users', () => {
+    const lean = jest.fn();
+    const ID = '674a1b2c3d4e5f6a7b8c9d0e';
+    const find = jest.fn();
+
+    beforeEach(() => {
+      select.mockReturnValue({ lean });
+      lean.mockReturnValue(query);
+      (model as Record<string, unknown>).find = find;
+      find.mockReturnValue(query);
+    });
+
+    it('findDeactivatedIds returns the ids of DEACTIVATED users only', async () => {
+      exec.mockResolvedValue([{ _id: 'a' }, { _id: 'b' }]);
+      await expect(service.findDeactivatedIds()).resolves.toEqual(['a', 'b']);
+      expect(find).toHaveBeenCalledWith({ status: 'DEACTIVATED' });
+      expect(select).toHaveBeenCalledWith('_id');
+    });
+
+    it('findDeactivatedIds is empty when nobody is deactivated', async () => {
+      exec.mockResolvedValue([]);
+      await expect(service.findDeactivatedIds()).resolves.toEqual([]);
+    });
+
+    it('isDeactivated is true only for DEACTIVATED', async () => {
+      exec.mockResolvedValue({ status: 'DEACTIVATED' });
+      await expect(service.isDeactivated(ID)).resolves.toBe(true);
+      for (const status of ['ACTIVE', 'SUSPENDED']) {
+        exec.mockResolvedValue({ status });
+        await expect(service.isDeactivated(ID)).resolves.toBe(false);
+      }
+    });
+
+    it('isDeactivated is false for an unknown user and for a malformed id (no query)', async () => {
+      exec.mockResolvedValue(null);
+      await expect(service.isDeactivated(ID)).resolves.toBe(false);
+      model.findById.mockClear();
+      await expect(service.isDeactivated('nope')).resolves.toBe(false);
+      expect(model.findById).not.toHaveBeenCalled();
+    });
+  });
+
   describe('updateProfile (ACC-09)', () => {
     const ID = '674a1b2c3d4e5f6a7b8c9d0e';
 

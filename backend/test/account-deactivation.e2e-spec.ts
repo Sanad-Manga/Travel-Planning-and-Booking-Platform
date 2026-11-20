@@ -19,7 +19,7 @@ const find = (res: request.Response, name: string): string => setCookies(res).fi
 const valueOf = (cookie: string): string => cookie.split(';')[0].split('=')[1];
 
 // ACC-12 against a real (in-memory, disposable) MongoDB and the whole AppModule. Atlas is never touched.
-// The booking check is a TEST DOUBLE: Flights B / Hotels B have not registered their checkers yet.
+// The booking check is a TEST DOUBLE that replaces the real flight checker (the real ones are proven in flight-deactivation-block.e2e-spec.ts).
 describe('DELETE /api/users/me (ACC-12, e2e)', () => {
   let app: INestApplication;
   let mongo: MongoMemoryReplSet;

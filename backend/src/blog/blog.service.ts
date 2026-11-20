@@ -99,6 +99,8 @@ export class BlogService {
   async listPublished(query: BrowsePostsQueryDto): Promise<PaginatedResponse<PostListRowDto>> {
     const filter: FilterQuery<Post> = { status: PostStatus.PUBLISHED, isHidden: false };
     if (query.tag) filter.tags = query.tag;
+    // ACC-12: posts of a deactivated author are not public. Part of the filter, so totals and pages stay correct.
+    filter.authorId = { $nin: await this.users.findDeactivatedIds() };
     if (query.q) return this.searchPublished(filter, query.q, query);
 
     const page = await paginate(this.posts, filter, query, {
@@ -190,7 +192,7 @@ export class BlogService {
 
     const post = await this.posts.findById(id).lean<LeanPost>().exec();
 
-    if (!post || !this.canView(post, viewer)) {
+    if (!post || !this.canView(post, viewer) || (await this.isHiddenByDeactivation(post, viewer))) {
       throw new NotFoundException('Post not found');
     }
 
@@ -218,6 +220,8 @@ export class BlogService {
       _id: postId,
       status: PostStatus.PUBLISHED,
       isHidden: false,
+      // ACC-12: a deactivated author's post is not public, so it cannot be liked.
+      authorId: { $nin: await this.users.findDeactivatedIds() },
     };
 
     try {
@@ -407,6 +411,12 @@ export class BlogService {
     if (post.status !== PostStatus.PUBLISHED) return false;
     if (!post.isHidden) return true;
     return viewer !== undefined && (viewer.role === Role.ADMIN || post.authorId.toString() === viewer.userId);
+  }
+
+  /** ACC-12: a deactivated author's post is hidden from everyone except admins (same 404 as an unknown post). */
+  private async isHiddenByDeactivation(post: LeanPost, viewer?: AuthenticatedUser): Promise<boolean> {
+    if (viewer?.role === Role.ADMIN) return false;
+    return this.users.isDeactivated(post.authorId.toString());
   }
 
   /** author id -> display name, one lookup per distinct author. Unknown authors are simply missing from the map. */
