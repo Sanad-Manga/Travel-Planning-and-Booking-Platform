@@ -4,5 +4,5 @@ import { ComingSoon } from '@/components/ComingSoon';
 export const metadata: Metadata = { title: 'Blog | Travel Planning and Booking Platform' };
 
 export default function BlogPage() {
-  return <ComingSoon title="Blog" />;
+  return <ComingSoon title="Blog" description="Read and share travel stories." />;
 }

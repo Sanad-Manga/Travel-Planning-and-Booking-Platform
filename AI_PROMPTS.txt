@@ -2663,6 +2663,15 @@ Prompt:
 Build the app shell with clear information architecture in the frontend: a skip link as the first focusable element, a Header with the site name and primary nav (Home, Flights, Hotels, Itineraries, Blog, Login, Register) with aria-current on the current page, a mobile menu button with aria-expanded and aria-controls that closes on route change and Escape, a main landmark with id main-content and tabIndex -1, a Footer, and coming-soon placeholder pages so no link 404s. Tests first, no new dependencies, extend globals.css only.
 How the output was used:
 Added SkipLink, Header, Footer, AppShell and ComingSoon components plus placeholder pages for flights, hotels, itineraries, blog, login and register, with tests written first. Appended a GEN-14 section to globals.css, wrapped the layout children in AppShell, and removed the page-level main from the home page so there is a single main landmark.
+
+Date: 2026-11-20
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GEN-15
+Prompt:
+Build reusable usability pieces for the frontend: PageHeader (h1, description, one primary action slot), Breadcrumbs (nav aria-label Breadcrumb, last item aria-current page), FormActions (primary button first, visible cancel, primary disabled with a Spinner while submitting) and Steps (aria-current step). Use them on the GEN-14 placeholder pages, add a short Wording and flow guide to frontend/README.md, tests first, no new dependencies, extend globals.css only.
+How the output was used:
+Added the four components with tests written first, appended a GEN-15 section to globals.css, rebuilt ComingSoon on PageHeader and Breadcrumbs with a description per placeholder page, and added the Wording and flow guide to the frontend README.
 Student: Ahmed Sanad
 Tool: Claude Code (Claude Sonnet 5.5)
 Related Requirement: CI tooling (no ticket)

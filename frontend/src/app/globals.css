@@ -669,3 +669,127 @@ video {
     padding-top: 0;
   }
 }
+
+/* ---------------------------------------------------------------------------------------------
+   GEN-15: usability pieces (page header, breadcrumbs, form actions, steps).
+   --------------------------------------------------------------------------------------------- */
+.page-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin-bottom: var(--space-6);
+}
+.page-header-title {
+  margin: 0;
+}
+.page-header-description {
+  margin: var(--space-1) 0 0;
+  color: var(--muted);
+}
+.page-header-action {
+  align-self: flex-start;
+}
+
+.breadcrumbs {
+  margin-bottom: var(--space-3);
+  font-size: var(--font-size-sm);
+}
+.breadcrumbs-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.breadcrumbs-item + .breadcrumbs-item::before {
+  content: '/';
+  margin-right: var(--space-1);
+  color: var(--muted);
+}
+.breadcrumbs-item a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+}
+.breadcrumbs-item [aria-current='page'] {
+  font-weight: 600;
+}
+
+.form-actions .btn-primary {
+  gap: var(--space-2);
+}
+.form-actions-label {
+  white-space: nowrap;
+}
+.form-actions .btn-primary .spinner {
+  border-color: rgba(255, 255, 255, 0.4);
+  border-top-color: #ffffff;
+}
+.form-actions a.btn {
+  text-decoration: none;
+  color: inherit;
+}
+
+.steps {
+  margin-bottom: var(--space-6);
+}
+.steps-summary {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--muted);
+}
+.steps-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--muted);
+}
+.step-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 2px solid var(--border);
+  border-radius: 50%;
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+}
+.step-current {
+  color: var(--foreground);
+  font-weight: 700;
+}
+.step-current .step-number {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #ffffff;
+}
+.step-done {
+  color: var(--foreground);
+}
+.step-done .step-number {
+  border-color: var(--success-text);
+  color: var(--success-text);
+}
+
+@media (min-width: 40rem) {
+  .page-header {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+  }
+  .steps-list {
+    flex-direction: row;
+    gap: var(--space-6);
+  }
+}
