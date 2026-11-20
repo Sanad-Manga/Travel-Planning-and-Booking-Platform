@@ -2481,3 +2481,10 @@ Verification: npx tsc --noEmit -p ., npx eslint (changed files), npm run build a
 163/163 passed; npx jest --config ./test/jest-e2e.json test/admin-moderators.e2e-spec.ts --maxWorkers=1 --silent 16/16
 passed. Not done: no full local e2e/unit suite run (CI covers that); no manual Swagger click-through against Atlas (no
 Swagger-visible change — the invite is an internal side-effect of an existing endpoint).
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-02 (reopened by the scrum master: unverified user could still book)
+Prompt:
+ACC-02 is back to To Do: RequireVerifiedEmail is used on no booking route. Add @RequireVerifiedEmail() to flight-bookings (create, hold, round trip) and hotel-bookings create, fix the docs that say booking is blocked, and add a test showing an unverified user gets 403 on booking.
+How the output was used:
+Added the decorator to POST /api/flight-bookings (a round trip is the same route with two segments), POST /api/flight-bookings/hold and POST /api/hotel-bookings. Added booking-requires-verified-email.e2e-spec.ts, which runs the real AppModule and checks 403 "Verify your email before booking" for emailVerified=false, no 403 for verified and field-less users, and 401 for guests. Updated the route table in docs/api/email-verification.md and the Swagger text in auth.controller.ts. Payments are left unguarded on purpose (a booking already needs a verified user).
