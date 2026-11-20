@@ -117,6 +117,46 @@ describe('edit flight (FLT-05) over HTTP (e2e)', () => {
     return _id;
   }
 
+  /**
+   * A round-trip booking: it stores only its OUTBOUND flight in `flightId`; the return leg exists only in
+   * `segments`. `returnFlightId` is the flight under test, so this booking reaches it through its second segment.
+   */
+  async function seedReturnLegBooking(
+    returnFlightId: string,
+    userId: Types.ObjectId,
+    status: string,
+  ) {
+    const _id = new Types.ObjectId();
+    const outboundFlightId = new Types.ObjectId();
+    const segment = (flightId: Types.ObjectId) => ({
+      flightId,
+      airlineId,
+      cabinClass: 'ECONOMY',
+      seats: 1,
+      farePerPassengerCents: 45000,
+      infantFareCents: 0,
+      baggageFeeCents: 0,
+    });
+    await connection.collection('flightBookings').insertOne({
+      _id,
+      userId,
+      airlineId,
+      flightId: outboundFlightId,
+      segments: [
+        segment(outboundFlightId),
+        segment(new Types.ObjectId(returnFlightId)),
+      ],
+      cabinClass: 'ECONOMY',
+      seats: 1,
+      farePerPassengerCents: 45000,
+      totalCents: 90000,
+      status,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    return _id;
+  }
+
   const stored = (id: string) =>
     connection.collection('flights').findOne({ _id: new Types.ObjectId(id) });
   const notificationsOf = (userId: Types.ObjectId) =>
@@ -374,6 +414,15 @@ describe('edit flight (FLT-05) over HTTP (e2e)', () => {
       },
     );
 
+    it('a booking that holds this flight as the RETURN leg of a round trip locks the airports too', async () => {
+      const { id } = await seedFlight();
+      await seedReturnLegBooking(id, new Types.ObjectId(), 'CONFIRMED');
+
+      await patch(id, { arrivalAirport: 'LHR' }).expect(409);
+
+      expect((await stored(id))?.arrivalAirport).toBe('JFK');
+    });
+
     it('an expired or cancelled booking does not lock them', async () => {
       const { id } = await seedFlight();
       await seedBooking(id, new Types.ObjectId(), 'EXPIRED');
@@ -438,6 +487,28 @@ describe('edit flight (FLT-05) over HTTP (e2e)', () => {
       expect(await notificationsOf(confirmedOnce)).toHaveLength(1);
       expect(await notificationsOf(pending)).toHaveLength(0);
       expect(await notificationsOf(cancelled)).toHaveLength(0);
+    });
+
+    it('a time change also notifies each passenger whose CONFIRMED round trip has this flight as its return leg, once', async () => {
+      const { id } = await seedFlight();
+      const roundTripper = new Types.ObjectId();
+      const pending = new Types.ObjectId();
+      const firstBooking = await seedReturnLegBooking(
+        id,
+        roundTripper,
+        'CONFIRMED',
+      );
+      await seedReturnLegBooking(id, roundTripper, 'CONFIRMED');
+      await seedReturnLegBooking(id, pending, 'PENDING_PAYMENT');
+
+      await patch(id, { departureLocalTime: '2090-12-01T16:00' }).expect(200);
+
+      const notes = await notificationsOf(roundTripper);
+      expect(notes).toHaveLength(1);
+      expect(notes[0]).toMatchObject({
+        link: `/flight-bookings/${firstBooking.toString()}`,
+      });
+      expect(await notificationsOf(pending)).toHaveLength(0);
     });
 
     it('an edit that leaves both times as they were sends nothing', async () => {

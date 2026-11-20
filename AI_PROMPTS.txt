@@ -2375,6 +2375,11 @@ Added unit tests for the failure cases, then changed ReportsAdminService.resolve
 Date: 2026-11-19
 Student: Ahmed Sanad
 Tool: Claude (Claude Code)
+Related Requirement: FLT-05 (follow-up: round-trip return-leg bookings, issue #154)
+Prompt:
+Fix the FLT-05 gap the reviewer found: a round-trip booking stores only its outbound flight in flightId and its return leg only in segments[].flightId, so for a flight that is the return leg the airports could still be changed while it had paid bookings, and a time change did not notify those passengers. Prove it with failing e2e tests first, then fix both places with the same $or filter that the cancellation and roster services use.
+How the output was used:
+Added two round-trip e2e tests to flight-edit.e2e-spec.ts (airport lock 409 for a CONFIRMED return-leg booking; one notification per passenger for a CONFIRMED return-leg booking, none for a pending one) and ran them to see them fail. Then added an onFlight() filter ($or on flightId and segments.flightId) used by hasActiveBookings and notifyPassengers in flight-edit.service.ts. The spec passes (28/28); build and lint pass. Nothing else changed.
 Related Requirement: Milestone 2 setup (frontend scaffold, groundwork for GEN-03 and GEN-04)
 Prompt:
 Scaffold the Next.js app in frontend/ so the Milestone 2 tickets (starting with GEN-03 confirm before destructive actions and GEN-04 friendly empty states) have somewhere to go: App Router and TypeScript, exact pinned versions like the backend, lint and typecheck scripts, and the backend API reachable from the same origin so the httpOnly auth cookies work.
