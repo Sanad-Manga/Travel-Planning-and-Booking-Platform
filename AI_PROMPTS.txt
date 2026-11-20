@@ -2740,6 +2740,11 @@ Added a small `changes` job to .github/workflows/ci.yml that lists the files a p
 Date: 2026-11-20
 Student: Ahmed Sanad
 Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: PAY-01 / FLT-22 (final audit M1.3)
+Prompt:
+Final audit: getPayable for flight bookings checks only owner, status and hold time, so a pending hold can still be paid after its flight departed. Refuse payment in that case without breaking reads of confirmed bookings, and add tests.
+How the output was used:
+Added assertFlightsStillOpen to FlightBookingProvider.getPayable: only for PENDING_PAYMENT bookings it loads the booking's legs and throws 409 when a leg's effective status is not SCHEDULED (reuses effectiveFlightStatus). Confirmed bookings stay readable. Left hotels and airline deactivation alone because deactivation and flight cancellation already release pending holds. Added an e2e case covering both behaviours.
 Related Requirement: BON-01 (final audit H3)
 Prompt:
 Final audit: admin analytics revenue counts only CONFIRMED bookings, so a booking drops out of revenue when the nightly GEN-11 sweep makes it COMPLETED. Count CONFIRMED and COMPLETED bookings in revenue and in the confirmed count, update the Swagger text, and add tests.

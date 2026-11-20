@@ -1,8 +1,9 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { ConflictException, Injectable, OnModuleInit } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { randomBytes } from 'node:crypto';
 import { Connection, Model, Types } from 'mongoose';
-import { BookingStatus, BookingType, NotificationType } from '../common';
+import { BookingStatus, BookingType, FlightStatus, NotificationType } from '../common';
+import { effectiveFlightStatus } from './utils/flight-status';
 import { AirlinesService } from '../airlines';
 import { FlightInventoryService } from './flight-inventory.service';
 import { NotificationsService } from '../notifications';
@@ -116,21 +117,53 @@ export class FlightBookingProvider implements BookingProvider, UpcomingBookingsC
         _id: new Types.ObjectId(id),
         userId: new Types.ObjectId(userId),
       })
-      .select('totalCents currency status holdExpiresAt')
+      .select('totalCents currency status holdExpiresAt flightId segments')
       .lean<
         Pick<
           FlightBookingLean,
-          'totalCents' | 'currency' | 'status' | 'holdExpiresAt'
+          | 'totalCents'
+          | 'currency'
+          | 'status'
+          | 'holdExpiresAt'
+          | 'flightId'
+          | 'segments'
         >
       >()
       .exec();
     if (!booking) return null;
+    // Only a hold that is still waiting for payment can be blocked: a CONFIRMED booking on a flight
+    // that has since left must stay readable (summary, itinerary link).
+    if (booking.status === BookingStatus.PENDING_PAYMENT) {
+      await this.assertFlightsStillOpen(booking);
+    }
     return {
       amountCents: booking.totalCents,
       currency: booking.currency,
       status: booking.status,
       holdExpiresAt: booking.holdExpiresAt ?? null,
     };
+  }
+
+  /** A held seat on a flight that departed (or was cancelled) in the meantime must not be paid for. */
+  private async assertFlightsStillOpen(
+    booking: Pick<FlightBookingLean, 'flightId' | 'segments'>,
+  ): Promise<void> {
+    const flightIds = booking.segments?.length
+      ? booking.segments.map((segment) => segment.flightId)
+      : [booking.flightId];
+    const legs = await this.flights
+      .find({ _id: { $in: flightIds } })
+      .select('status departureAt')
+      .lean<Pick<Flight, 'status' | 'departureAt'>[]>()
+      .exec();
+    const closed = legs.find(
+      (leg) => effectiveFlightStatus(leg) !== FlightStatus.SCHEDULED,
+    );
+    if (closed) {
+      throw new ConflictException(
+        `This flight is no longer open for payment (it is ${effectiveFlightStatus(closed)})`,
+      );
+    }
   }
 
   async getStatus(id: string): Promise<BookingStatusSnapshot | null> {
