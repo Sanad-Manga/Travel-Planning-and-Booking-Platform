@@ -1,4 +1,4 @@
-# Hotel search and the free-room function (HTL-11)
+# Hotel search and the free-room function (HTL-11, HTL-12)
 
 ## Endpoint
 
@@ -10,6 +10,9 @@
 | `checkIn`, `checkOut` | `YYYY-MM-DD`. `checkOut` after `checkIn`; `checkIn` not before today (UTC). |
 | `guests` | Whole number 1-100. |
 | `rooms` | Whole number 1-10, default 1. |
+| `minPrice`, `maxPrice` | HTL-12: optional inclusive price per night in **integer cents**, using the cheapest qualifying room (or cheapest combination when `rooms` > 1). `minPrice` above `maxPrice` is a 400. |
+| `minRating` | HTL-12: optional minimum average review rating, 1-5 inclusive (a decimal such as 4.5 is allowed). A hotel with no rating is excluded while this is set. |
+| `sort`, `order` | HTL-12: `sort` is `price` (default) or `rating`; `order` is `asc` (default) or `desc`. Any other value is a 400. |
 | `page`, `limit` | Shared pagination (default 1 / 10, max 50). A page past the end is `items: []`. |
 
 Returns `{ items, page, limit, total, totalPages }`. Each item: `id, name, cityId, cityName, countryCode, countryName,
@@ -17,6 +20,24 @@ starRating, freeRooms, nights, cheapestTotalCents, currency`. Sorted by `cheapes
 A hotel is returned if it is ACTIVE and at least `rooms` rooms are free for the whole stay and **some choice of exactly
 `rooms` of them** sleeps `guests` people together. `cheapestTotalCents` = nights x the cheapest such choice (a "from"
 price). It is a feasibility check only: nothing is held or booked (HTL-16/18 re-check).
+
+## Price and rating filters, sorting (HTL-12)
+
+The filters narrow the same matches; the response shape does not change.
+
+- **Price.** `minPrice` / `maxPrice` are inclusive and expressed in **integer cents per night**. The price is the
+  cheapest qualifying room: with `rooms=1` its `pricePerNightCents`, with `rooms > 1` the cheapest combination of
+  exactly `rooms` free rooms that together fit `guests` (the same figure as `cheapestTotalCents / nights`). A hotel is
+  kept when `minPrice <= price <= maxPrice`; a missing bound is open-ended. `minPrice > maxPrice` is a field-level 400
+  on `minPrice`.
+- **Rating.** `minRating` (1-5, decimal allowed) compares the hotel's stored `averageRating` (visible reviews only,
+  maintained by HTL-23). A hotel with `averageRating: null` is **excluded** as soon as `minRating` is set.
+- **Sorting.** `sort=price` (default) orders by the price above; `sort=rating` orders by `averageRating`, and unrated
+  hotels are **always last** in both directions. `order=asc` (default) or `order=desc` picks the direction. Ties fall
+  back to name, then id, so pages are stable. `sort=price&order=asc` is exactly the original HTL-11 order
+  (`cheapestTotalCents`, then name, then id) because `nights` is the same for every match.
+- Unknown `sort` / `order` values and malformed prices/ratings are field-level 400s in the shared shape
+  `{ message: 'Validation failed', details: [{ field, message }] }`.
 
 ## `HotelAvailabilityService.findFreeRooms` (exported from `HotelsModule`)
 
