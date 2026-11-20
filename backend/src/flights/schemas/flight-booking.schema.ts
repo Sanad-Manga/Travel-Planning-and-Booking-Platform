@@ -74,6 +74,23 @@ export class FlightBookingSegment {
 const FlightBookingSegmentSchema =
   SchemaFactory.createForClass(FlightBookingSegment);
 
+/** FLT-28: the seat a passenger chose on one flight of the booking. */
+@Schema({ _id: false })
+export class FlightSeatSelection {
+  @Prop({ type: Types.ObjectId, ref: 'Flight', required: true })
+  flightId: Types.ObjectId;
+
+  /** Index into `passengers`. */
+  @Prop({ type: Number, required: true, min: 0 })
+  passengerIndex: number;
+
+  /** Seat label in the booked cabin, e.g. "12A". */
+  @Prop({ type: String, required: true })
+  seat: string;
+}
+const FlightSeatSelectionSchema =
+  SchemaFactory.createForClass(FlightSeatSelection);
+
 /**
  * A flight booking (collection `flightBookings`). FLT-22 creates it as PENDING_PAYMENT with the seats held;
  * the status only ever changes through BookingLifecycle (docs/contracts.md section 5).
@@ -149,6 +166,13 @@ export class FlightBooking {
    */
   @Prop({ type: String })
   bookingReference?: string;
+
+  /**
+   * FLT-28: seats the traveler picked (at most one per passenger per flight), written only by
+   * FlightSeatSelectionService after the seat was claimed in `flightSeatClaims`. Absent until a seat is chosen.
+   */
+  @Prop({ type: [FlightSeatSelectionSchema], default: undefined })
+  seatSelections?: FlightSeatSelection[];
 
   /**
    * FLT-26: what this cancellation refunds, recorded just before the status becomes CANCELLED
