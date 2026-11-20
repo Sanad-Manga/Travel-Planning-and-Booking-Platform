@@ -2745,3 +2745,8 @@ Prompt:
 Final audit: the nightly hotel completion sweep rethrows any unexpected error, so one bad booking leaves every later due stay CONFIRMED until the next night (the flight sweep logs and continues). Make the hotel sweep log the error and move on, with a test that fails the first transition and still completes the next booking.
 How the output was used:
 Added a Logger to HotelBookingsService and replaced the rethrow with a logged error (cursor already advances past the id), mirroring the flight sweep. Added an e2e case that makes the first transition throw a plain Error, then checks the later stay is COMPLETED, the failed one stays CONFIRMED and is completed by the next run.
+Related Requirement: GEN-12 / PAY-01 (final audit H1, H2, L5)
+Prompt:
+Final audit of develop found the README does not explain npm run seed, the demo setup order, or how to get a booking CONFIRMED from Swagger (the Stripe webhook is hidden and only a signed payment_intent.succeeded confirms). Add a Demo setup section and a Demo a payment section using the Stripe CLI, and fix the contracts sentence saying flights complete when DEPARTED (the code completes on arrival in a nightly sweep).
+How the output was used:
+Added the seed script row, the setup order, the stripe listen and payment_intents confirm steps and a note that reviews need pre-prepared past stays to README.md; corrected the GEN-11 flight completion sentence in docs/contracts.md. Checked each step against the controllers and cookie settings. Docs only.
