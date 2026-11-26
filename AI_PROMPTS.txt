@@ -2948,6 +2948,20 @@ Exported the Swagger document from the real controllers (without a database) int
 Date: 2026-11-26
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Opus 5.5)
+Related Requirement: FLT-02, GEN-12 (SCRUM-135)
+Prompt:
+Frontend only: build searchable Airport / City / Country / Currency pickers (searchable dropdowns) on top of the GEN-02 API client. Tests first; keep the tests small. The backend lists have no search parameter and a page size of at most 50.
+How the output was used:
+Tests written first and watched fail (listAll paging, the ReferencePicker combobox: filtering, keyboard and mouse selection, Escape, no-match, loading/error/field-error states; each picker loading its list and reporting the right code; the city picker filtering by country). Added listAll/allKey/fetchAll and the item types to src/api/referenceData.ts (loads every 50-item page once, SWR-cached, capped at 20 pages), the accessible ReferencePicker component (ARIA combobox + listbox) and AirportPicker (IATA code), CountryPicker (country code), CityPicker (city id, optional countryCode) and CurrencyPicker (currency code) in src/components/pickers.tsx, plus picker styles in globals.css with 44px touch targets.
+
+Date: 2026-11-26
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Opus 5.5)
+Related Requirement: FLT-02, GEN-12 (SCRUM-135)
+Prompt:
+Address the lead's review on PR #199: (1) a chosen picker value cannot be cleared, so optional filters can never be unset; (2) listAll stops at 1,000 items without telling anyone. Add tests for both.
+How the output was used:
+Tests written first. ReferencePicker now clears the value (onChange('')) when the text is emptied and the field loses focus or Enter is pressed, and shows a Clear button on optional fields that have a value. listAll returns { items, total }; when the server's total is larger than what was loaded, the picker shows "Only the first 1,000 of N are listed." under the field, linked to the input with aria-describedby. The 1,000 cap stays: the CSVs in the repo have 7 rows each.
 Related Requirement: GEN-17 (SCRUM-144)
 Prompt:
 Frontend only: a server-side fetch helper that forwards the user's cookies to the backend, a client-side fallback when the server gets a 401, and one example page. Tests first; keep the tests small.
@@ -2955,6 +2969,12 @@ How the output was used:
 Tests written first and watched fail (serverApi forwards only access_token to BACKEND_URL with no-store, no Cookie for a guest, 401 becomes { ok: false, reason: 'unauthorized' }, other errors throw ApiError; the example page renders server data with no browser request, and on a server 401 loads the user in the browser instead). Added src/lib/serverApi.ts (never forwards the refresh token, since a server component cannot set rotated cookies), exported toApiError from src/lib/api.ts, added the /examples/server-fetch page (ProfileSummary, ProfileSummaryClient using useApi with loading/error states) and a README section.
 Student: Abdelrahman ElGabarty
 Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GEN-06, GEN-11 (SCRUM-138, M2: formatMoney / formatInZone / StatusBadge / Countdown)
+Prompt:
+Frontend only. Build the shared display helpers other M2 tickets import: formatMoney (integer minor units + currency code), formatInZone (UTC ISO timestamp shown in an IANA zone), StatusBadge (backend booking/payment/refund/flight status to words + tone) and Countdown (to a hold expiry). Build this first because TierEditor, checkout and the booking pages render money, times and statuses.
+How the output was used:
+Added lib/formatMoney.ts (always divides by 100 like the backend (every currency is 100 minor units per unit, per docs/contracts.md section 3) and lets Intl choose the decimals shown, so 250000 is 2,500.00 in USD, ¥2,500 in JPY and 2,500.000 in KWD; a missing or non-integer amount shows a dash, an invalid currency code shows "amount CODE"), lib/formatInZone.ts (Intl.DateTimeFormat with the given IANA zone, 24-hour time, optional date-only and zone-name; an unknown zone falls back to UTC and says so), components/StatusBadge.tsx (one lookup for every status value in common/enums with a label and tone; the word is always shown so colour never carries the meaning alone; an unknown status is shown as plain words in the neutral tone) and components/Countdown.tsx (reads the time after mount so server and browser agree on first paint, rounds a partial second up, calls onExpire once, is not announced every second, restarts for a new expiry). Added the badge and countdown styles to globals.css using the existing tokens, with dark-mode colours. The ticket text was not readable (Jira access was down), so the behaviour above follows the ticket title and docs/contracts.md only; the exact labels and the countdown format are my choice and may need to match the ticket.
+Verification: npm run lint, npm run typecheck, npm run build clean; npm test 366/366 passed (26 new tests across the four files); changed Countdown's Math.ceil to Math.floor on purpose and the rounding test failed, then restored it. Not done: none of the four is used by a page yet, so nothing was checked in a browser.
 Related Requirement: FLT-09, HTL-10 (SCRUM-139, M2-07: TierEditor, cancellation tiers form)
 Prompt:
 Frontend only. Build the TierEditor form component for a provider's cancellation refund tiers, used later by the airline policies page (SCRUM-204) and the hotel policies page (SCRUM-207). It edits a list of { daysBeforeThreshold, refundPercent } and saves the whole list, using the backend's rules from SetCancellationPolicyDto and UpdateHotelPoliciesDto.
