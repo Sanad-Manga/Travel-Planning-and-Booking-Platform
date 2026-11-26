@@ -47,6 +47,7 @@ The app refuses to start if `MONGODB_URI` is missing or still the placeholder.
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Only for the payment demo below (Stripe test mode) |
 | `FX_API_KEY`, `PLATFORM_CURRENCY` | Currency conversion for itineraries (a free FXRatesAPI key is enough) |
 | `HOLD_MINUTES` | How long a booking hold lasts (default 10) |
+| `AUTO_VERIFY_EMAIL` | Optional, **dev/demo only**, default off. Only the exact value `true` makes new accounts start with a verified email (no verification email is sent), so demo users can book without an inbox. A warning is logged at startup when on. Never use in production |
 | `SMTP_*` | Optional. Without them a throwaway test inbox is used and each email's preview link is printed in the backend log |
 
 

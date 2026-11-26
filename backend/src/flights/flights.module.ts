@@ -18,6 +18,8 @@ import { FlightSearchService } from './flight-search.service';
 import { FlightCancellationService } from './flight-cancellation.service';
 import { FlightEditService } from './flight-edit.service';
 import { FlightRosterService } from './flight-roster.service';
+import { MyFlightsController } from './my-flights.controller';
+import { MyFlightsService } from './my-flights.service';
 import { FlightSeatSelectionService } from './flight-seat-selection.service';
 import { FlightStatusJob } from './flight-status.job';
 import { FlightsController } from './flights.controller';
@@ -49,9 +51,11 @@ import { UsersModule } from '../users/users.module';
     NotificationsModule,
     UsersModule, // ACC-12: UpcomingBookingsRegistry, where the flight bookings register their checker
   ],
-  // FlightSearchController is listed first so GET /flights/search can never be captured by a future GET /flights/:id.
+  // FlightSearchController and MyFlightsController are listed first so GET /flights/search and /flights/mine
+  // can never be captured by GET /flights/:id.
   controllers: [
     FlightSearchController,
+    MyFlightsController,
     FlightsController,
     FlightBookingsController,
     FlightCabinsController,
@@ -69,6 +73,7 @@ import { UsersModule } from '../users/users.module';
     FlightStatusJob,
     FlightEditService,
     FlightRosterService,
+    MyFlightsService,
     FlightCancellationService,
   ],
   exports: [FlightsService],
