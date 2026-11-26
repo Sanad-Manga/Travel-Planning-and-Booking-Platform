@@ -8,9 +8,10 @@ describe('formatMoney (GEN-06)', () => {
     expect(formatMoney(0, 'USD')).toBe('$0.00');
   });
 
-  it('respects the currency minor unit: JPY has none, KWD has three', () => {
-    expect(formatMoney(500, 'JPY')).toBe('¥500');
-    expect(formatMoney(12345, 'KWD')).toContain('12.345');
+  it('divides by 100 for every currency, as the backend does; Intl only picks the decimals shown', () => {
+    expect(formatMoney(250000, 'USD')).toBe('$2,500.00');
+    expect(formatMoney(250000, 'JPY')).toBe('¥2,500');
+    expect(formatMoney(250000, 'KWD')).toContain('2,500.000');
   });
 
   it('formats a negative amount (a refund adjustment)', () => {
