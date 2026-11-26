@@ -38,7 +38,7 @@ export class ApiError extends Error {
 
 export interface ApiOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
-  /** Sent as JSON. */
+  /** FormData passes through as multipart. Other values are sent as JSON. */
   body?: unknown;
   signal?: AbortSignal;
   /** On a 401, refresh the session and retry once (default true). Off for login, where 401 means wrong password. */
@@ -97,12 +97,13 @@ export async function toApiError(response: Response): Promise<ApiError> {
 
 function send(path: string, { method = 'GET', body, signal }: ApiOptions): Promise<Response> {
   const headers: Record<string, string> = { Accept: 'application/json' };
-  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  const isMultipart = typeof FormData !== 'undefined' && body instanceof FormData;
+  if (body !== undefined && !isMultipart) headers['Content-Type'] = 'application/json';
   return fetch(url(path), {
     method,
     credentials: 'include',
     headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: isMultipart ? body : JSON.stringify(body),
     signal,
   });
 }

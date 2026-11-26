@@ -4119,3 +4119,708 @@ Prompt:
 Backend only. Add GET /api/flights/mine for an airline moderator: the flights of their own airline in any status, paginated, latest departure first, with an optional status filter. A SCHEDULED flight that has already left must be reported and filtered as DEPARTED like everywhere else. Tests first.
 How the output was used:
 Added my-flights.service.ts, my-flights.controller.ts (listed before FlightsController so mine is never read as an id), dto/my-flights-query.dto.ts and registered them in flights.module.ts. flight-mine.spec.ts runs against an isolated in-memory MongoDB: own airline only, order, DEPARTED reading and filter, pagination, a user without an airline gets 403. Lint, build and the flights specs pass. Not checked: a call through Swagger with a real moderator login.
+
+================================================
+Date: 2026-11-26
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: GEN-08 (SCRUM-137)
+Prompt:
+# TASK: SCRUM-137 — GEN-08 ImageUploader
+
+Repository:
+Sanad-Manga/Travel-Planning-and-Booking-Platform
+
+GitHub:
+https://github.com/Sanad-Manga/Travel-Planning-and-Booking-Platform
+
+Jira:
+https://ahmedsanadprojects.atlassian.net/browse/SCRUM-137
+
+Owner: Mohamed Walid
+Milestone: M2 — Frontend
+Sprint: M2 S0 — Foundations
+Module: Shared & Setup
+Estimated effort: 3 hours
+Kind: Mandatory
+
+Implement SCRUM-137 completely, test it, and leave it ready for review.
+
+Prioritize efficient implementation. Do not overengineer this foundation component or spend unnecessary time on unrelated work.
+
+==================================================
+1. GIT SETUP AND SAFETY
+==================================================
+
+Before making changes, inspect:
+
+git status
+git branch --show-current
+git remote -v
+git worktree list
+
+Verify the repository is correct.
+
+Fetch the latest GitHub development branch:
+
+git fetch origin
+git rev-parse origin/develop
+
+Record the full origin/develop commit SHA as BASELINE_SHA.
+
+Create a NEW feature branch from the latest origin/develop:
+
+feature/GEN-08-image-uploader
+
+Prefer an isolated Git worktree to preserve existing work:
+
+git worktree add -b feature/GEN-08-image-uploader "../Travel-Planning-and-Booking-Platform-GEN08" origin/develop
+
+Check that the branch and destination directory do not already exist before running this command.
+
+If either exists, inspect it and preserve existing work rather than overwriting anything.
+
+Important:
+
+- Do not modify the original repository worktree.
+- Do not modify the SCRUM-136 / GEN-05 worktree.
+- Do not branch from the SCRUM-136 feature branch.
+- Do not include SCRUM-136 changes in this PR.
+- Do not wait for SCRUM-136 to merge.
+- Start from the latest origin/develop.
+- Do not discard, stash, or overwrite existing work.
+- Do not merge or rebase automatically.
+- Do not force-push.
+- Do not delete branches.
+- Do not commit, push, or create a PR automatically.
+- Do not modify Jira.
+
+If safe branch isolation is impossible, report the blocker.
+
+==================================================
+2. MILESTONE 1 PROTECTION
+==================================================
+
+Treat completed Milestone 1 functionality as protected.
+
+Backend changes are allowed during Milestone 2 only when explicitly authorized by the assigned Jira ticket.
+
+SCRUM-137 is a frontend-only task.
+
+Therefore, for this task:
+
+- The entire backend/ directory is read-only.
+- Existing backend APIs are read-only.
+- Existing database schemas are protected.
+- Existing API contracts are protected.
+- Existing backend tests are protected.
+- Existing authentication and authorization behavior must be preserved.
+- Existing CI workflows and Git hooks must not be modified.
+- Existing environment and deployment configuration must not be modified.
+
+Inspect backend files where necessary to understand the upload contract, but never modify them.
+
+If a backend issue is discovered, document it and explain whether it blocks the task.
+
+Do not silently fix unrelated backend problems.
+
+Do not implement other Jira tickets.
+
+A minimal backward-compatible frontend API client improvement is permitted if required for multipart uploads. It must preserve all existing JSON request behavior and authentication handling, and must have regression tests.
+
+==================================================
+3. ACTUAL JIRA REQUIREMENTS
+==================================================
+
+What to build:
+
+Build the shared upload control for photos and logos.
+
+It checks type (JPG or PNG), size (5 MB), and count before sending, shows a preview, lets the user delete an image, and shows the backend error if it rejects the file.
+
+GEN-08:
+
+The system shall accept image uploads in JPG or PNG format, up to 5 MB each, with up to 5 images per post, activity or hotel and 1 logo per airline, stored on the server and served by URL.
+
+Uploads outside these limits are rejected with an error.
+
+Component:
+
+ImageUploader
+
+Images are served from /uploads/... on the backend, outside /api.
+
+Acceptance criteria:
+
+- Rejects non-JPG/PNG, files over 5 MB and more than the permitted number of images, with a clear message.
+- Shows previews and a delete button.
+- Shows the backend error text on failure.
+- Works with the keyboard and on phones.
+
+Jira checklist:
+
+- Uploader renders with the three limits enforced.
+- Preview and delete tested.
+- Backend error shown.
+- Works at phone width.
+- PR title names the requirement ID and this ticket.
+- PR checklist completed.
+- AI_PROMPTS.txt entry added.
+
+Dependencies:
+
+SCRUM-133 — Done.
+SCRUM-140 — Done.
+
+Verify their implementations exist in the fetched baseline.
+
+==================================================
+4. INSPECT THE EXISTING IMPLEMENTATION
+==================================================
+
+Before coding, inspect:
+
+- README.md
+- frontend/README.md
+- frontend/package.json
+- frontend/src/components/
+- frontend/src/app/globals.css
+- frontend/src/lib/api.ts
+- frontend/src/lib/api.test.ts
+- frontend/src/lib/apiError.ts
+- frontend/src/api/types.ts
+- frontend/src/api/schema.d.ts
+- frontend/next.config.ts
+- backend/src/uploads/README.md
+- backend/src/uploads/upload.types.ts
+- backend/src/uploads/image-validation.ts
+- docs/api/blog-images.md
+- docs/contracts.md
+- .github/pull_request_template.md
+- AI_PROMPTS.txt
+
+Read relevant existing upload controllers to confirm the actual endpoints, multipart field names, response shapes, and delete behavior.
+
+Inspect any AGENTS.md and Milestone 2 instructions.
+
+Do not invent endpoints or manually modify generated OpenAPI schemas.
+
+The /uploads rewrite is already present in frontend/next.config.ts. Reuse it without changing configuration.
+
+==================================================
+5. IMAGE UPLOADER COMPONENT
+==================================================
+
+Suggested location:
+
+frontend/src/components/ImageUploader.tsx
+
+Create a reusable, strictly typed ImageUploader component.
+
+It must be suitable for:
+
+- Blog post images.
+- Itinerary activity images.
+- Hotel photos.
+- Airline logos.
+
+Do not hardcode the component to any individual entity or API endpoint.
+
+Use a configurable interface that accepts existing image references, upload and delete operations, and the appropriate image-count limit.
+
+Prefer a controlled component or a clearly documented equivalent that integrates with downstream forms.
+
+An image reference generally contains:
+
+{
+  "id": "server-generated-id",
+  "url": "/uploads/example.jpg"
+}
+
+Confirm actual response shapes and allow consumers to adapt them where necessary.
+
+Support:
+
+- Rendering existing uploaded images.
+- Selecting new images.
+- Uploading through the provided operation.
+- Displaying image previews.
+- Deleting individual images.
+- Uploading and deleting states.
+- Validation errors.
+- Backend errors.
+- Disabled controls while relevant requests are pending.
+- Updating the consumer with successfully uploaded or deleted images.
+
+Do not claim an image has been uploaded or deleted before the server operation succeeds.
+
+On deletion failure, retain the image and display the error.
+
+On upload failure, do not create a fake successful image reference.
+
+Keep the component API small and predictable.
+
+==================================================
+6. FILE VALIDATION
+==================================================
+
+Match the existing backend limits.
+
+Accepted MIME types:
+
+image/jpeg
+image/png
+
+Maximum image size:
+
+5,242,880 bytes (5 MiB)
+
+Maximum images:
+
+- Post: 5.
+- Activity: 5.
+- Hotel: 5.
+- Airline: 1.
+
+The default limit should be 5.
+
+Support a maximum of 1 for airline logos.
+
+Validate files BEFORE sending any upload request.
+
+Reject:
+
+- Unsupported MIME types.
+- Oversized files.
+- Empty files.
+- Files exceeding the remaining available image slots.
+
+Include the existing images and relevant pending uploads when checking capacity.
+
+Accept valid images exactly at the maximum size.
+
+Provide clear messages explaining why a file was rejected.
+
+The file input accept attribute should advertise JPEG and PNG formats, but actual validation must still be performed.
+
+Do not trust file extensions alone.
+
+The backend remains responsible for authoritative content validation, decoding, ownership, authorization, and atomic capacity enforcement.
+
+Do not duplicate the backend image-decoding implementation in the browser.
+
+Prevent accidental duplicate submissions.
+
+When selecting multiple files, respect the remaining capacity. Keep upload behavior predictable and document whether selections are processed sequentially or rejected as a batch.
+
+==================================================
+7. UPLOAD AND DELETE API INTEGRATION
+==================================================
+
+The backend does NOT provide one universal POST /api/uploads endpoint.
+
+Existing consumer-owned endpoints include:
+
+Blog:
+POST /api/posts/:id/images
+DELETE /api/posts/:id/images/:imageId
+
+Hotel:
+POST /api/hotels/:id/photos
+DELETE /api/hotels/:id/photos/:photoId
+
+Airline:
+POST /api/airlines/:id/logo
+DELETE /api/airlines/:id/logo
+
+Activity:
+Inspect the current backend controller to confirm the exact endpoint paths and response shapes.
+
+Existing upload operations use multipart/form-data. Blog and airline endpoints use the multipart field "image"; verify the other endpoints before documenting their usage.
+
+Use FormData for multipart requests.
+
+Do NOT manually set the multipart Content-Type header because the browser must generate the boundary.
+
+Important discovery:
+
+frontend/src/lib/api.ts currently serializes request bodies as JSON.
+
+If necessary, extend the existing centralized API client minimally to support FormData.
+
+Requirements for that extension:
+
+- Existing JSON requests must behave exactly as before.
+- FormData must be transmitted without JSON.stringify().
+- Do not set application/json for FormData requests.
+- Preserve same-origin routing.
+- Preserve credentials: include.
+- Preserve existing 401 refresh and retry behavior.
+- Preserve ApiError parsing.
+- Preserve existing login redirects.
+- Do not introduce a duplicate authentication implementation.
+- Do not automatically retry failed uploads for arbitrary network or server errors.
+- Add targeted regression tests.
+
+Use a reusable API integration pattern with configurable upload/delete operations.
+
+Do not implement the downstream pages or all their domain-specific API modules merely to demonstrate the shared component.
+
+Preserve the server's authorization model.
+
+Do not expose authentication tokens to JavaScript or localStorage.
+
+==================================================
+8. PREVIEWS AND ERROR HANDLING
+==================================================
+
+Display existing images using their returned URLs.
+
+For example:
+
+/uploads/example.jpg
+
+Use the existing same-origin /uploads rewrite.
+
+Do not prepend /api to image URLs.
+
+Do not hardcode localhost:3001 or a deployment URL.
+
+Preserve cookie-authenticated image access, including private blog draft images.
+
+Avoid an image optimization or proxy approach that strips authentication cookies from protected image requests.
+
+If temporary local previews use URL.createObjectURL(), revoke object URLs when no longer needed and on unmount.
+
+Display backend error messages clearly.
+
+Preserve meaningful server-provided error text.
+
+Examples:
+
+- Invalid image.
+- File too large.
+- Image count limit reached.
+- Permission denied.
+- Upload failed.
+- Delete failed.
+
+Do not replace specific backend validation messages with an unhelpful generic error.
+
+Use existing ApiError, Alert, and error formatting conventions where appropriate.
+
+Render server messages as text, not injected HTML.
+
+==================================================
+9. UI, RESPONSIVENESS AND ACCESSIBILITY
+==================================================
+
+Follow the existing frontend design system.
+
+Reuse:
+
+- Existing CSS variables.
+- Button styles.
+- Alert components.
+- Spinner/loading components.
+- Existing focus indicators.
+- Existing dark-mode conventions.
+- ConfirmProvider where appropriate.
+
+Requirements:
+
+- Accessible file selection control.
+- Clear JPG/PNG and file size instructions.
+- Visible image count.
+- Image thumbnails.
+- Clearly identifiable delete buttons.
+- Keyboard-accessible controls.
+- Accessible names for upload and delete actions.
+- Accessible error messages.
+- Visible pending operation state.
+- Responsive image grid or equivalent.
+- No horizontal page overflow.
+- Correct behavior at phone width.
+- Light and dark mode compatibility.
+
+Do not install a new UI library.
+
+Do not overengineer drag-and-drop, cropping, resizing, compression, progress indicators, or image editing unless required by existing project specifications.
+
+Keep the styling scoped and additive.
+
+==================================================
+10. DOWNSTREAM COMPATIBILITY
+==================================================
+
+SCRUM-137 directly blocks:
+
+- SCRUM-187 — Activities with images.
+- SCRUM-196 — Blog post editor and images.
+- SCRUM-198 — Hotel moderator profile and photos.
+- SCRUM-201 — Airline profile and logo.
+
+Provide a concise usage example demonstrating:
+
+- A five-image uploader.
+- A single-logo uploader.
+- Existing image references.
+- Configurable upload and delete callbacks.
+- Integration with the existing authenticated API client.
+- Handling successful uploads and deletions.
+
+Document any differences in endpoint response shapes that consumers must handle.
+
+Do not implement these four downstream tickets.
+
+Do not modify existing domain pages.
+
+Do not create a committed demonstration route.
+
+==================================================
+11. TESTING
+==================================================
+
+Use the existing Vitest and React Testing Library setup.
+
+Add focused behavioral tests covering:
+
+Validation:
+- Accepts valid JPEG.
+- Accepts valid PNG.
+- Rejects unsupported file types before sending.
+- Rejects empty files.
+- Rejects oversized files before sending.
+- Accepts a file exactly at the maximum size.
+- Enforces the five-image limit.
+- Enforces the one-logo limit.
+- Accounts for existing and pending images.
+
+Preview and deletion:
+- Displays existing image previews.
+- Displays successfully uploaded images.
+- Deletes the intended image.
+- Keeps an image when deletion fails.
+- Displays the backend deletion error.
+
+Upload behavior:
+- Calls the upload operation with the correct file.
+- Shows pending state.
+- Prevents duplicate submissions.
+- Displays the actual backend rejection message.
+- Does not add failed uploads to the successful image list.
+
+Accessibility:
+- File input has an accessible label.
+- Delete buttons have accessible names.
+- Controls support keyboard interaction.
+- Validation errors are accessible.
+
+If modifying the existing API client, test:
+
+- FormData is sent without JSON serialization.
+- Content-Type is not manually set for FormData.
+- Existing JSON request behavior remains unchanged.
+- Authentication cookies and 401 refresh behavior remain intact.
+- Backend errors are parsed correctly.
+
+Use mocked requests.
+
+Do not access shared Atlas, live accounts, Stripe, production credentials, or actual project image records.
+
+If a local browser is available, verify the actual component at approximately:
+
+- 360px.
+- 768px.
+- 1280px.
+
+Also verify keyboard navigation and dark mode.
+
+Use temporary test fixtures or an isolated preview that is excluded from the final change set.
+
+Do not claim browser verification unless it actually happened.
+
+==================================================
+12. ALLOWED FILE SCOPE
+==================================================
+
+Expected new files:
+
+frontend/src/components/ImageUploader.tsx
+frontend/src/components/ImageUploader.test.tsx
+
+Possible narrowly scoped additions:
+
+- Upload-related frontend utility and its tests.
+- Component-specific styles.
+
+Permitted minimal existing-file changes:
+
+frontend/src/app/globals.css
+frontend/src/lib/api.ts
+frontend/src/lib/api.test.ts
+frontend/README.md
+AI_PROMPTS.txt
+
+Only modify these existing files when necessary.
+
+Do not modify:
+
+- backend/**
+- docs/**
+- .github/**
+- .githooks/**
+- scripts/**
+- Environment configuration.
+- Generated API schemas.
+- Unrelated frontend components.
+- Package manifests or lockfiles.
+- SCRUM-136 implementation files.
+
+Use existing dependencies.
+
+If a new dependency appears necessary, request approval rather than adding it automatically.
+
+Append this task's AI prompt to AI_PROMPTS.txt according to repository policy.
+
+Preserve all existing entries and other contributors' work.
+
+==================================================
+13. VERIFICATION AND PROTECTION AUDIT
+==================================================
+
+Install locked frontend dependencies if necessary:
+
+npm ci
+
+Do not upgrade dependencies.
+
+Run the focused new tests first.
+
+After implementation, run from frontend/:
+
+npm run lint
+npm run typecheck
+npm test
+npm run build
+
+Record actual results.
+
+If a check fails, distinguish failures caused by SCRUM-137 from pre-existing baseline failures.
+
+Fix only issues within the authorized task scope.
+
+Do not weaken tests or suppress errors.
+
+Before finishing, audit the change set against BASELINE_SHA:
+
+git status --short
+git diff --check
+git diff --stat
+git diff --name-status BASELINE_SHA
+git ls-files --others --exclude-standard
+
+Also inspect staged changes and all new files.
+
+Verify:
+
+- Backend changes: 0.
+- Database schema changes: 0.
+- API contract changes: 0.
+- Milestone 1 documentation changes: 0.
+- Existing backend test changes: 0.
+- CI workflow changes: 0.
+- Git hook changes: 0.
+- Dependency changes: 0.
+- Environment changes: 0.
+- Unauthorized changes: 0.
+
+Run:
+
+git diff BASELINE_SHA -- backend/
+git diff BASELINE_SHA -- docs/ .github/ .githooks/ scripts/
+
+Replace BASELINE_SHA with the actual recorded commit SHA.
+
+Protected-path diffs must be empty.
+
+Check untracked protected files separately.
+
+Verify the original worktree and GEN-05 worktree remain untouched.
+
+==================================================
+14. FINAL REPORT
+==================================================
+
+Provide a concise but complete final report containing:
+
+1. Implementation summary.
+2. Jira acceptance criteria and checklist coverage.
+3. Every changed or created file.
+4. Component public API.
+5. Example usage for five images and one airline logo.
+6. Automated test results.
+7. Lint, typecheck, and build results.
+8. Actual browser verification results.
+9. Any API client changes and regression test results.
+10. Milestone 1 protection audit.
+11. Git baseline SHA and feature branch.
+12. Known limitations and assumptions.
+13. Whether SCRUM-137 is ready for review.
+14. Suggested PR description using the current repository template.
+
+Suggested commit:
+
+feat(frontend): add reusable image uploader (GEN-08)
+
+Suggested PR title:
+
+feat(frontend): reusable image uploader (GEN-08 / SCRUM-137)
+
+Expected final status:
+
+Committed: No.
+Pushed: No.
+PR created: No.
+Jira modified: No.
+
+==================================================
+15. EXECUTION INSTRUCTIONS
+==================================================
+
+Fetch the latest GitHub code.
+
+Create the isolated GEN-08 feature branch.
+
+Read existing upload contracts.
+
+Implement the reusable ImageUploader.
+
+Ensure multipart requests work with existing authentication.
+
+Write focused automated tests.
+
+Verify mobile and desktop behavior if possible.
+
+Run frontend verification.
+
+Update AI_PROMPTS.txt.
+
+Audit protected files.
+
+Provide the final report.
+
+Do not stop after planning.
+
+Do not modify Milestone 1.
+
+Do not modify SCRUM-136.
+
+Do not implement unrelated tickets.
+
+Do not commit, push, merge, or create a PR until I approve.
+
+Choose the simplest reusable implementation satisfying the actual Jira requirements and existing project contracts.
+
+How the output was used:
+Added the shared ImageUploader, its styles, and authenticated FormData support in the existing API client. Added validation, confirmation, preview, error, concurrency and request regression tests. Verified 38 focused tests and 441 total frontend tests, lint, typecheck and production build. Exercised the component and the existing Next.js rewrites in headless Edge with synthetic images and cookies, then removed the temporary preview and generated dev artifacts. Recorded usage examples for post images and airline logos.
