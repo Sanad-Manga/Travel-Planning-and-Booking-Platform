@@ -4,6 +4,7 @@ import { AuthProvider } from '@/components/AuthProvider';
 import { AppShell } from '@/components/AppShell';
 import { ConfirmProvider } from '@/components/ConfirmProvider';
 import { ToastProvider } from '@/components/ToastProvider';
+import { SWRProvider } from '@/api/SWRProvider';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -18,7 +19,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <ConfirmProvider>
           <ToastProvider>
             <AuthProvider>
-              <AppShell>{children}</AppShell>
+              <SWRProvider>
+                <AppShell>{children}</AppShell>
+              </SWRProvider>
             </AuthProvider>
           </ToastProvider>
         </ConfirmProvider>
