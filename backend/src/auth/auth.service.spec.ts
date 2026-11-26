@@ -1,9 +1,10 @@
-import { BadRequestException, ConflictException, ForbiddenException, HttpException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, HttpException, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import { compare, hashSync } from 'bcryptjs';
 import { AccountStatus, Role } from '../common';
+import configuration from '../config/configuration';
 import { UsersService } from '../users/users.service';
 import { AuthService } from './auth.service';
 import { EmailVerificationService } from './email-verification.service';
@@ -42,10 +43,14 @@ describe('AuthService', () => {
     ...extra,
   });
 
-  beforeEach(async () => {
-    jest.resetAllMocks();
-    usersService.create.mockImplementation((input) => Promise.resolve(userDoc(input)));
-    jwtService.signAsync.mockResolvedValue('signed.jwt.token');
+  /** Builds the service with the real configuration() reading AUTO_VERIFY_EMAIL (ACC-02 dev flag) from process.env. */
+  async function buildService(autoVerifyEmail?: string): Promise<AuthService> {
+    const previous = process.env.AUTO_VERIFY_EMAIL;
+    if (autoVerifyEmail === undefined) delete process.env.AUTO_VERIFY_EMAIL;
+    else process.env.AUTO_VERIFY_EMAIL = autoVerifyEmail;
+    const loaded = configuration();
+    if (previous === undefined) delete process.env.AUTO_VERIFY_EMAIL;
+    else process.env.AUTO_VERIFY_EMAIL = previous;
     const moduleRef = await Test.createTestingModule({
       providers: [
         AuthService,
@@ -54,10 +59,17 @@ describe('AuthService', () => {
         { provide: TokenRevocationService, useValue: revocations },
         { provide: EmailVerificationService, useValue: emailVerification },
         // Fake secrets, only for this test.
-        { provide: ConfigService, useValue: new ConfigService({ JWT_ACCESS_SECRET: 'a'.repeat(32), JWT_REFRESH_SECRET: 'r'.repeat(32) }) },
+        { provide: ConfigService, useValue: new ConfigService({ JWT_ACCESS_SECRET: 'a'.repeat(32), JWT_REFRESH_SECRET: 'r'.repeat(32), ...loaded }) },
       ],
     }).compile();
-    service = moduleRef.get(AuthService);
+    return moduleRef.get(AuthService);
+  }
+
+  beforeEach(async () => {
+    jest.resetAllMocks();
+    usersService.create.mockImplementation((input) => Promise.resolve(userDoc(input)));
+    jwtService.signAsync.mockResolvedValue('signed.jwt.token');
+    service = await buildService();
   });
 
   describe('register', () => {
@@ -83,6 +95,38 @@ describe('AuthService', () => {
       await service.register(dto);
       expect(usersService.create.mock.calls[0][0].emailVerified).toBe(false);
       expect(emailVerification.sendInBackground).toHaveBeenCalledTimes(1);
+    });
+
+    describe('AUTO_VERIFY_EMAIL dev flag (ACC-02, G12)', () => {
+      it('flag "true": creates the account already verified and sends no verification email', async () => {
+        const flagged = await buildService('true');
+        usersService.findByEmail.mockResolvedValue(null);
+        await flagged.register(dto);
+        expect(usersService.create.mock.calls[0][0].emailVerified).toBe(true);
+        expect(emailVerification.sendInBackground).not.toHaveBeenCalled();
+      });
+
+      it.each([undefined, 'false', 'TRUE', 'True', '1', 'yes', ''])('flag %j: account stays unverified and the email is started as before', async (value) => {
+        const unflagged = await buildService(value);
+        usersService.findByEmail.mockResolvedValue(null);
+        await unflagged.register(dto);
+        expect(usersService.create.mock.calls[0][0].emailVerified).toBe(false);
+        expect(emailVerification.sendInBackground).toHaveBeenCalledTimes(1);
+      });
+
+      it('logs one clear warning at startup when the flag is on, and none when it is off', async () => {
+        const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+        try {
+          (await buildService('true')).onModuleInit();
+          expect(warn).toHaveBeenCalledTimes(1);
+          expect(warn).toHaveBeenCalledWith('AUTO_VERIFY_EMAIL is on: new accounts are verified without checking their email. Never use in production.');
+          warn.mockClear();
+          (await buildService()).onModuleInit();
+          expect(warn).not.toHaveBeenCalled();
+        } finally {
+          warn.mockRestore();
+        }
+      });
     });
 
     it('rejects a duplicate email with a field-level 409 and creates nothing', async () => {

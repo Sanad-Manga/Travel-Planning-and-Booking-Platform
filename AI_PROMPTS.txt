@@ -2923,6 +2923,16 @@ Re-formatted AI_PROMPTS.txt with a script: one separator style (48 "=" character
 Date: 2026-11-26
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-02 (SCRUM-143, G12)
+Prompt:
+Backend only: add an optional AUTO_VERIFY_EMAIL dev/demo flag (off by default, only the exact value "true" turns it on) so new accounts are created with emailVerified true and no verification email, with a startup warning, docs, unit tests and one e2e. Never applies to existing users, login or resend-verification.
+How the output was used:
+Tests written first (unit cases for on, unset, "false", "TRUE" and others; e2e for register then POST /api/flight-bookings with the flag on and off) and watched fail. Added autoVerifyEmail to configuration.ts and the optional AUTO_VERIFY_EMAIL to EnvVars; AuthService.register uses it (verified and no email when on) and onModuleInit logs the warning. Documented in the README table, .env.example and docs/api/email-verification.md.
+
+================================================
+Date: 2026-11-26
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
 Related Requirement: ACC-04, ACC-11 (SCRUM-134)
 Prompt:
 Frontend only: add RequireRole (guest to login with returnTo, wrong role gets a "You do not have access" message with a link to their home, user with mustChangePassword goes to /change-password), a roles helper (home path per role, header links per role), a small change-password form (PATCH /api/auth/change-password, min 8 chars with a letter and a digit, new password must differ, backend field errors shown, then log in again), placeholder /admin /airline /hotel pages, a role-aware Header with no flash of wrong links while loading, and a login redirect to the role home or /change-password. Tests first.
