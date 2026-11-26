@@ -5,7 +5,7 @@ import { RequireAuth } from './RequireAuth';
 
 const replace = vi.fn();
 let pathname = '/trips';
-let auth: { user: { id: string } | null; loading: boolean } = { user: null, loading: false };
+let auth: { user: { id: string; mustChangePassword?: boolean } | null; loading: boolean } = { user: null, loading: false };
 
 vi.mock('next/navigation', () => ({ usePathname: () => pathname, useRouter: () => ({ replace }) }));
 vi.mock('./AuthProvider', () => ({ useAuth: () => auth }));
@@ -83,5 +83,39 @@ describe('RequireAuth (ACC-10)', () => {
       </RequireAuth>,
     );
     expect(readPendingAction()).toBeNull();
+  });
+
+  describe('forced password change (ACC-11)', () => {
+    it('sends a user with a temporary password to /change-password and hides the page', async () => {
+      auth = { user: { id: 'u1', mustChangePassword: true }, loading: false };
+      render(
+        <RequireAuth>
+          <p>Secret page</p>
+        </RequireAuth>,
+      );
+      await waitFor(() => expect(replace).toHaveBeenCalledWith('/change-password'));
+      expect(screen.queryByText('Secret page')).toBeNull();
+    });
+
+    it('allowMustChange lets that user see the page (the change-password page itself)', () => {
+      auth = { user: { id: 'u1', mustChangePassword: true }, loading: false };
+      render(
+        <RequireAuth allowMustChange>
+          <p>Change form</p>
+        </RequireAuth>,
+      );
+      expect(screen.getByText('Change form')).toBeInTheDocument();
+      expect(replace).not.toHaveBeenCalled();
+    });
+
+    it('resumeAfterLogin={false} sends a guest to plain /login and remembers nothing', async () => {
+      render(
+        <RequireAuth allowMustChange resumeAfterLogin={false}>
+          <p>x</p>
+        </RequireAuth>,
+      );
+      await waitFor(() => expect(replace).toHaveBeenCalledWith('/login'));
+      expect(readPendingAction()).toBeNull();
+    });
   });
 });

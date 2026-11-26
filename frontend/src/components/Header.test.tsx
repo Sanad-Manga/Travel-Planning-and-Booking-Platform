@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Header } from './Header';
@@ -8,7 +8,7 @@ let pathname = '/';
 const push = vi.fn();
 const logout = vi.fn();
 const toastError = vi.fn();
-let auth: { user: { id: string; name: string } | null; loading: boolean; logout: () => Promise<void> } = {
+let auth: { user: { id: string; name: string; role?: string; mustChangePassword?: boolean } | null; loading: boolean; logout: () => Promise<void> } = {
   user: null,
   loading: false,
   logout,
@@ -136,6 +136,62 @@ describe('Header (GEN-14)', () => {
       await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
       expect(toastError.mock.calls[0][0]).toMatch(/couldn.t reach the server/i);
       expect(push).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('role-aware links (ACC-04)', () => {
+    const as = (role: string, extra: object = {}) => {
+      auth = { user: { id: 'u1', name: 'X', role, ...extra }, loading: false, logout };
+    };
+    const linkNames = () =>
+      within(screen.getByRole('navigation', { name: 'Primary' }))
+        .getAllByRole('link')
+        .map((l) => l.textContent);
+
+    it('a USER sees the travel links and My bookings, no area links', () => {
+      as('USER');
+      render(<Header />);
+      expect(screen.getByRole('link', { name: 'My bookings' })).toHaveAttribute('href', '/bookings');
+      expect(screen.getByRole('link', { name: 'Flights' })).toBeInTheDocument();
+      for (const name of ['Admin', 'Airline', 'Hotel']) expect(screen.queryByRole('link', { name })).toBeNull();
+    });
+
+    it.each([
+      ['ADMIN', 'Admin', '/admin'],
+      ['AIRLINE_MODERATOR', 'Airline', '/airline'],
+      ['HOTEL_MODERATOR', 'Hotel', '/hotel'],
+    ])('%s sees their own area link and Blog, not the traveller links', (role, label, href) => {
+      as(role);
+      render(<Header />);
+      expect(screen.getByRole('link', { name: label })).toHaveAttribute('href', href);
+      expect(screen.getByRole('link', { name: 'Blog' })).toBeInTheDocument();
+      for (const name of ['Flights', 'Itineraries', 'My bookings']) expect(screen.queryByRole('link', { name })).toBeNull();
+      expect(screen.getByRole('link', { name: 'Account' })).toBeInTheDocument();
+    });
+
+    it('highlights the current area page', () => {
+      as('ADMIN');
+      pathname = '/admin';
+      render(<Header />);
+      expect(screen.getByRole('link', { name: 'Admin' })).toHaveAttribute('aria-current', 'page');
+    });
+
+    it('while the session loads shows only Home and Blog, nothing role-specific', () => {
+      auth = { user: null, loading: true, logout };
+      render(<Header />);
+      expect(linkNames()).toEqual(['Home', 'Blog']);
+    });
+  });
+
+  describe('forced password change (ACC-11)', () => {
+    it('shows only Change password and Logout', async () => {
+      auth = { user: { id: 'u1', name: 'X', role: 'USER', mustChangePassword: true }, loading: false, logout };
+      render(<Header />);
+      const nav = screen.getByRole('navigation', { name: 'Primary' });
+      expect(within(nav).getAllByRole('link').map((l) => l.textContent)).toEqual(['Change password']);
+      expect(screen.getByRole('link', { name: 'Change password' })).toHaveAttribute('href', '/change-password');
+      expect(screen.getByRole('button', { name: 'Logout' })).toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: 'Account' })).toBeNull();
     });
   });
 

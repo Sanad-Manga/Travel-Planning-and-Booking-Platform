@@ -101,7 +101,7 @@ describe('AuthProvider / useAuth (ACC-10)', () => {
     apiMock.mockResolvedValueOnce(ziad);
     mount();
     await screen.findByText('hello Ziad');
-    expect(Object.keys(auth).sort()).toEqual(['loading', 'login', 'logout', 'user']);
+    expect(Object.keys(auth).sort()).toEqual(['loading', 'login', 'logout', 'resetSession', 'user']);
     expect(JSON.stringify(auth.user)).not.toMatch(/password|token/i);
   });
 
@@ -128,6 +128,18 @@ describe('AuthProvider / useAuth (ACC-10)', () => {
     apiMock.mockRejectedValueOnce(new TypeError('offline'));
     await expect(auth.logout()).rejects.toBeInstanceOf(TypeError);
     await waitFor(() => expect(screen.getByText('hello Ziad')).toBeInTheDocument());
+  });
+
+  it('resetSession forgets the user locally without calling the API (the server already ended the session)', async () => {
+    apiMock.mockResolvedValueOnce(ziad);
+    mount();
+    await screen.findByText('hello Ziad');
+    rememberPendingAction({ path: '/hotels/1', action: 'book-room' });
+    apiMock.mockClear();
+    act(() => auth.resetSession());
+    expect(screen.getByText('guest')).toBeInTheDocument();
+    expect(readPendingAction()).toBeNull();
+    expect(apiMock).not.toHaveBeenCalled();
   });
 
   it('useAuth outside the provider is a clear error', () => {

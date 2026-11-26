@@ -4,18 +4,11 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { toFriendlyError } from '@/lib/apiError';
+import { FORCED_PASSWORD_PATH, NEUTRAL_NAV_LINKS, navLinksFor, type NavLink } from '@/lib/roles';
 import { useAuth } from './AuthProvider';
 import { useToast } from './ToastProvider';
 
 const NAV_ID = 'primary-nav';
-
-const mainLinks = [
-  { label: 'Home', href: '/' },
-  { label: 'Flights', href: '/flights' },
-  { label: 'Hotels', href: '/hotels' },
-  { label: 'Itineraries', href: '/itineraries' },
-  { label: 'Blog', href: '/blog' },
-];
 
 const guestLinks = [
   { label: 'Login', href: '/login' },
@@ -63,7 +56,7 @@ export function Header() {
     }
   }
 
-  function renderLinks(links: typeof mainLinks) {
+  function renderLinks(links: NavLink[]) {
     return links.map((link) => (
       <li key={link.href}>
         <Link
@@ -76,6 +69,10 @@ export function Header() {
       </li>
     ));
   }
+
+  const forced = !!user?.mustChangePassword;
+  // Nothing role-specific until we know who this is; with a temporary password only the way out.
+  const mainLinks: NavLink[] = loading ? NEUTRAL_NAV_LINKS : forced ? [] : navLinksFor(user?.role ?? null);
 
   return (
     <header className="site-header">
@@ -94,12 +91,16 @@ export function Header() {
           Menu
         </button>
         <nav id={NAV_ID} aria-label="Primary" className={open ? 'site-nav site-nav-open' : 'site-nav'}>
-          <ul className="site-nav-list">{renderLinks(mainLinks)}</ul>
+          {mainLinks.length > 0 ? <ul className="site-nav-list">{renderLinks(mainLinks)}</ul> : null}
           {loading ? null : (
             <ul className="site-nav-list site-nav-account">
               {user ? (
                 <>
-                  {renderLinks([{ label: 'Account', href: '/account' }])}
+                  {renderLinks(
+                    forced
+                      ? [{ label: 'Change password', href: FORCED_PASSWORD_PATH }]
+                      : [{ label: 'Account', href: '/account' }],
+                  )}
                   <li>
                     <button type="button" className="site-nav-link site-nav-button" onClick={() => void onLogout()}>
                       Logout

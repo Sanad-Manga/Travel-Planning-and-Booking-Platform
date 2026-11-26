@@ -94,6 +94,35 @@ describe('LoginForm (ACC-10)', () => {
     await waitFor(() => expect(replace).toHaveBeenCalledWith('/'));
   });
 
+  it.each([
+    ['ADMIN', '/admin'],
+    ['AIRLINE_MODERATOR', '/airline'],
+    ['HOTEL_MODERATOR', '/hotel'],
+    ['USER', '/'],
+  ] as const)('a %s with no returnTo goes to their role home %s (ACC-04)', async (role, home) => {
+    backend(() => Promise.resolve({ ...ziad, role }));
+    const user = await setup();
+    await fillAndSubmit(user);
+    await waitFor(() => expect(replace).toHaveBeenCalledWith(home));
+  });
+
+  it('a moderator with a returnTo still goes to the returnTo', async () => {
+    search = 'returnTo=%2Fblog';
+    backend(() => Promise.resolve({ ...ziad, role: 'ADMIN' }));
+    const user = await setup();
+    await fillAndSubmit(user);
+    await waitFor(() => expect(replace).toHaveBeenCalledWith('/blog'));
+  });
+
+  it('a user with a temporary password goes to /change-password, even with a returnTo (ACC-11)', async () => {
+    search = 'returnTo=%2Fblog';
+    backend(() => Promise.resolve({ ...ziad, role: 'ADMIN', mustChangePassword: true }));
+    const user = await setup();
+    await fillAndSubmit(user);
+    await waitFor(() => expect(replace).toHaveBeenCalledWith('/change-password'));
+    expect(replace).not.toHaveBeenCalledWith('/blog');
+  });
+
   it.each(['//evil.com', 'https://evil.com', '/\\evil.com', '/%5Cevil.com', 'javascript:alert(1)'])(
     'ignores the hostile returnTo %s',
     async (hostile) => {
