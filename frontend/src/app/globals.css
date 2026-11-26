@@ -998,3 +998,44 @@ video {
     justify-self: start;
   }
 }
+
+/* GEN-08 image uploader */
+.image-uploader {
+  min-width: 0;
+}
+.image-uploader > label {
+  font-weight: 600;
+}
+.image-uploader-instructions {
+  margin: var(--space-1) 0 var(--space-2);
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+}
+.image-uploader-input {
+  width: 100%;
+  max-width: 24rem;
+}
+.image-uploader-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+  gap: var(--space-3);
+  padding: 0;
+  margin: var(--space-3) 0 0;
+  list-style: none;
+}
+.image-uploader-grid > li {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.image-uploader-grid img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: contain;
+  background: var(--background);
+  border-radius: var(--radius);
+}
