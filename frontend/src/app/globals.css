@@ -828,3 +828,52 @@ video {
     width: auto;
   }
 }
+
+/* GEN-11: StatusBadge and Countdown. The text always carries the meaning; the colour only supports it. */
+.status-badge {
+  display: inline-block;
+  padding: 0.125rem var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  background: var(--surface);
+  color: var(--foreground);
+}
+.status-badge-success {
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+.status-badge-warning {
+  background: var(--warning-bg);
+  color: #92400e;
+}
+.status-badge-error {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+.status-badge-info {
+  background: var(--info-bg);
+  color: #1d4ed8;
+}
+.countdown {
+  font-variant-numeric: tabular-nums;
+}
+.countdown-time {
+  font-weight: 600;
+}
+.countdown-expired {
+  color: var(--danger-text);
+  font-weight: 600;
+}
+
+@media (prefers-color-scheme: dark) {
+  .status-badge-warning {
+    color: #fcd34d;
+  }
+  .status-badge-info {
+    color: #93c5fd;
+  }
+}
