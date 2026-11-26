@@ -28,6 +28,8 @@ export interface EnvVars {
   SMTP_USER?: string;
   SMTP_PASSWORD?: string;
   SMTP_FROM?: string;
+  /** ACC-02 (G12): dev/demo only, optional and not validated at boot. Only the exact value "true" auto-verifies new accounts. */
+  AUTO_VERIFY_EMAIL?: string;
 }
 
 export function validateEnv(raw: Record<string, unknown>): Record<string, unknown> & EnvVars {

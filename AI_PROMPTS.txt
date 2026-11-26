@@ -2923,6 +2923,16 @@ Re-formatted AI_PROMPTS.txt with a script: one separator style (48 "=" character
 Date: 2026-11-26
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-02 (SCRUM-143, G12)
+Prompt:
+Backend only: add an optional AUTO_VERIFY_EMAIL dev/demo flag (off by default, only the exact value "true" turns it on) so new accounts are created with emailVerified true and no verification email, with a startup warning, docs, unit tests and one e2e. Never applies to existing users, login or resend-verification.
+How the output was used:
+Tests written first (unit cases for on, unset, "false", "TRUE" and others; e2e for register then POST /api/flight-bookings with the flag on and off) and watched fail. Added autoVerifyEmail to configuration.ts and the optional AUTO_VERIFY_EMAIL to EnvVars; AuthService.register uses it (verified and no email when on) and onModuleInit logs the warning. Documented in the README table, .env.example and docs/api/email-verification.md.
+
+================================================
+Date: 2026-11-26
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
 Related Requirement: ACC-04, ACC-11 (SCRUM-134)
 Prompt:
 Frontend only: add RequireRole (guest to login with returnTo, wrong role gets a "You do not have access" message with a link to their home, user with mustChangePassword goes to /change-password), a roles helper (home path per role, header links per role), a small change-password form (PATCH /api/auth/change-password, min 8 chars with a letter and a digit, new password must differ, backend field errors shown, then log in again), placeholder /admin /airline /hotel pages, a role-aware Header with no flash of wrong links while loading, and a login redirect to the role home or /change-password. Tests first.
@@ -2936,6 +2946,13 @@ Exported the Swagger document from the real controllers (without a database) int
 
 ================================================
 Date: 2026-11-26
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Opus 5.5)
+Related Requirement: GEN-17 (SCRUM-144)
+Prompt:
+Frontend only: a server-side fetch helper that forwards the user's cookies to the backend, a client-side fallback when the server gets a 401, and one example page. Tests first; keep the tests small.
+How the output was used:
+Tests written first and watched fail (serverApi forwards only access_token to BACKEND_URL with no-store, no Cookie for a guest, 401 becomes { ok: false, reason: 'unauthorized' }, other errors throw ApiError; the example page renders server data with no browser request, and on a server 401 loads the user in the browser instead). Added src/lib/serverApi.ts (never forwards the refresh token, since a server component cannot set rotated cookies), exported toApiError from src/lib/api.ts, added the /examples/server-fetch page (ProfileSummary, ProfileSummaryClient using useApi with loading/error states) and a README section.
 Student: Abdelrahman ElGabarty
 Tool: Claude Code (Claude Sonnet 5.5)
 Related Requirement: GEN-06, GEN-11 (SCRUM-138, M2: formatMoney / formatInZone / StatusBadge / Countdown)
