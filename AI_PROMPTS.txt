@@ -2981,3 +2981,13 @@ Frontend only. Build the TierEditor form component for a provider's cancellation
 How the output was used:
 Added lib/cancellationTiers.ts (parseTierRows: whole numbers only, days 0-365, percent 0-100, no two rows with the same days, at most 20 rows, empty list allowed meaning nothing is refunded; returns the tiers sorted largest threshold first plus a map from each typed row to its sent index; describeTier writes a tier in words) and components/TierEditor.tsx (one row per tier with Add and Remove, a "How it will work" preview in words, errors shown next to the field and focus moved to the first one, a spinner and no double save while the request runs, a request failure shown as an Alert with a retry). The caller does the request in onSave, so the same component serves both airline (event "departure") and hotel (event "check-in"). A server field error such as cancellationTiers.2.daysBeforeThreshold is mapped back to the row the person typed, because the list is sorted before it is sent. The form does not check that the refund shrinks as the date gets closer: the backend does not either, and the refund amount is the server's job (RefundCalculator). Added the styles to globals.css.
 Verification: npm run lint, npm run typecheck, npm run build clean; npm test 359/359 passed (33 new tests in two files); changing the row-index mapping on purpose made the server-error test fail, then restored. Looked at the form in a real browser on a throwaway preview route (since deleted): this caught a missing space in the intro sentence, now fixed, and the duplicate-days error, focus and hidden preview were confirmed. Not done: not connected to the real endpoints (SCRUM-204 and SCRUM-207 do that), so no save was tried against the backend.
+
+================================================
+Date: 2026-11-26
+Student: Ahmed Sanad
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: FLT-29, FLT-30 (M2-10, gap G1: list the flights of my airline)
+Prompt:
+Backend only. Add GET /api/flights/mine for an airline moderator: the flights of their own airline in any status, paginated, latest departure first, with an optional status filter. A SCHEDULED flight that has already left must be reported and filtered as DEPARTED like everywhere else. Tests first.
+How the output was used:
+Added my-flights.service.ts, my-flights.controller.ts (listed before FlightsController so mine is never read as an id), dto/my-flights-query.dto.ts and registered them in flights.module.ts. flight-mine.spec.ts runs against an isolated in-memory MongoDB: own airline only, order, DEPARTED reading and filter, pagination, a user without an airline gets 403. Lint, build and the flights specs pass. Not checked: a call through Swagger with a real moderator login.

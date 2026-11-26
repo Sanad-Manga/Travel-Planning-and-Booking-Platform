@@ -235,6 +235,12 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
       total: 25,
     },
     {
+      // FLT-29 / G1: the moderator's own airline flights (the one flight seeded below); the envelope and the limits are checked here, the rows in flight-mine.spec.ts
+      swagger: '/api/flights/mine',
+      url: '/api/flights/mine',
+      auth: 'airlineModerator',
+    },
+    {
       swagger: '/api/hotels/search',
       url: '/api/hotels/search',
       auth: 'none',
