@@ -2918,3 +2918,13 @@ Prompt:
 Before submitting Milestone 1: make the AI_PROMPTS.txt log format consistent and check the README against the code.
 How the output was used:
 Re-formatted AI_PROMPTS.txt with a script: one separator style (48 "=" characters) before every entry, a Date line on every entry (28 entries had none; the date is the day the entry was committed, taken from git blame), and entries that had been glued to the previous one separated again. No prompt text was changed or removed (verified by comparing every non-blank, non-separator, non-Date line before and after: 2339 identical lines). Checked the README claims (scripts, port, routes, env variables, Swagger path) against package.json, the config code and the controllers, and added an environment-variables table (required vs optional) to the backend setup section.
+
+================================================
+Date: 2026-11-26
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GEN-02 (SCRUM-133, M2-01)
+Prompt:
+Generate API types from the backend's Swagger document, add swr, react-hook-form and zod, and set the endpoint-function conventions with an example, for the Milestone 2 frontend.
+How the output was used:
+Exported the Swagger document from the real controllers (without a database) into frontend/openapi/openapi.json and generated src/api/schema.d.ts with openapi-typescript (npm run gen:api / gen:api:file). Added type helpers (src/api/types.ts), an example endpoint module (referenceData.ts), a typed SWR hook and provider (useApi, SWRProvider) and applyApiErrors for backend field errors in react-hook-form forms, with tests, and a README section with the conventions.
