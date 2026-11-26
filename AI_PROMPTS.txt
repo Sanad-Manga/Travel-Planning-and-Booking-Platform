@@ -2933,3 +2933,13 @@ Prompt:
 Generate API types from the backend's Swagger document, add swr, react-hook-form and zod, and set the endpoint-function conventions with an example, for the Milestone 2 frontend.
 How the output was used:
 Exported the Swagger document from the real controllers (without a database) into frontend/openapi/openapi.json and generated src/api/schema.d.ts with openapi-typescript (npm run gen:api / gen:api:file). Added type helpers (src/api/types.ts), an example endpoint module (referenceData.ts), a typed SWR hook and provider (useApi, SWRProvider) and applyApiErrors for backend field errors in react-hook-form forms, with tests, and a README section with the conventions.
+
+================================================
+Date: 2026-11-26
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Opus 5.5)
+Related Requirement: FLT-02, GEN-12 (SCRUM-135)
+Prompt:
+Frontend only: build searchable Airport / City / Country / Currency pickers (searchable dropdowns) on top of the GEN-02 API client. Tests first; keep the tests small. The backend lists have no search parameter and a page size of at most 50.
+How the output was used:
+Tests written first and watched fail (listAll paging, the ReferencePicker combobox: filtering, keyboard and mouse selection, Escape, no-match, loading/error/field-error states; each picker loading its list and reporting the right code; the city picker filtering by country). Added listAll/allKey/fetchAll and the item types to src/api/referenceData.ts (loads every 50-item page once, SWR-cached, capped at 20 pages), the accessible ReferencePicker component (ARIA combobox + listbox) and AirportPicker (IATA code), CountryPicker (country code), CityPicker (city id, optional countryCode) and CurrencyPicker (currency code) in src/components/pickers.tsx, plus picker styles in globals.css with 44px touch targets.
