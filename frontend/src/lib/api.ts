@@ -75,7 +75,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-async function toApiError(response: Response): Promise<ApiError> {
+/** Turns a failed response into an ApiError (also used by the server-side helper, GEN-17). */
+export async function toApiError(response: Response): Promise<ApiError> {
   let body: unknown;
   try {
     body = await response.json();

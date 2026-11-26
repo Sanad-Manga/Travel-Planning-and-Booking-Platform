@@ -42,3 +42,12 @@ npm run gen:api:file   # no backend: regenerates from the committed openapi/open
 - **Actions** (create, update, delete) run from event handlers, not in render. Destructive ones go through the confirm dialog, and success is shown with a toast.
 - **Forms:** `react-hook-form` with a `zod` schema (`@hookform/resolvers/zod`) for checks before sending. On a failed submit call `applyApiErrors(error, setError, ['field', ...])` from `@/lib/formErrors` to put the backend's field errors next to the right inputs. It returns any message left over for an `Alert`.
 - **Money is integer cents** (`...Cents`) and dates are UTC ISO strings. Format them at the edge of the UI only.
+
+## Loading data on the server (GEN-17)
+
+A server component (a `page.tsx` without `'use client'`) can load data before the HTML is sent with `serverApi<T>(path)` from `@/lib/serverApi`.
+
+- It calls the backend directly (`BACKEND_URL`) and forwards only the user's `access_token` cookie, never the refresh token. Responses are never cached.
+- It returns `{ ok: true, data }`, or `{ ok: false, reason: 'unauthorized' }` on a 401. Any other error is thrown as an `ApiError`.
+- On `unauthorized`, render a client component that loads the same data with `useApi`. In the browser `api()` refreshes the session once and sends the user to login if that fails. A server component cannot refresh, because it cannot set the new cookies.
+- Example: `src/app/examples/server-fetch/` (`/examples/server-fetch`, not indexed). It shows the signed-in user loaded on the server, with the browser fallback.

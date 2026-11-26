@@ -12,6 +12,8 @@ export default () => {
     mongodbUri: env.MONGODB_URI as string,
     // ACC-02: base URL of this API, used in the email-verification link. Optional (like SMTP), not validated at boot.
     publicApiUrl: process.env.PUBLIC_API_URL || 'http://localhost:3001',
+    // ACC-02 (G12): dev/demo only. Exactly "true" turns it on; unset or anything else is off.
+    autoVerifyEmail: env.AUTO_VERIFY_EMAIL === 'true',
     cookieSecure: String(env.COOKIE_SECURE ?? String(process.env.NODE_ENV === 'production')) === 'true',
   };
 };
