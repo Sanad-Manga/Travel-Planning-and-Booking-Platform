@@ -2933,3 +2933,14 @@ Prompt:
 Generate API types from the backend's Swagger document, add swr, react-hook-form and zod, and set the endpoint-function conventions with an example, for the Milestone 2 frontend.
 How the output was used:
 Exported the Swagger document from the real controllers (without a database) into frontend/openapi/openapi.json and generated src/api/schema.d.ts with openapi-typescript (npm run gen:api / gen:api:file). Added type helpers (src/api/types.ts), an example endpoint module (referenceData.ts), a typed SWR hook and provider (useApi, SWRProvider) and applyApiErrors for backend field errors in react-hook-form forms, with tests, and a README section with the conventions.
+
+================================================
+Date: 2026-11-26
+Student: Abdelrahman ElGabarty
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: FLT-09, HTL-10 (SCRUM-139, M2-07: TierEditor, cancellation tiers form)
+Prompt:
+Frontend only. Build the TierEditor form component for a provider's cancellation refund tiers, used later by the airline policies page (SCRUM-204) and the hotel policies page (SCRUM-207). It edits a list of { daysBeforeThreshold, refundPercent } and saves the whole list, using the backend's rules from SetCancellationPolicyDto and UpdateHotelPoliciesDto.
+How the output was used:
+Added lib/cancellationTiers.ts (parseTierRows: whole numbers only, days 0-365, percent 0-100, no two rows with the same days, at most 20 rows, empty list allowed meaning nothing is refunded; returns the tiers sorted largest threshold first plus a map from each typed row to its sent index; describeTier writes a tier in words) and components/TierEditor.tsx (one row per tier with Add and Remove, a "How it will work" preview in words, errors shown next to the field and focus moved to the first one, a spinner and no double save while the request runs, a request failure shown as an Alert with a retry). The caller does the request in onSave, so the same component serves both airline (event "departure") and hotel (event "check-in"). A server field error such as cancellationTiers.2.daysBeforeThreshold is mapped back to the row the person typed, because the list is sorted before it is sent. The form does not check that the refund shrinks as the date gets closer: the backend does not either, and the refund amount is the server's job (RefundCalculator). Added the styles to globals.css.
+Verification: npm run lint, npm run typecheck, npm run build clean; npm test 359/359 passed (33 new tests in two files); changing the row-index mapping on purpose made the server-error test fail, then restored. Looked at the form in a real browser on a throwaway preview route (since deleted): this caught a missing space in the intro sentence, now fixed, and the duplicate-days error, focus and hidden preview were confirmed. Not done: not connected to the real endpoints (SCRUM-204 and SCRUM-207 do that), so no save was tried against the backend.
