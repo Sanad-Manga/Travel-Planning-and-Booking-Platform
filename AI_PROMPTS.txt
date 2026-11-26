@@ -2933,3 +2933,13 @@ Prompt:
 Generate API types from the backend's Swagger document, add swr, react-hook-form and zod, and set the endpoint-function conventions with an example, for the Milestone 2 frontend.
 How the output was used:
 Exported the Swagger document from the real controllers (without a database) into frontend/openapi/openapi.json and generated src/api/schema.d.ts with openapi-typescript (npm run gen:api / gen:api:file). Added type helpers (src/api/types.ts), an example endpoint module (referenceData.ts), a typed SWR hook and provider (useApi, SWRProvider) and applyApiErrors for backend field errors in react-hook-form forms, with tests, and a README section with the conventions.
+
+================================================
+Date: 2026-11-26
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Opus 5.5)
+Related Requirement: GEN-17 (SCRUM-144)
+Prompt:
+Frontend only: a server-side fetch helper that forwards the user's cookies to the backend, a client-side fallback when the server gets a 401, and one example page. Tests first; keep the tests small.
+How the output was used:
+Tests written first and watched fail (serverApi forwards only access_token to BACKEND_URL with no-store, no Cookie for a guest, 401 becomes { ok: false, reason: 'unauthorized' }, other errors throw ApiError; the example page renders server data with no browser request, and on a server 401 loads the user in the browser instead). Added src/lib/serverApi.ts (never forwards the refresh token, since a server component cannot set rotated cookies), exported toApiError from src/lib/api.ts, added the /examples/server-fetch page (ProfileSummary, ProfileSummaryClient using useApi with loading/error states) and a README section.
