@@ -2936,6 +2936,13 @@ Exported the Swagger document from the real controllers (without a database) int
 
 ================================================
 Date: 2026-11-26
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Opus 5.5)
+Related Requirement: GEN-17 (SCRUM-144)
+Prompt:
+Frontend only: a server-side fetch helper that forwards the user's cookies to the backend, a client-side fallback when the server gets a 401, and one example page. Tests first; keep the tests small.
+How the output was used:
+Tests written first and watched fail (serverApi forwards only access_token to BACKEND_URL with no-store, no Cookie for a guest, 401 becomes { ok: false, reason: 'unauthorized' }, other errors throw ApiError; the example page renders server data with no browser request, and on a server 401 loads the user in the browser instead). Added src/lib/serverApi.ts (never forwards the refresh token, since a server component cannot set rotated cookies), exported toApiError from src/lib/api.ts, added the /examples/server-fetch page (ProfileSummary, ProfileSummaryClient using useApi with loading/error states) and a README section.
 Student: Abdelrahman ElGabarty
 Tool: Claude Code (Claude Sonnet 5.5)
 Related Requirement: FLT-09, HTL-10 (SCRUM-139, M2-07: TierEditor, cancellation tiers form)
