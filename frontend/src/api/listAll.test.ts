@@ -16,7 +16,7 @@ describe('listAll', () => {
       const page = Number(new URL(url, 'http://x').searchParams.get('page'));
       return Promise.resolve(json({ items: [`item${page}`], page, limit: 50, total: 3, totalPages: 3 }));
     });
-    await expect(listAll<string>('/api/cities', { countryCode: 'EG' })).resolves.toEqual(['item1', 'item2', 'item3']);
+    await expect(listAll<string>('/api/cities', { countryCode: 'EG' })).resolves.toEqual({ items: ['item1', 'item2', 'item3'], total: 3 });
     expect(fetchMock.mock.calls.map((c) => c[0])).toEqual([
       '/api/cities?countryCode=EG&page=1&limit=50',
       '/api/cities?countryCode=EG&page=2&limit=50',
@@ -26,7 +26,17 @@ describe('listAll', () => {
 
   it('makes one request when everything fits on the first page', async () => {
     fetchMock.mockResolvedValue(json({ items: ['EGP'], page: 1, limit: 50, total: 1, totalPages: 1 }));
-    await expect(listAll<string>('/api/currencies')).resolves.toEqual(['EGP']);
+    await expect(listAll<string>('/api/currencies')).resolves.toEqual({ items: ['EGP'], total: 1 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops at 1,000 items and reports the real total so the picker can say so', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      const page = Number(new URL(url, 'http://x').searchParams.get('page'));
+      return Promise.resolve(json({ items: [page], page, limit: 50, total: 1234, totalPages: 25 }));
+    });
+    const result = await listAll<number>('/api/airports');
+    expect(fetchMock).toHaveBeenCalledTimes(20);
+    expect(result.total).toBe(1234);
   });
 });

@@ -25,6 +25,8 @@ export interface ReferencePickerProps {
   isLoading?: boolean;
   /** The list could not be loaded: one plain sentence. */
   loadError?: string;
+  /** A note under the field, for example that the list is incomplete. */
+  notice?: string;
   required?: boolean;
   disabled?: boolean;
   placeholder?: string;
@@ -38,7 +40,8 @@ const MAX_SHOWN = 50;
 /**
  * FLT-02 / GEN-12: a searchable dropdown (ARIA 1.2 combobox with a listbox). The user types to filter by name,
  * code or detail, picks with the mouse or with Arrow keys + Enter, and Escape cancels. The form only ever
- * receives an option's `value`, never the typed text.
+ * receives an option's `value`, never the typed text. Emptying the text and leaving the field (or pressing Enter)
+ * clears the value with `onChange('')`; an optional field with a value also shows a Clear button.
  */
 export function ReferencePicker({
   label,
@@ -49,6 +52,7 @@ export function ReferencePicker({
   error,
   isLoading,
   loadError,
+  notice,
   required,
   disabled,
   placeholder,
@@ -59,6 +63,7 @@ export function ReferencePicker({
   const hintId = `${id}-hint`;
   const errorId = `${id}-error`;
   const statusId = `${id}-status`;
+  const noticeId = `${id}-notice`;
 
   // null = not typing: the input shows the selected option's label.
   const [query, setQuery] = useState<string | null>(null);
@@ -85,6 +90,14 @@ export function ReferencePicker({
     close();
   };
 
+  const clear = () => {
+    if (value !== '') onChange('');
+    close();
+  };
+
+  /** The user deleted the text: leaving the field (or Enter) means "no value", not "keep the old one". */
+  const emptied = query !== null && query.trim() === '';
+
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
@@ -98,6 +111,9 @@ export function ReferencePicker({
     } else if (event.key === 'Enter' && open && active >= 0 && shown[active]) {
       event.preventDefault();
       choose(shown[active]);
+    } else if (event.key === 'Enter' && emptied) {
+      event.preventDefault();
+      clear();
     } else if (event.key === 'Escape' && open) {
       event.preventDefault();
       close();
@@ -105,7 +121,9 @@ export function ReferencePicker({
   };
 
   const describedBy =
-    [hint ? hintId : null, isLoading || loadError ? statusId : null, error ? errorId : null].filter(Boolean).join(' ') ||
+    [hint ? hintId : null, isLoading || loadError ? statusId : null, notice ? noticeId : null, error ? errorId : null]
+      .filter(Boolean)
+      .join(' ') ||
     undefined;
   const activeId = open && active >= 0 && shown[active] ? `${id}-opt-${active}` : undefined;
   const typed = (query ?? '').trim();
@@ -144,7 +162,7 @@ export function ReferencePicker({
           placeholder={placeholder ?? 'Type to search'}
           value={query ?? selected?.label ?? ''}
           onFocus={() => setOpen(true)}
-          onBlur={close}
+          onBlur={() => (emptied ? clear() : close())}
           onChange={(event) => {
             setQuery(event.target.value);
             setOpen(true);
@@ -152,6 +170,11 @@ export function ReferencePicker({
           }}
           onKeyDown={onKeyDown}
         />
+        {!required && !disabled && value ? (
+          <button type="button" className="picker-clear" aria-label={`Clear ${label}`} onClick={clear}>
+            ×
+          </button>
+        ) : null}
         {name ? <input type="hidden" name={name} value={value} /> : null}
         {open && !isLoading && !loadError ? (
           <div className="picker-popup">
@@ -190,6 +213,11 @@ export function ReferencePicker({
       ) : loadError ? (
         <p id={statusId} className="field-error" role="alert">
           {loadError}
+        </p>
+      ) : null}
+      {notice ? (
+        <p id={noticeId} className="field-hint">
+          {notice}
         </p>
       ) : null}
       {error ? (

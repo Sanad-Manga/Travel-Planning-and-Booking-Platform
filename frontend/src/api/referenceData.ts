@@ -42,24 +42,32 @@ const MAX_LIMIT = 50;
 /** Safety stop: never walk more than 1,000 items for one picker. */
 const MAX_PAGES = 20;
 
+/** A whole reference list, plus the server's total so a caller can tell when it was cut at `MAX_PAGES`. */
+export interface AllItems<T> {
+  items: T[];
+  total: number;
+}
+
 /**
  * Loads every item of a small reference list (airports, cities, countries, currencies). The backend has no
  * search parameter, so a picker loads the whole list once (cached by SWR) and filters it in the browser.
- * Page 1 says how many pages exist; the rest are requested together.
+ * Page 1 says how many pages exist; the rest are requested together. Stops at 1,000 items; `total` is then
+ * larger than `items.length` and the picker says so (never cut off silently).
  */
-export async function listAll<T>(path: string, query?: object): Promise<T[]> {
+export async function listAll<T>(path: string, query?: object): Promise<AllItems<T>> {
   const pageKey = (page: number) => withQuery(path, { ...query, page, limit: MAX_LIMIT });
   const first = await api<Page<T>>(pageKey(1));
   const last = Math.min(first.totalPages, MAX_PAGES);
   const rest = await Promise.all(Array.from({ length: Math.max(last - 1, 0) }, (_, i) => api<Page<T>>(pageKey(i + 2))));
-  return [first, ...rest].flatMap((p) => p.items);
+  const items = [first, ...rest].flatMap((p) => p.items);
+  return { items, total: Math.max(first.total, items.length) };
 }
 
 /** SWR key for a whole list; the `all:` prefix keeps it apart from the single-page keys above. */
 export const allKey = (path: string, query?: object) => `all:${withQuery(path, query)}`;
 
 /** SWR fetcher for an `allKey`. */
-export function fetchAll<T>(key: string): Promise<T[]> {
+export function fetchAll<T>(key: string): Promise<AllItems<T>> {
   const url = new URL(key.slice('all:'.length), 'http://local');
   return listAll<T>(url.pathname, Object.fromEntries(url.searchParams));
 }

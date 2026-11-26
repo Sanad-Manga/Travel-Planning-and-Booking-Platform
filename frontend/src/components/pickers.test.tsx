@@ -53,4 +53,14 @@ describe('reference-data pickers', () => {
     await screen.findByRole('option', { name: /Cairo/ });
     expect(fetchMock.mock.calls[0][0]).toBe('/api/cities?countryCode=EG&page=1&limit=50');
   });
+
+  it('says when the list is longer than what was loaded', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      const n = Number(new URL(url, 'http://x').searchParams.get('page'));
+      const items = Array.from({ length: 50 }, (_, i) => ({ code: `C${n}-${i}` }));
+      return Promise.resolve(new Response(JSON.stringify({ items, page: n, limit: 50, total: 1200, totalPages: 24 }), { status: 200 }));
+    });
+    wrap(<CurrencyPicker value="" onChange={() => {}} />);
+    expect(await screen.findByText('Only the first 1,000 of 1,200 are listed.')).toBeInTheDocument();
+  });
 });

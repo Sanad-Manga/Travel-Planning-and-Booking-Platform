@@ -1,22 +1,28 @@
 'use client';
 
 import { allKey, fetchAll } from '@/api/referenceData';
-import type { Airport, City, Country, Currency } from '@/api/referenceData';
+import type { Airport, AllItems, City, Country, Currency } from '@/api/referenceData';
 import { useApi } from '@/api/useApi';
 import { toFriendlyError } from '@/lib/apiError';
 import { ReferencePicker } from './ReferencePicker';
 import type { PickerOption, ReferencePickerProps } from './ReferencePicker';
 
 /** What every picker accepts: the ReferencePicker props minus the list it loads itself. The label has a default. */
-export type PickerProps = Omit<ReferencePickerProps, 'options' | 'isLoading' | 'loadError' | 'label'> & { label?: string };
+export type PickerProps = Omit<ReferencePickerProps, 'options' | 'isLoading' | 'loadError' | 'notice' | 'label'> & { label?: string };
 
 /** Loads a whole reference list once (SWR-cached and shared by every picker on the page) and maps it to options. */
 function useOptions<T>(key: string, toOption: (item: T) => PickerOption) {
-  const { data, error, isLoading } = useApi<T[]>(key, { fetcher: fetchAll });
+  const { data, error, isLoading } = useApi<AllItems<T>>(key, { fetcher: fetchAll });
+  const items = data?.items ?? [];
+  const total = data?.total ?? 0;
   return {
-    options: (data ?? []).map(toOption),
+    options: items.map(toOption),
     isLoading,
     loadError: error ? `Could not load the list. ${toFriendlyError(error).hint}` : undefined,
+    notice:
+      total > items.length
+        ? `Only the first ${items.length.toLocaleString('en-US')} of ${total.toLocaleString('en-US')} are listed.`
+        : undefined,
   };
 }
 

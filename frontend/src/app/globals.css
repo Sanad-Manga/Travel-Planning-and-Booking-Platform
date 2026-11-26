@@ -259,6 +259,26 @@ a:focus-visible {
 .picker-control {
   position: relative;
 }
+.picker-clear {
+  position: absolute;
+  top: 50%;
+  right: var(--space-1);
+  transform: translateY(-50%);
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.picker-clear:hover {
+  color: inherit;
+}
+.picker-control:has(.picker-clear) .field-input {
+  padding-right: 3rem;
+}
 .picker-popup {
   position: absolute;
   z-index: 20;

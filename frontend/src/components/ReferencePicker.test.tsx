@@ -83,4 +83,40 @@ describe('ReferencePicker', () => {
     expect(input).toHaveAttribute('aria-invalid', 'true');
     expect(input).toHaveAccessibleDescription(expect.stringContaining('Choose an airport'));
   });
+
+  it('clears the value when the text is emptied and the field loses focus', () => {
+    const onPick = vi.fn();
+    render(<Controlled value="CAI" onPick={onPick} />);
+    const input = screen.getByRole('combobox');
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.blur(input);
+    expect(onPick).toHaveBeenCalledWith('');
+    expect(input).toHaveValue('');
+  });
+
+  it('clears the value with Enter on an empty field', () => {
+    const onPick = vi.fn();
+    render(<Controlled value="CAI" onPick={onPick} />);
+    const input = screen.getByRole('combobox');
+    fireEvent.change(input, { target: { value: '  ' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onPick).toHaveBeenCalledWith('');
+  });
+
+  it('offers a Clear button only for an optional field with a value', () => {
+    const onPick = vi.fn();
+    const { unmount } = render(<Controlled value="CAI" onPick={onPick} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Clear Airport' }));
+    expect(onPick).toHaveBeenCalledWith('');
+    expect(screen.getByRole('combobox')).toHaveValue('');
+    expect(screen.queryByRole('button', { name: 'Clear Airport' })).not.toBeInTheDocument();
+    unmount();
+    render(<Controlled value="CAI" required />);
+    expect(screen.queryByRole('button', { name: 'Clear Airport' })).not.toBeInTheDocument();
+  });
+
+  it('shows a notice, linked to the input, when the list is incomplete', () => {
+    render(<ReferencePicker label="Airport" options={options} value="" onChange={() => {}} notice="Only the first 1,000 of 1,200 are listed." />);
+    expect(screen.getByRole('combobox')).toHaveAccessibleDescription(expect.stringContaining('Only the first 1,000 of 1,200'));
+  });
 });
