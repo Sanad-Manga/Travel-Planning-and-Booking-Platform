@@ -237,3 +237,51 @@ describe('api (ACC-10): 401 refresh and retry', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('api (GEN-08): multipart requests', () => {
+  function imageBody() {
+    const body = new FormData();
+    body.append('image', new File(['png'], 'image.png', { type: 'image/png' }));
+    return body;
+  }
+
+  it('passes FormData through with cookies and lets fetch set its multipart boundary', async () => {
+    const body = imageBody();
+    fetchMock.mockResolvedValueOnce(json(201, { id: 'image', url: '/uploads/image.png' }));
+    await expect(api('/posts/post/images', { method: 'POST', body })).resolves.toEqual({
+      id: 'image',
+      url: '/uploads/image.png',
+    });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/posts/post/images');
+    expect(init).toMatchObject({ method: 'POST', credentials: 'include', headers: { Accept: 'application/json' } });
+    expect(init.headers['Content-Type']).toBeUndefined();
+    expect(init.body).toBe(body);
+  });
+
+  it('uses the existing refresh flow and resends the original FormData once', async () => {
+    const body = imageBody();
+    fetchMock
+      .mockResolvedValueOnce(json(401, errorBody(401)))
+      .mockResolvedValueOnce(json(200, {}))
+      .mockResolvedValueOnce(json(201, { id: 'image' }));
+    await expect(api('/activities/activity/images', { method: 'POST', body })).resolves.toEqual({ id: 'image' });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/activities/activity/images', '/api/auth/refresh', '/api/activities/activity/images',
+    ]);
+    for (const [, init] of fetchMock.mock.calls) expect(init.credentials).toBe('include');
+    expect(fetchMock.mock.calls[0][1].body).toBe(body);
+    expect(fetchMock.mock.calls[2][1].body).toBe(body);
+    expect(fetchMock.mock.calls[2][1].headers['Content-Type']).toBeUndefined();
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it.each([413, 503])('exposes a %i upload error as ApiError without retrying', async (status) => {
+    const message = 'Upload rejected';
+    fetchMock.mockResolvedValueOnce(json(status, errorBody(status, { message })));
+    const error = await api('/airlines/airline/logo', { method: 'POST', body: imageBody() }).catch((failure: unknown) => failure);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ statusCode: status, message });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
