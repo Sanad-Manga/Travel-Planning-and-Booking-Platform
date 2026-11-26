@@ -2986,6 +2986,11 @@ Verification: npm run lint, npm run typecheck, npm run build clean; npm test 359
 Date: 2026-11-26
 Student: Ahmed Sanad
 Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GEN-12 (M2-08: uploads rewrite, env example, dev setup doc, PR checklist)
+Prompt:
+Frontend and docs only. Proxy /uploads/* to the backend like /api/*, add the Stripe publishable key to the frontend env example, write a short developer setup doc (seed, verified demo users, stripe listen) and a frontend pull request template with the definition of done.
+How the output was used:
+Added the second rewrite in next.config.ts with a test that checks both rewrites, the NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY line (publishable key only) in frontend/.env.example, docs/dev-setup.md and .github/PULL_REQUEST_TEMPLATE/frontend.md. Lint, typecheck, test and build pass in a separate worktree. Not yet checked: an uploaded image loading through port 3000 in the browser.
 Related Requirement: FLT-29, FLT-30 (M2-10, gap G1: list the flights of my airline)
 Prompt:
 Backend only. Add GET /api/flights/mine for an airline moderator: the flights of their own airline in any status, paginated, latest departure first, with an optional status filter. A SCHEDULED flight that has already left must be reported and filtered as DEPARTED like everywhere else. Tests first.
