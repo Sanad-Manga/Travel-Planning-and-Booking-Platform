@@ -3,13 +3,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api } from '@/lib/api';
 import { clearPendingAction } from '@/lib/pendingAction';
+import type { Role } from '@/lib/roles';
 
 /** The backend's UserResponseDto. No token or password hash is ever part of it. */
 export interface AuthUser {
   id: string;
   name: string;
   email: string;
-  role: 'USER' | 'ADMIN' | 'AIRLINE_MODERATOR' | 'HOTEL_MODERATOR';
+  role: Role;
   status: 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED';
   emailVerified: boolean;
   preferredCurrency: string;
@@ -28,6 +29,8 @@ interface Auth {
   login: (email: string, password: string) => Promise<AuthUser>;
   /** Rejects if the server could not be reached; the user then stays signed in. */
   logout: () => Promise<void>;
+  /** Forget the user locally, without calling the API: for when the server has already ended the session. */
+  resetSession: () => void;
 }
 
 const AuthContext = createContext<Auth | null>(null);
@@ -73,7 +76,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearPendingAction();
   }, []);
 
-  const value = useMemo<Auth>(() => ({ user, loading, login, logout }), [user, loading, login, logout]);
+  const resetSession = useCallback(() => {
+    setUser(null);
+    clearPendingAction();
+  }, []);
+
+  const value = useMemo<Auth>(
+    () => ({ user, loading, login, logout, resetSession }),
+    [user, loading, login, logout, resetSession],
+  );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

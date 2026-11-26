@@ -6,6 +6,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { ApiError } from '@/lib/api';
 import { toFriendlyError, type FriendlyError } from '@/lib/apiError';
 import { safeReturnTo } from '@/lib/returnTo';
+import { FORCED_PASSWORD_PATH, homePathFor } from '@/lib/roles';
 import { Alert } from './Alert';
 import { useAuth } from './AuthProvider';
 import { Breadcrumbs } from './Breadcrumbs';
@@ -47,7 +48,10 @@ export function LoginForm() {
   const [formError, setFormError] = useState<FriendlyError | null>(null);
 
   useEffect(() => {
-    if (!loading && user) router.replace(returnTo);
+    if (loading || !user) return;
+    // ACC-11: a temporary password must be replaced first. ACC-04: with no returnTo, go to the role's home.
+    if (user.mustChangePassword) router.replace(FORCED_PASSWORD_PATH);
+    else router.replace(returnTo === '/' ? homePathFor(user.role) : returnTo);
   }, [loading, user, returnTo, router]);
 
   async function submit() {

@@ -2918,3 +2918,13 @@ Prompt:
 Before submitting Milestone 1: make the AI_PROMPTS.txt log format consistent and check the README against the code.
 How the output was used:
 Re-formatted AI_PROMPTS.txt with a script: one separator style (48 "=" characters) before every entry, a Date line on every entry (28 entries had none; the date is the day the entry was committed, taken from git blame), and entries that had been glued to the previous one separated again. No prompt text was changed or removed (verified by comparing every non-blank, non-separator, non-Date line before and after: 2339 identical lines). Checked the README claims (scripts, port, routes, env variables, Swagger path) against package.json, the config code and the controllers, and added an environment-variables table (required vs optional) to the backend setup section.
+
+================================================
+Date: 2026-11-26
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: ACC-04, ACC-11 (SCRUM-134)
+Prompt:
+Frontend only: add RequireRole (guest to login with returnTo, wrong role gets a "You do not have access" message with a link to their home, user with mustChangePassword goes to /change-password), a roles helper (home path per role, header links per role), a small change-password form (PATCH /api/auth/change-password, min 8 chars with a letter and a digit, new password must differ, backend field errors shown, then log in again), placeholder /admin /airline /hotel pages, a role-aware Header with no flash of wrong links while loading, and a login redirect to the role home or /change-password. Tests first.
+How the output was used:
+Added lib/roles.ts, RequireRole (built on RequireAuth, which now also redirects forced users and takes allowMustChange / resumeAfterLogin), ChangePasswordForm and its page, the role home placeholders (plus /bookings so the My bookings link does not 404), a resetSession method on AuthProvider, and updated Header and LoginForm. Tests written first for each piece; lint, typecheck, test and build all pass.
