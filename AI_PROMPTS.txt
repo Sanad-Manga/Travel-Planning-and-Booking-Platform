@@ -2961,3 +2961,13 @@ Frontend only. Build the TierEditor form component for a provider's cancellation
 How the output was used:
 Added lib/cancellationTiers.ts (parseTierRows: whole numbers only, days 0-365, percent 0-100, no two rows with the same days, at most 20 rows, empty list allowed meaning nothing is refunded; returns the tiers sorted largest threshold first plus a map from each typed row to its sent index; describeTier writes a tier in words) and components/TierEditor.tsx (one row per tier with Add and Remove, a "How it will work" preview in words, errors shown next to the field and focus moved to the first one, a spinner and no double save while the request runs, a request failure shown as an Alert with a retry). The caller does the request in onSave, so the same component serves both airline (event "departure") and hotel (event "check-in"). A server field error such as cancellationTiers.2.daysBeforeThreshold is mapped back to the row the person typed, because the list is sorted before it is sent. The form does not check that the refund shrinks as the date gets closer: the backend does not either, and the refund amount is the server's job (RefundCalculator). Added the styles to globals.css.
 Verification: npm run lint, npm run typecheck, npm run build clean; npm test 359/359 passed (33 new tests in two files); changing the row-index mapping on purpose made the server-error test fail, then restored. Looked at the form in a real browser on a throwaway preview route (since deleted): this caught a missing space in the intro sentence, now fixed, and the duplicate-days error, focus and hidden preview were confirmed. Not done: not connected to the real endpoints (SCRUM-204 and SCRUM-207 do that), so no save was tried against the backend.
+
+================================================
+Date: 2026-11-26
+Student: Ahmed Sanad
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GEN-12 (M2-08: uploads rewrite, env example, dev setup doc, PR checklist)
+Prompt:
+Frontend and docs only. Proxy /uploads/* to the backend like /api/*, add the Stripe publishable key to the frontend env example, write a short developer setup doc (seed, verified demo users, stripe listen) and a frontend pull request template with the definition of done.
+How the output was used:
+Added the second rewrite in next.config.ts with a test that checks both rewrites, the NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY line (publishable key only) in frontend/.env.example, docs/dev-setup.md and .github/PULL_REQUEST_TEMPLATE/frontend.md. Lint, typecheck, test and build pass in a separate worktree. Not yet checked: an uploaded image loading through port 3000 in the browser.
