@@ -72,3 +72,7 @@ The decorator also adds the 403 to Swagger.
 
 Other routes checked, not needing it: `POST /api/payments/:id/retry` (the booking already exists, so it was created by a verified user),
 `POST /api/bookings/:type/:id/accept-policies` (same), itinerary item routes (planning data, not bookings). Cancel and read routes stay open.
+
+## Dev/demo flag: `AUTO_VERIFY_EMAIL`
+
+For demos without an email inbox, set the optional env variable `AUTO_VERIFY_EMAIL=true`: accounts created by `POST /api/auth/register` are then stored with `emailVerified: true` and no verification email is sent. It is **off by default**; only the exact value `true` turns it on (unset, `false`, `TRUE`, `1` are all off). It never changes existing users, login or resend-verification, and the API logs a warning at startup while it is on. Never enable it in production.
