@@ -255,6 +255,73 @@ a:focus-visible {
   cursor: not-allowed;
 }
 
+/* Searchable pickers (FLT-02 / GEN-12) */
+.picker-control {
+  position: relative;
+}
+.picker-clear {
+  position: absolute;
+  top: 50%;
+  right: var(--space-1);
+  transform: translateY(-50%);
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.picker-clear:hover {
+  color: inherit;
+}
+.picker-control:has(.picker-clear) .field-input {
+  padding-right: 3rem;
+}
+.picker-popup {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + var(--space-1));
+  left: 0;
+  right: 0;
+  max-height: min(18rem, 50vh);
+  overflow-y: auto;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--foreground) 15%, transparent);
+}
+.picker-list {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-1) 0;
+}
+.picker-option {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 2.75rem;
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+}
+.picker-option:hover,
+.picker-option.is-active {
+  background: var(--surface);
+}
+.picker-option[aria-selected='true'] .picker-option-label {
+  font-weight: 600;
+}
+.picker-option-detail {
+  font-size: var(--font-size-sm);
+  color: var(--muted);
+}
+.picker-empty {
+  margin: 0;
+  padding: var(--space-3);
+  color: var(--muted);
+}
+
 /* Cards */
 .card {
   padding: var(--space-4);
@@ -826,6 +893,55 @@ video {
   }
   .site-nav-button {
     width: auto;
+  }
+}
+
+/* GEN-11: StatusBadge and Countdown. The text always carries the meaning; the colour only supports it. */
+.status-badge {
+  display: inline-block;
+  padding: 0.125rem var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  background: var(--surface);
+  color: var(--foreground);
+}
+.status-badge-success {
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+.status-badge-warning {
+  background: var(--warning-bg);
+  color: #92400e;
+}
+.status-badge-error {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+.status-badge-info {
+  background: var(--info-bg);
+  color: #1d4ed8;
+}
+.countdown {
+  font-variant-numeric: tabular-nums;
+}
+.countdown-time {
+  font-weight: 600;
+}
+.countdown-expired {
+  color: var(--danger-text);
+  font-weight: 600;
+}
+
+@media (prefers-color-scheme: dark) {
+  .status-badge-warning {
+    color: #fcd34d;
+  }
+  .status-badge-info {
+    color: #93c5fd;
   }
 }
 
