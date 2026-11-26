@@ -121,6 +121,13 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
   ];
 
   const ROUTES: ListRoute[] = [
+    {
+      swagger: '/api/admin/providers',
+      url: '/api/admin/providers',
+      auth: 'admin',
+      query: 'type=hotel',
+      total: 1,
+    },
     // user + admin + hotel moderator + airline moderator (the hotel moderator pages the HTL-08 row below)
     {
       swagger: '/api/admin/accounts',
