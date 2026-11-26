@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, HttpException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, HttpException, Injectable, Logger, OnModuleInit, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { compare, hash, hashSync } from 'bcryptjs';
@@ -29,7 +29,9 @@ export interface LoginResult {
 }
 
 @Injectable()
-export class AuthService {
+export class AuthService implements OnModuleInit {
+  private readonly logger = new Logger(AuthService.name);
+
   // A real bcrypt hash of a random string nobody knows. When the email does not exist we still run
   // bcrypt against it, so "unknown email" and "wrong password" take the same time (no timing leak).
   private readonly dummyHash = hashSync(randomBytes(16).toString('hex'), BCRYPT_SALT_ROUNDS);
@@ -41,6 +43,17 @@ export class AuthService {
     private readonly revocations: TokenRevocationService,
     private readonly emailVerification: EmailVerificationService,
   ) {}
+
+  /** ACC-02 (G12): one clear warning when the dev/demo auto-verify flag is on. Never crashes, even in production. */
+  onModuleInit(): void {
+    if (this.autoVerifyEmail()) {
+      this.logger.warn('AUTO_VERIFY_EMAIL is on: new accounts are verified without checking their email. Never use in production.');
+    }
+  }
+
+  private autoVerifyEmail(): boolean {
+    return this.config.get<boolean>('autoVerifyEmail') === true;
+  }
 
   /** Creates a USER account. Business rule (unique email) is enforced here, not only by the DTO. */
   async register(dto: RegisterDto): Promise<UserResponseDto> {
@@ -55,15 +68,16 @@ export class AuthService {
     // Role and status are never taken from the client: the schema defaults give USER / ACTIVE.
     // If two requests race past the check above, the unique index throws Mongo code 11000,
     // which the global filter also turns into a 409.
+    const autoVerify = this.autoVerifyEmail(); // new accounts only: login, resend and existing users never use it
     const user = await this.usersService.create({
       name: dto.name,
       email: dto.email,
       passwordHash,
       consentAcceptedAt: new Date(),
-      emailVerified: false, // ACC-02: booking stays blocked until the emailed link is used
+      emailVerified: autoVerify, // ACC-02: false = booking stays blocked until the emailed link is used
     });
     // ACC-02: background send; a failure is logged and never fails or slows registration.
-    this.emailVerification.sendInBackground(user);
+    if (!autoVerify) this.emailVerification.sendInBackground(user);
     return UserResponseDto.from(user);
   }
 
