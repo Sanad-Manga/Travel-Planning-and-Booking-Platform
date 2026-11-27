@@ -542,3 +542,17 @@ The exact backend CI commands passed on Node 22.23.5 and npm 10.9.9
 using disposable MongoDB 8.2.6. Jest passed 1,300/1,300 across 93 suites
 and E2E passed 1,938/1,938 across 76 suites. The additional TypeScript
 and Git whitespace checks passed.
+
+## Provider picker — ACC-13 / ACC-15 / SCRUM-141
+
+Call `GET /api/admin/providers?type=airline` or `?type=hotel` using an ADMIN session.
+The response contains active and inactive providers of the requested type in ascending
+provider ID order. Each item contains only `id` (string), `name` and `isActive` (boolean).
+The standard page envelope is `{ items, page, limit, total, totalPages }`. Page defaults
+to 1; limit defaults to 10 and accepts 1–50. A page past the end has empty `items`
+and retains its requested page and collection totals.
+
+Use the returned `id` when linking a moderator in SCRUM-155. In SCRUM-156, show
+both states and use the existing deactivate/reactivate endpoints for changes.
+This GET performs no mutations. Generate the frontend OpenAPI snapshot and types
+through the normal Swagger workflow when integrating the consumer screens.

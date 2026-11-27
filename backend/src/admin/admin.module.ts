@@ -35,6 +35,8 @@ import { AdminContentController } from './admin-content.controller';
 import { AdminContentService } from './admin-content.service';
 import { AdminPasswordResetController } from './admin-password-reset.controller';
 import { AdminPasswordResetService } from './admin-password-reset.service';
+import { ProviderListController } from './provider-list.controller';
+import { ProviderListService } from './provider-list.service';
 import { ProviderStatusController } from './provider-status.controller';
 import { ProviderStatusService } from './provider-status.service';
 import { ModeratorAccountsController } from './moderator-accounts.controller';
@@ -87,6 +89,7 @@ import { TemporaryPasswordService } from './temporary-password.service';
     AdminAnalyticsController,
     AccountStatusController,
     AdminPasswordResetController,
+    ProviderListController,
     ProviderStatusController,
     ModeratorAccountsController,
     ReportsAdminController,
@@ -98,6 +101,7 @@ import { TemporaryPasswordService } from './temporary-password.service';
     AdminAnalyticsService,
     AccountStatusService,
     AdminPasswordResetService,
+    ProviderListService,
     ProviderStatusService,
     PasswordResetTargetService,
     TemporaryPasswordService,
