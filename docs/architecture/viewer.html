@@ -147,6 +147,8 @@
   figure.diagram button:hover { color: var(--fg); border-color: var(--border-strong); }
   .diagram-body { overflow-x: auto; padding: 0.5rem 1rem 1rem; text-align: center; min-height: 6rem; }
   .diagram-body svg { max-width: 100%; height: auto; }
+  .diagram-body foreignObject { overflow: visible; }
+  .diagram-body .nodeLabel, .diagram-body .edgeLabel { overflow: visible; }
   .diagram-body .pending { color: var(--muted); font-size: 0.85rem; padding: 2rem 0; }
   .diagram-body .err { text-align: left; color: var(--bad-fg); font-size: 0.85rem; }
   figure.diagram.expanded {
@@ -293,7 +295,14 @@
   }
 
   let drawing = 0;
+  // Mermaid sizes every box from the text width at draw time, so the web font must be loaded first,
+  // otherwise labels are measured in a narrower fallback font and the real text is cut off.
+  const fontsReady = Promise.all([
+    document.fonts.load('400 16px Inter'), document.fonts.load('500 16px Inter'), document.fonts.load('600 16px Inter'),
+  ]).then(() => document.fonts.ready).catch(() => undefined);
+
   async function drawAll() {
+    await fontsReady;
     const token = ++drawing;
     const theme = effective();
     mermaid.initialize({
