@@ -5629,6 +5629,11 @@ Test written first and seen failing, then the prop added in DataTable.tsx and th
 Date: 2026-11-27
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Opus 5.5)
+Related Requirement: ACC-04, ACC-05, ACC-06 (SCRUM-146)
+Prompt:
+Start SCRUM-146: finish login (role landing, generic wrong-password message, suspended message, lockout message with the retry time), logout in the header that clears the session, and an expired session sending the user to login. Check what SCRUM-134 already covers, fill only the gaps, tests first, then check against the real backend at phone width.
+How the output was used:
+Most of the ticket was already in place from SCRUM-134 (role landing and returnTo, generic 401 message, suspended 403, header logout, api() refresh-then-login redirect). Two gaps fixed, tests first: (1) the lockout message always said "15 minutes"; it now shows the time left from the backend's 423 message ("Try again in 12 minutes") and no longer offers a Try again button while locked; (2) logout did not clear the SWR cache, so a previous user's data could show for the next person in the same tab; SWRProvider now starts an empty cache when a signed-in user logs out or a different user signs in (a guest signing in keeps it). Checked on the real backend at 375 px: login lands on the role home, logout makes /auth/me and /auth/refresh answer 401, a wrong password shows the generic message, the 5th failure shows the lockout with the time left.
 Related Requirement: ACC-01 (SCRUM-145)
 Prompt:
 Start SCRUM-145: the /register page with name, email, password and a required terms checkbox, validated with zod, backend field errors shown next to the field, a clear duplicate-email message, and a verify-your-email notice after success. Follow the theme guide and the frontend PR template; tests first and small; check it against the real backend at phone width.
