@@ -3701,3 +3701,14 @@ Choose the simplest reusable implementation satisfying the actual Jira requireme
 
 How the output was used:
 Added the shared ImageUploader, its styles, and authenticated FormData support in the existing API client. Added validation, confirmation, preview, error, concurrency and request regression tests. Verified 38 focused tests and 441 total frontend tests, lint, typecheck and production build. Exercised the component and the existing Next.js rewrites in headless Edge with synthetic images and cookies, then removed the temporary preview and generated dev artifacts. Recorded usage examples for post images and airline logos.
+
+================================================
+Date: 2026-11-27
+Student: Ahmed Sanad
+Tool: Claude (Claude Code, Sonnet 5.5)
+Related Requirement: GEN theme template (frontend)
+Prompt:
+Design a sleek, minimal, muted theme (not bright or flashy) for the travel platform frontend, in two phases: first three visual HTML prototypes in light and dark with WCAG AA contrast checks, then implement the chosen direction in frontend/ with all design decisions in CSS tokens, a docs/theme.md guide and a /examples/theme living style guide. Follow-ups: prefer Harbor but make light mode blend better, try a Harbor and Linen mix, then a second blend, then use the first mix with the teal accent from the second.
+
+How the output was used:
+Chose the "Harbor x Linen 1" direction with the teal accent after comparing the prototypes. Replaced the colour, type, spacing, radius, focus and motion values in globals.css with one token block (light and dark) and restyled the existing components through those tokens without changing their props, markup or tests. Added a test that keeps the two dark blocks identical and rejects raw colours, the /examples/theme page and frontend/docs/theme.md. Dropped next/font/google because the build needs network access; the font stack names Inter first and falls back to system fonts. Verified lint, typecheck, all frontend tests and the production build, and checked the style guide at 320 px wide.
