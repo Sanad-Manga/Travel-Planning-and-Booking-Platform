@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
+import { NotificationBell } from '@/features/notifications/NotificationBell';
 import { toFriendlyError } from '@/lib/apiError';
 import { FORCED_PASSWORD_PATH, NEUTRAL_NAV_LINKS, navLinksFor, type NavLink } from '@/lib/roles';
 import { useAuth } from './AuthProvider';
@@ -96,6 +97,12 @@ export function Header() {
             <ul className="site-nav-list site-nav-account">
               {user ? (
                 <>
+                  {forced ? null : (
+                    // GEN-01: the notification bell, for every signed-in role.
+                    <li>
+                      <NotificationBell />
+                    </li>
+                  )}
                   {renderLinks(
                     forced
                       ? [{ label: 'Change password', href: FORCED_PASSWORD_PATH }]
