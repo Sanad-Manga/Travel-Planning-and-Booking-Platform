@@ -1115,6 +1115,17 @@ a.btn {
 /* =============================================================================================
    AUTH: login form and the Logout button in the header (ACC-10)
    ============================================================================================= */
+/* Account page (ACC-08 / ACC-09) */
+.account-sections {
+  display: grid;
+  gap: var(--space-6);
+  max-width: 40rem;
+}
+.account-email {
+  color: var(--foreground);
+  overflow-wrap: anywhere;
+}
+
 .auth-form {
   max-width: 26rem;
 }

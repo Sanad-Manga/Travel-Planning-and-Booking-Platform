@@ -36,6 +36,14 @@ async function fill(current = 'Temp0rary1', next = 'N3wPassw0rd', confirm = next
 }
 
 describe('ChangePasswordForm (ACC-11)', () => {
+  it('embedded (on /account, ACC-08): no page heading or breadcrumbs, same fields and button', () => {
+    render(<ChangePasswordForm embedded />);
+    expect(screen.queryByRole('heading', { level: 1 })).toBeNull();
+    expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).toBeNull();
+    expect(screen.getByLabelText(/Current password/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Change password' })).toBeInTheDocument();
+  });
+
   it('has a heading and three labelled password fields', () => {
     render(<ChangePasswordForm />);
     expect(screen.getByRole('heading', { level: 1, name: 'Change password' })).toBeInTheDocument();
