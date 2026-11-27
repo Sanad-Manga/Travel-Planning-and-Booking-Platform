@@ -1468,3 +1468,21 @@ a.btn {
     animation: none;
   }
 }
+
+/* App-level error, not-found and loading screens (GitHub issue 224) */
+.error-page-home {
+  margin-top: var(--space-6);
+}
+.page-loading {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-12) 0;
+}
+.global-error {
+  display: grid;
+  gap: var(--space-4);
+  justify-items: start;
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: var(--space-12) var(--space-4);
+}
