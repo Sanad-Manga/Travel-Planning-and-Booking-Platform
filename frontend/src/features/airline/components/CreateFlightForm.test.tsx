@@ -107,4 +107,16 @@ describe('CreateFlightForm (FLT-03)', () => {
     await user.click(screen.getByRole('button', { name: 'Create flight' }));
     expect(await screen.findByRole('alert')).toBeInTheDocument();
   });
+
+  it('marks the flight number field when the backend answers 409 for a duplicate', async () => {
+    const details = [{ field: 'flightNumber', message: 'this airline already has this flight number on that departure date' }];
+    createMock.mockRejectedValue(
+      new ApiError(409, 'Flight already exists', details, null, { statusCode: 409, error: 'Conflict', message: 'Flight already exists', details }),
+    );
+    const user = await fillValid();
+    await user.click(screen.getByRole('button', { name: 'Create flight' }));
+    expect(await screen.findByText('this airline already has this flight number on that departure date')).toBeInTheDocument();
+    expect(screen.getByLabelText(/Flight number/)).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
 });

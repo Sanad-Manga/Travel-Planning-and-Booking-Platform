@@ -9,6 +9,7 @@ import { PageHeader } from '@/components/PageHeader';
 import { AirportPicker } from '@/components/pickers';
 import { TextField } from '@/components/TextField';
 import { useToast } from '@/components/ToastProvider';
+import { ApiError } from '@/lib/api';
 import { toFriendlyError, type FriendlyError } from '@/lib/apiError';
 import { createFlight } from '../api';
 import { validateFlight, type FlightFormErrors, type FlightFormValues } from '../flightForm';
@@ -50,6 +51,12 @@ export function CreateFlightForm() {
       const friendly = toFriendlyError(error);
       const known: FlightFormErrors = {};
       for (const field of FIELDS) if (friendly.fieldErrors[field]) known[field] = friendly.fieldErrors[field];
+      // A duplicate flight number is a 409 that still carries `details`, which toFriendlyError only reads on a 400.
+      if (error instanceof ApiError) {
+        for (const { field, message } of error.details) {
+          if ((FIELDS as string[]).includes(field)) known[field as keyof FlightFormValues] = message;
+        }
+      }
       setErrors(known);
       if (Object.keys(known).length === 0) setFormError(friendly);
       setSubmitting(false);
