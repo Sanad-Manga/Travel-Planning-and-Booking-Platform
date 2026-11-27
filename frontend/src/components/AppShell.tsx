@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react';
+import { ForcedPasswordRedirect } from '@/features/account/ForcedPasswordRedirect';
+import { VerifyEmailBanner } from '@/features/account/VerifyEmailBanner';
 import { Footer } from './Footer';
 import { Header } from './Header';
 import { SkipLink } from './SkipLink';
@@ -7,8 +9,10 @@ import { SkipLink } from './SkipLink';
 export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="app-shell">
+      <ForcedPasswordRedirect />
       <SkipLink />
       <Header />
+      <VerifyEmailBanner />
       <main id="main-content" tabIndex={-1} className="page app-main">
         {children}
       </main>
