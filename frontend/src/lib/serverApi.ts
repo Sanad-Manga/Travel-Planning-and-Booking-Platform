@@ -25,10 +25,13 @@ function backendUrl(path: string): string {
   return `${base}${apiPath}`;
 }
 
+/** Must match ACCESS_TOKEN_COOKIE in backend/src/common/constants.ts; change both together. */
+const ACCESS_TOKEN_COOKIE = 'access_token';
+
 export async function serverApi<T = unknown>(path: string): Promise<ServerResult<T>> {
-  const access = (await cookies()).get('access_token');
+  const access = (await cookies()).get(ACCESS_TOKEN_COOKIE);
   const headers: Record<string, string> = { Accept: 'application/json' };
-  if (access) headers.Cookie = `access_token=${access.value}`;
+  if (access) headers.Cookie = `${ACCESS_TOKEN_COOKIE}=${access.value}`;
 
   const response = await fetch(backendUrl(path), { method: 'GET', headers, cache: 'no-store' });
   if (response.status === 401) return { ok: false, reason: 'unauthorized' };
