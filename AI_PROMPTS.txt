@@ -5617,3 +5617,13 @@ Prompt:
 Frontend only. Add an optional onRetry prop to DataTable that is passed to the error Alert so a Try again button shows, a test for it (button only when onRetry is given, click calls it), and wire onRetry in the README example.
 How the output was used:
 Test written first and seen failing, then the prop added in DataTable.tsx and the README example updated to onRetry={() => void list.revalidate()}. Existing props and behaviour unchanged. Lint, typecheck, tests and build checked in an isolated worktree.
+
+================================================
+Date: 2026-11-27
+Student: Ahmed Sanad
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GEN-architecture (documentation, no requirement ID)
+Prompt:
+Produce the project's architecture with the C4 model, levels 1 to 3 only (no code level), so the whole team understands how the frontend works and talks to the backend and I can check that everything works as it should. Read the real code on the latest develop (the code wins over the docs), draw system context, containers, frontend components, backend components and the dynamic flows (login and silent refresh, paginated list, flight booking and payment, image upload, server fetch with 401 fallback) as Mermaid in Markdown under docs/architecture, add FINDINGS.md listing anything inconsistent (what, where, severity, owner) without fixing it, stamp everything with the develop commit and date, and add a single themed light/dark viewer page. Docs only, do not touch code, do not merge.
+How the output was used:
+Claude traced next.config.ts, src/lib, src/api, src/components, src/app, the NestJS modules, controllers, guards and cookies, and compared the backend routes with the committed Swagger snapshot by script. The diagrams were rendered in a browser to check every Mermaid block parses and reads well, and the findings were re-checked against the code before being written. Only files under docs/architecture and this entry were added.
