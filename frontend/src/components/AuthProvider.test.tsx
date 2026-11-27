@@ -101,7 +101,7 @@ describe('AuthProvider / useAuth (ACC-10)', () => {
     apiMock.mockResolvedValueOnce(ziad);
     mount();
     await screen.findByText('hello Ziad');
-    expect(Object.keys(auth).sort()).toEqual(['loading', 'login', 'logout', 'resetSession', 'user']);
+    expect(Object.keys(auth).sort()).toEqual(['loading', 'login', 'logout', 'refresh', 'resetSession', 'user']);
     expect(JSON.stringify(auth.user)).not.toMatch(/password|token/i);
   });
 
@@ -148,5 +148,19 @@ describe('AuthProvider / useAuth (ACC-10)', () => {
       return null;
     }
     expect(() => render(<Lonely />)).toThrow('useAuth must be used inside <AuthProvider>');
+  });
+
+  it('refresh reloads the user from GET /auth/me (for example after the email is verified)', async () => {
+    apiMock.mockResolvedValueOnce({ ...ziad, emailVerified: false });
+    mount();
+    await screen.findByText('hello Ziad');
+    expect(captured.auth?.user?.emailVerified).toBe(false);
+
+    apiMock.mockResolvedValueOnce(ziad);
+    await act(async () => {
+      await auth.refresh();
+    });
+    expect(apiMock).toHaveBeenLastCalledWith('/auth/me', { redirectOn401: false });
+    expect(captured.auth?.user?.emailVerified).toBe(true);
   });
 });
