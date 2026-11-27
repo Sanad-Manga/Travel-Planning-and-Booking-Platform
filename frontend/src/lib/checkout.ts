@@ -32,7 +32,7 @@ export function describeCardFailure(failure: StripeFailure): { message: string; 
   if (failure.type === 'validation_error' && failure.message) {
     return { message: failure.message, hint: 'Correct the card details and try again.' };
   }
-  return { message: 'The payment could not be completed.', hint: 'Nothing was charged. Try again in a moment.' };
+  return { message: 'The payment could not be completed.', hint: 'Try again in a moment. If you are not sure whether it went through, check your booking status first.' };
 }
 
 type Call = <T>(path: string, options?: { method?: 'GET' | 'POST'; body?: unknown }) => Promise<T>;

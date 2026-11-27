@@ -1,11 +1,11 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SWRConfig } from 'swr';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { swrDefaults } from '@/api/useApi';
 
 const router = { push: vi.fn(), replace: vi.fn() };
-const stripe = { confirmCardPayment: vi.fn() };
+const stripe = { confirmCardPayment: vi.fn(), retrievePaymentIntent: vi.fn() };
 const getStripe = vi.fn();
 
 vi.mock('next/navigation', () => ({ useRouter: () => router, usePathname: () => '/', useSearchParams: () => new URLSearchParams() }));
@@ -28,6 +28,9 @@ const failure = (statusCode: number, message: string) => reply({ statusCode, mes
 
 interface World {
   status: string;
+  holdMs: number;
+  holdAt?: number;
+  bookingConflict: boolean;
   payments: Record<string, { status: string }>;
   createReply: () => Promise<Response>;
 }
@@ -45,13 +48,14 @@ function fakeBackend(input: string, init: RequestInit = {}) {
   const method = init.method ?? 'GET';
   calls.push({ method, path: input, body: init.body ? JSON.parse(String(init.body)) : undefined });
   if (/\/api\/(flight|hotel)-bookings\/b1$/.test(input)) {
+    if (world.bookingConflict) return failure(409, 'A booking is available only while it is pending payment or after it is confirmed');
     return reply({
       id: 'b1',
       status: world.status,
       totalCents: 125050,
       currency: 'USD',
       bookingReference: null,
-      holdExpiresAt: new Date(Date.now() + 8 * 60_000).toISOString(),
+      holdExpiresAt: new Date((world.holdAt ??= Date.now() + world.holdMs)).toISOString(),
     });
   }
   if (input.endsWith('/policies')) return reply(policies);
@@ -89,12 +93,18 @@ describe('Checkout (PAY-01 / PAY-02)', () => {
     router.push.mockReset();
     router.replace.mockReset();
     stripe.confirmCardPayment.mockReset();
+    stripe.retrievePaymentIntent.mockReset().mockResolvedValue({ paymentIntent: { status: 'requires_payment_method' } });
     getStripe.mockReset().mockReturnValue(Promise.resolve({}));
-    world = { status: 'PENDING_PAYMENT', payments: { p1: { status: 'FAILED' } }, createReply: created };
+    world = { status: 'PENDING_PAYMENT', holdMs: 8 * 60_000, bookingConflict: false, payments: { p1: { status: 'FAILED' } }, createReply: created };
     vi.stubGlobal(
       'fetch',
       vi.fn((input: string, init?: RequestInit) => fakeBackend(input, init)),
     );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
   });
 
   it('shows the total, the countdown and the policies, and keeps Pay disabled until the policies are accepted and a card is entered', async () => {
@@ -231,6 +241,104 @@ describe('Checkout (PAY-01 / PAY-02)', () => {
     expect(screen.getByRole('checkbox')).toBeDisabled();
     expect(payButton()).toBeDisabled();
   }, 15000);
+
+  it('does not confirm a card on an earlier payment once the hold has run out (no charge-then-refund)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    world.holdMs = 60_000;
+    stripe.confirmCardPayment.mockResolvedValueOnce({ error: { type: 'validation_error', message: 'Your card number is incomplete.' } });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    renderCheckout();
+    await readyToPay(user);
+    await user.click(payButton());
+    expect(await screen.findByText('Your card number is incomplete.')).toBeInTheDocument();
+    await act(async () => void (await vi.advanceTimersByTimeAsync(61_000)));
+    expect(payButton()).toBeDisabled();
+    expect(stripe.confirmCardPayment).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses to confirm when Pay is pressed after the hold time on this device has passed, before the countdown ticks', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    world.holdMs = 60_000;
+    stripe.confirmCardPayment.mockResolvedValueOnce({ error: { type: 'validation_error', message: 'Your card number is incomplete.' } });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    renderCheckout();
+    await readyToPay(user);
+    await user.click(payButton());
+    await screen.findByText('Your card number is incomplete.');
+    vi.setSystemTime(Date.now() + 120_000);
+    await user.click(payButton());
+    expect(await screen.findByText('The time to pay this booking has run out.')).toBeInTheDocument();
+    expect(stripe.confirmCardPayment).toHaveBeenCalledTimes(1);
+  });
+
+  it('checks Stripe when the failure is not a card problem, and goes to the status page if the payment went through', async () => {
+    stripe.confirmCardPayment.mockResolvedValueOnce({ error: { type: 'api_connection_error', message: 'Failed to fetch' } });
+    stripe.retrievePaymentIntent.mockResolvedValueOnce({ paymentIntent: { status: 'succeeded' } });
+    const user = userEvent.setup();
+    renderCheckout();
+    await readyToPay(user);
+    await user.click(payButton());
+    await waitFor(() => expect(router.push).toHaveBeenCalledWith('/bookings/flights/b1'));
+    expect(stripe.retrievePaymentIntent).toHaveBeenCalledWith('secret_p1');
+  });
+
+  it('shows a general message, without claiming nothing was charged, when a non-card failure did not go through', async () => {
+    stripe.confirmCardPayment.mockResolvedValueOnce({ error: { type: 'api_connection_error', message: 'Failed to fetch' } });
+    const user = userEvent.setup();
+    renderCheckout();
+    await readyToPay(user);
+    await user.click(payButton());
+    expect(await screen.findByText('The payment could not be completed.')).toBeInTheDocument();
+    expect(screen.queryByText(/Nothing was charged/)).not.toBeInTheDocument();
+    expect(router.push).not.toHaveBeenCalled();
+  });
+
+  it('shows the time-ran-out screen when the flight endpoint starts answering 409 for the booking', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    renderCheckout();
+    await readyToPay(user);
+    world.bookingConflict = true;
+    await act(async () => void (await vi.advanceTimersByTimeAsync(3000)));
+    expect(await screen.findByText('Time to pay ran out')).toBeInTheDocument();
+  });
+
+  it('says the booking is no longer open when the very first load is a 409', async () => {
+    world.bookingConflict = true;
+    renderCheckout();
+    expect(await screen.findByText('This booking is no longer open')).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+  });
+
+  it('says the bank is still settling when the failed attempt never becomes retryable, and stays usable', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    world.payments.p1 = { status: 'REQUIRES_PAYMENT' };
+    stripe.confirmCardPayment.mockResolvedValueOnce({ error: { type: 'card_error', message: 'Your card was declined.' } });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    renderCheckout();
+    await readyToPay(user);
+    await user.click(payButton());
+    await screen.findByText('Your card was declined.');
+    await user.click(payButton());
+    await act(async () => void (await vi.advanceTimersByTimeAsync(10_000)));
+    expect(await screen.findByText('Your bank is still settling the previous attempt.')).toBeInTheDocument();
+    expect(stripe.confirmCardPayment).toHaveBeenCalledTimes(1);
+    expect(payButton()).toBeEnabled();
+  });
+
+  it('tells the traveller what is missing while Pay is disabled, and shows the test-card hint only for a test key', async () => {
+    vi.stubEnv('NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY', 'pk_test_demo');
+    renderCheckout();
+    expect(await screen.findByText('To pay: accept the policies and enter your card details.')).toBeInTheDocument();
+    expect(screen.getByText(/Test mode: use card 4242 4242 4242 4242/)).toBeInTheDocument();
+  });
+
+  it('shows no test-card hint without a test key', async () => {
+    vi.stubEnv('NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY', 'pk_live_demo');
+    renderCheckout();
+    await screen.findByText('To pay: accept the policies and enter your card details.');
+    expect(screen.queryByText(/Test mode/)).not.toBeInTheDocument();
+  });
 
   it('explains when no Stripe key is set, and shows no form', () => {
     getStripe.mockReturnValue(null);

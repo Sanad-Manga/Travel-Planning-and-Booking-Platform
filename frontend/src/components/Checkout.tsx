@@ -90,6 +90,7 @@ function CheckoutBody({ type, bookingId }: CheckoutProps) {
   const [accepted, setAccepted] = useState(false);
   const [cardComplete, setCardComplete] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [holdOver, setHoldOver] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
   const [cardOptions] = useState(readCardOptions);
   const policiesAccepted = useRef(false);
@@ -99,14 +100,34 @@ function CheckoutBody({ type, bookingId }: CheckoutProps) {
   const statusPath = bookingStatusPath(type, bookingId);
   const backPath = type === 'flight' ? '/flights' : '/hotels';
 
+  /** Checked when Pay is pressed: the countdown reached zero, or the hold's time has passed on this device's clock. The backend refuses a payment after that. */
+  function holdIsOverNow(): boolean {
+    return holdOver || (booking?.holdExpiresAt ? Date.now() >= Date.parse(booking.holdExpiresAt) : false);
+  }
+
   useEffect(() => {
     if (phase === 'confirmed') router.replace(statusPath);
   }, [phase, router, statusPath]);
+
+  async function settledStatus(clientSecret: string): Promise<string | undefined> {
+    try {
+      return (await stripe?.retrievePaymentIntent(clientSecret))?.paymentIntent?.status;
+    } catch {
+      return undefined;
+    }
+  }
 
   async function pay() {
     if (!stripe || !elements) return;
     const card = elements.getElement(CardElement);
     if (!card) return;
+    if (holdIsOverNow()) {
+      // Never confirm a card (even on a payment made earlier) after the hold ran out: the backend would refuse the booking and refund.
+      setHoldOver(true);
+      setProblem({ message: 'The time to pay this booking has run out.', hint: 'Nothing was charged. Checking your booking now.' });
+      refresh();
+      return;
+    }
     setBusy(true);
     setProblem(null);
     try {
@@ -131,6 +152,14 @@ function CheckoutBody({ type, bookingId }: CheckoutProps) {
       if (result.error) {
         // A decline leaves this attempt failed (the backend records it); a typo in the card leaves it usable as it is.
         if (result.error.type === 'card_error') attempt.current.failed = true;
+        else if (result.error.type !== 'validation_error') {
+          // Not a card problem (for example the connection dropped after Stripe got the request): the payment may have gone through.
+          const settled = await settledStatus(attempt.current.clientSecret);
+          if (settled === 'succeeded' || settled === 'processing') {
+            router.push(statusPath);
+            return;
+          }
+        }
         setProblem(describeCardFailure(result.error));
         return;
       }
@@ -142,15 +171,15 @@ function CheckoutBody({ type, bookingId }: CheckoutProps) {
       }
       const kind = classifyPaymentRefusal(error);
       if (kind === 'hold-expired') {
-        // Ask the backend again: the page then switches to the "time ran out" screen. The message covers the moment before that.
-        setProblem({ message: 'The time to pay this booking has run out.', hint: 'Nothing was charged.' });
+        // The backend says "not awaiting payment or expired": it may also have just been paid. Ask again and let the page decide.
+        setProblem({ message: 'This booking can no longer be paid.', hint: 'Its time may have run out, or it may already be paid. Checking your booking now.' });
         refresh();
         return;
       }
       if (kind === 'payment-in-progress') {
         setProblem({
           message: 'A payment for this booking is already in progress.',
-          hint: 'If you just paid, check your booking status. If you closed this page before paying, the booking is released when its time runs out and you can book again.',
+          hint: 'If you just paid, check your booking status. If you closed this page before paying, this booking cannot be paid again until its time runs out; then you can book again.',
         });
         return;
       }
@@ -172,6 +201,21 @@ function CheckoutBody({ type, bookingId }: CheckoutProps) {
         <Spinner label={phase === 'confirmed' ? 'Taking you to your booking' : 'Loading checkout'} />
         <Skeleton lines={4} />
       </div>
+    );
+  }
+
+  if (phase === 'unavailable') {
+    return (
+      <>
+        <Alert variant="warning" title="This booking is no longer open" hint="It has expired or been cancelled. Nothing was charged.">
+          <p>It can no longer be paid.</p>
+        </Alert>
+        <p>
+          <Link className="btn btn-primary" href={backPath}>
+            {type === 'flight' ? 'Search flights again' : 'Search hotels again'}
+          </Link>
+        </p>
+      </>
     );
   }
 
@@ -223,7 +267,13 @@ function CheckoutBody({ type, bookingId }: CheckoutProps) {
         </p>
         {booking.holdExpiresAt ? (
           <p>
-            <Countdown expiresAt={booking.holdExpiresAt} onExpire={refresh} />
+            <Countdown
+              expiresAt={booking.holdExpiresAt}
+              onExpire={() => {
+                setHoldOver(true);
+                refresh();
+              }}
+            />
           </p>
         ) : null}
       </Card>
@@ -261,11 +311,13 @@ function CheckoutBody({ type, bookingId }: CheckoutProps) {
           </Alert>
         ) : null}
 
+        {!busy && (!accepted || !cardComplete) ? <p className="field-hint">To pay: accept the policies and enter your card details.</p> : null}
+
         <FormActions
           primaryLabel={`Pay ${amount}`}
           submitting={busy}
           submittingLabel="Processing payment…"
-          disabled={!accepted || !cardComplete || !stripe || !policies.data}
+          disabled={!accepted || !cardComplete || !stripe || !policies.data || holdOver}
           cancelHref={backPath}
           cancelLabel="Back"
         />
