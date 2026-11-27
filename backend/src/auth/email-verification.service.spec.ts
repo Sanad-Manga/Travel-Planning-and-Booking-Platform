@@ -2,7 +2,6 @@ import { BadRequestException, HttpException, UnauthorizedException } from '@nest
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'node:crypto';
 import { Types } from 'mongoose';
-import configuration from '../config/configuration';
 import { EMAIL_VERIFICATION_TTL_MS, EmailVerificationService, ResendCooldownException } from './email-verification.service';
 
 const ID = '6730a1f2c3d4e5f607182930';
@@ -19,7 +18,7 @@ describe('EmailVerificationService (ACC-02)', () => {
     jest.resetAllMocks();
     tokens.updateOne.mockReturnValue(exec({}));
     email.send.mockResolvedValue(undefined);
-    service = new EmailVerificationService(tokens as never, users as never, email as never, new ConfigService({ publicApiUrl: 'https://api.example.com/' }));
+    service = new EmailVerificationService(tokens as never, users as never, email as never, new ConfigService({ frontendUrl: 'https://app.example.com/' }));
   });
 
   const fieldError = async (promise: Promise<unknown>) => {
@@ -48,25 +47,13 @@ describe('EmailVerificationService (ACC-02)', () => {
   const unverified = { id: ID, name: 'Ali', email: 'ali@example.com', emailVerified: false };
   const duplicateKey = () => ({ exec: () => Promise.reject(Object.assign(new Error('dup'), { code: 11000 })) });
 
-  it('registration email: a link to the API verify route built from the publicApiUrl setting', async () => {
+  it('registration email: a link to the frontend /verify-email page built from the frontendUrl setting', async () => {
     service.sendInBackground(unverified as never);
     await settle();
     const sent = email.send.mock.calls[0][0];
     expect(sent.to).toBe('ali@example.com');
-    expect(sent.text).toMatch(/https:\/\/api\.example\.com\/api\/auth\/verify-email\?token=[A-Za-z0-9_-]{43}/);
-  });
-
-  it('the setting comes from the shared configuration: default http://localhost:3001, PUBLIC_API_URL overrides', () => {
-    const saved = process.env.PUBLIC_API_URL;
-    try {
-      delete process.env.PUBLIC_API_URL;
-      expect(configuration().publicApiUrl).toBe('http://localhost:3001');
-      process.env.PUBLIC_API_URL = 'https://api.example.org';
-      expect(configuration().publicApiUrl).toBe('https://api.example.org');
-    } finally {
-      if (saved === undefined) delete process.env.PUBLIC_API_URL;
-      else process.env.PUBLIC_API_URL = saved;
-    }
+    expect(sent.text).toMatch(/https:\/\/app\.example\.com\/verify-email\?token=[A-Za-z0-9_-]{43}/);
+    expect(sent.text).not.toContain('/api/');
   });
 
   describe('resend', () => {
