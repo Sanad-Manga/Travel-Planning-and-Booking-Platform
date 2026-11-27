@@ -2984,6 +2984,1129 @@ Verification: npm run lint, npm run typecheck, npm run build clean; npm test 359
 
 ================================================
 Date: 2026-11-26
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: GEN-05 (SCRUM-136, M2-04)
+Prompt:
+# TASK: SCRUM-136 — GEN-05
+
+## Project Information
+
+Repository: Sanad-Manga/Travel-Planning-and-Booking-Platform
+
+GitHub:
+https://github.com/Sanad-Manga/Travel-Planning-and-Booking-Platform
+
+Jira:
+https://ahmedsanadprojects.atlassian.net/browse/SCRUM-136
+
+Milestone: M2 — Frontend
+Sprint: M2 S0 — Foundations
+Owner: Mohamed Walid
+Plan ID: M2-04
+Requirement: GEN-05
+Priority: Mandatory
+Estimated effort: 4 hours
+
+Task title:
+[GEN-05] DataTable (responsive) + Pagination + usePaginated (page size 10)
+
+Your responsibility is to implement, test, and verify this ticket completely while preserving existing project functionality and other contributors' work.
+
+1. MILESTONE PROTECTION AND SCOPE POLICY
+
+Milestone 1 contains the completed backend implementation.
+
+Treat completed Milestone 1 functionality as protected, not permanently immutable.
+
+Backend changes are permitted during Milestone 2 only when the assigned Jira ticket explicitly requires or authorizes them.
+
+When backend changes are authorized in other tickets:
+- Keep changes strictly within the approved ticket scope.
+- Preserve backward compatibility wherever possible.
+- Preserve existing API contracts unless an approved change requires otherwise.
+- Avoid regressions.
+- Run relevant existing and new regression tests.
+- Document any changes affecting other contributors.
+
+HOWEVER, SCRUM-136 IS A FRONTEND-ONLY TASK.
+
+For this ticket:
+
+- The entire backend/ directory is read-only.
+- Existing API contracts are read-only.
+- Existing Milestone 1 documentation is protected.
+- Existing backend tests and database schemas are protected.
+- Existing CI workflows and Git hooks are protected.
+- Existing environment and deployment configuration is protected.
+- Existing milestone tags and releases must remain untouched.
+
+You may inspect these files to understand the project.
+
+You must not modify them.
+
+If you discover a backend bug, missing endpoint, incorrect response, Swagger inconsistency, security issue, or architectural problem:
+
+1. Document the problem with supporting evidence.
+2. Identify the affected files or API endpoints.
+3. Explain whether it prevents completion of SCRUM-136.
+4. Recommend a separately scoped Jira fix where appropriate.
+5. Do not implement that fix without explicit authorization.
+
+Do not modify the backend simply to make frontend implementation easier.
+
+Do not fabricate API responses, silently hide backend problems, or weaken validation to make incompatible behavior appear functional.
+
+Preserve existing frontend functionality as well.
+
+Do not implement:
+
+- SCRUM-137.
+- SCRUM-141.
+- Downstream admin pages.
+- Hotel moderator pages.
+- Unrelated frontend features.
+- Other contributors' Jira tickets.
+
+If any requirement conflicts with these restrictions, preserve the restrictions and report the blocker.
+
+2. GIT SETUP AND REPOSITORY SAFETY
+
+Complete this section before making implementation changes.
+
+A. Inspect the local repository
+
+Run:
+
+git status
+git status --porcelain=v1
+git branch --show-current
+git remote -v
+git worktree list
+
+Verify that origin points to:
+
+Sanad-Manga/Travel-Planning-and-Booking-Platform
+
+HTTPS and SSH equivalents are acceptable.
+
+If the repository is incorrect, stop and report the problem.
+
+B. Preserve existing work
+
+Inspect staged, unstaged, and untracked files.
+
+If existing local changes are present:
+
+- Do not overwrite them.
+- Do not discard them.
+- Do not automatically stash them.
+- Do not automatically commit them.
+- Do not include unrelated changes in SCRUM-136.
+
+Prefer a separate Git worktree if the existing working tree is not clean.
+
+If safe isolation is impossible, report the blocker instead of risking existing work.
+
+C. Fetch the latest code from GitHub
+
+Run:
+
+git fetch origin
+
+Verify that origin/develop exists.
+
+Run:
+
+git log -1 --oneline origin/develop
+git rev-parse origin/develop
+
+Record the full origin/develop commit SHA as BASELINE_SHA.
+
+This is the baseline for implementation and the final change audit.
+
+Do not assume that the local develop branch is current.
+
+Do not use main as the implementation base.
+
+Do not pull remote changes directly into an unrelated feature branch.
+
+D. Check whether the required feature branch exists
+
+Required branch:
+
+feature/GEN-05-datatable-pagination
+
+Inspect both local and remote branches.
+
+If the branch does not exist and the working tree is clean, run:
+
+git switch --no-track -c feature/GEN-05-datatable-pagination origin/develop
+
+If the working tree is not clean, create an isolated worktree outside the existing repository directory, based on the same BASELINE_SHA.
+
+Do not overwrite an existing directory or branch.
+
+If the branch already exists:
+
+- Inspect its history and working-tree status.
+- Determine whether it contains existing SCRUM-136 work.
+- Verify its relationship to origin/develop.
+- Do not reset, delete, overwrite, or automatically rebase it.
+- Reuse it only if doing so safely preserves existing work and satisfies the required baseline.
+- Otherwise report the conflict.
+
+E. Verify the implementation branch
+
+Run:
+
+git branch --show-current
+git status
+git log -1 --oneline
+git rev-parse HEAD
+
+Confirm:
+
+- The active branch is the SCRUM-136 feature branch.
+- The new branch starts from BASELINE_SHA.
+- The task working tree contains no unrelated changes.
+- Existing local work remains preserved.
+
+STRICT GIT RESTRICTIONS
+
+Never:
+
+- Implement directly on develop or main.
+- Merge branches automatically.
+- Rebase branches automatically.
+- Force-push.
+- Delete branches.
+- Run git reset --hard.
+- Run git clean -fd or equivalent destructive cleanup.
+- Discard existing working-tree changes.
+- Modify Git remotes.
+- Modify milestone tags or releases.
+- Bypass Git hooks to hide failures.
+- Commit automatically.
+- Push automatically.
+- Create a pull request automatically.
+- Merge a pull request.
+- Change Jira statuses or assignments.
+
+All implementation changes must remain local for my review.
+
+3. READ AND UNDERSTAND THE REPOSITORY
+
+Inspect the latest implementation on the feature branch before writing code.
+
+Read:
+
+- README.md
+- frontend/README.md
+- frontend/package.json
+- frontend/package-lock.json
+- frontend/src/api/useApi.ts
+- frontend/src/api/types.ts
+- frontend/src/api/SWRProvider.tsx
+- frontend/src/api/schema.d.ts
+- frontend/src/api/referenceData.ts
+- frontend/src/lib/api.ts
+- frontend/src/lib/apiError.ts
+- frontend/src/components/
+- frontend/src/app/globals.css
+- frontend/vitest.config.mts
+- frontend/src/test/setup.ts
+- docs/contracts.md
+- .github/pull_request_template.md
+- .github/workflows/ci.yml
+- AI_PROMPTS.txt
+
+Also inspect:
+
+- Any available Milestone 2 implementation guidelines.
+- Any repository-specific AGENTS.md instructions.
+- Existing component tests.
+- Existing pagination implementations.
+- Existing frontend API conventions.
+- Relevant original backend pagination code in read-only mode.
+
+Understand the project's:
+
+- Architecture.
+- Authentication and authorization behavior.
+- API contracts.
+- TypeScript conventions.
+- SWR caching behavior.
+- Error handling.
+- Design tokens.
+- Accessibility conventions.
+- Test patterns.
+- Git workflow.
+- Definition of Done.
+
+The frontend already uses:
+
+- Next.js.
+- React.
+- TypeScript.
+- SWR.
+- Vitest.
+- React Testing Library.
+- Generated OpenAPI types.
+- A centralized authenticated API client.
+
+Reuse the existing infrastructure.
+
+Do not install competing frameworks or duplicate existing functionality.
+
+Check whether DataTable, Pagination, or usePaginated has already been implemented.
+
+If partially implemented functionality exists, inspect it carefully and preserve other contributors' work.
+
+4. JIRA REQUIREMENTS AND DEPENDENCIES
+
+SCRUM-136:
+
+Requirement: GEN-05
+Plan ID: M2-04
+Kind: Mandatory
+Estimate: 4 hours
+
+Incoming dependency:
+
+SCRUM-133 / M2-01
+
+Generate API types from Swagger; add SWR, React Hook Form, Zod, and endpoint-function conventions.
+
+Jira currently marks SCRUM-133 as Done.
+
+Verify that its implementation actually exists in the fetched origin/develop.
+
+If Jira and GitHub disagree, report the discrepancy.
+
+Do not recreate SCRUM-133.
+
+SCRUM-136 directly blocks:
+
+- SCRUM-154 — Admin accounts table.
+- SCRUM-155 — Create moderator form.
+- SCRUM-157 — Admin bookings table.
+- SCRUM-158 — Reports queue.
+- SCRUM-159 — Audit log table.
+- SCRUM-160 — Admin analytics (bonus).
+- SCRUM-176 — Hotel room status page.
+- SCRUM-177 — Hotel reservations list.
+
+The components must provide reusable interfaces suitable for these consumers.
+
+Do not implement the downstream tickets.
+
+5. OBJECTIVE AND DELIVERABLES
+
+Implement reusable frontend pagination infrastructure.
+
+Required deliverables:
+
+1. Generic responsive DataTable component.
+2. Reusable Pagination component.
+3. Reusable usePaginated hook.
+4. Automated tests for all three.
+5. Concise integration documentation and usage examples.
+
+Default page size: 10.
+
+The implementation must be independent of any business domain.
+
+A consumer should be able to display accounts, bookings, reports, audit logs, or other paginated resources without duplicating shared pagination logic.
+
+Keep the implementation practical and appropriately scoped for a shared foundation ticket.
+
+Do not overengineer the components.
+
+6. DATATABLE COMPONENT
+
+Suggested location:
+
+frontend/src/components/DataTable.tsx
+
+Follow existing repository conventions if another location is more appropriate.
+
+Create a generic DataTable<T> component.
+
+FUNCTIONAL REQUIREMENTS
+
+- Accept typed row data.
+- Accept typed column definitions.
+- Support stable column IDs.
+- Support column headers.
+- Support custom cell-rendering functions.
+- Support React content inside cells.
+- Support stable row keys supplied by consumers.
+- Support empty data.
+- Support loading states.
+- Support error states.
+- Work with arbitrary business-domain row types.
+
+Avoid using array indexes as the default identity for dynamic rows.
+
+ACCESSIBILITY
+
+Use semantic HTML:
+
+- table
+- thead
+- tbody
+- tr
+- th
+- td
+
+Provide:
+
+- Appropriate column header scope.
+- Accessible table name or caption.
+- Valid table structure.
+- Keyboard-accessible interactive cell content.
+- Visible focus indicators.
+
+Do not use color alone to communicate important information.
+
+RESPONSIVENESS
+
+- Work on mobile, tablet, and desktop.
+- Handle wide tables using an appropriately scoped overflow container.
+- Prevent horizontal overflow of the entire page.
+- Preserve semantic table markup.
+- Support long cell content and action buttons.
+
+Do not replace the table with inaccessible div-based layouts.
+
+STATES
+
+Reuse existing components where appropriate:
+
+- EmptyState.
+- Skeleton.
+- Spinner.
+- Alert.
+- Existing friendly error formatting.
+
+Distinguish between:
+
+- Initial loading.
+- Successful results.
+- Successful empty results.
+- Failed requests.
+
+Do not show an empty state while data is still loading.
+
+Do not present failed requests as successful empty results.
+
+OUT OF SCOPE
+
+Do not implement:
+
+- Spreadsheet editing.
+- Column dragging.
+- Advanced virtualization.
+- Custom sorting engines.
+- CSV export.
+- Domain-specific filters.
+- Domain-specific business logic.
+
+Keep the component API small, typed, and documented.
+
+7. PAGINATION COMPONENT
+
+Suggested location:
+
+frontend/src/components/Pagination.tsx
+
+Create a reusable controlled Pagination component.
+
+It must not fetch API data itself.
+
+FUNCTIONAL REQUIREMENTS
+
+- Use page size 10 by default.
+- Display the current page.
+- Display the total number of pages.
+- Display useful result counts when available.
+- Provide Previous and Next controls.
+- Disable Previous on the first page.
+- Disable Next on the last page.
+- Handle a single page.
+- Handle zero results.
+- Handle partially filled final pages.
+- Prevent invalid navigation.
+- Invoke the consumer's navigation callback.
+- Work on mobile and desktop.
+
+Never display:
+
+- Page 0.
+- Page 1 of 0.
+- Negative page numbers.
+- Misleading result counts.
+
+Use server-provided pagination metadata.
+
+Do not calculate the total number of pages using only the current items array.
+
+Do not introduce internal pagination state that conflicts with the consumer's state.
+
+ACCESSIBILITY
+
+- Use an accessible navigation landmark.
+- Give buttons descriptive accessible names.
+- Use proper disabled states.
+- Support keyboard interaction.
+- Preserve visible focus indicators.
+- Clearly communicate the current page.
+
+Prefer a simple Previous / page information / Next layout unless existing project requirements specify otherwise.
+
+8. usePaginated HOOK
+
+Suggested location:
+
+frontend/src/api/usePaginated.ts
+
+Implement a generic reusable hook for server-side paginated data.
+
+EXISTING UTILITIES
+
+Reuse:
+
+- useApi<T> from frontend/src/api/useApi.ts
+- Page<T> from frontend/src/api/types.ts
+- withQuery() from frontend/src/api/types.ts
+- Existing SWRProvider
+- Existing centralized API client
+
+Do not create another API client.
+
+Do not duplicate authentication handling.
+
+Do not bypass existing SWR configuration.
+
+BACKEND CONTRACT
+
+Query parameters:
+
+page:
+- Default: 1.
+
+limit:
+- Default: 10.
+- Maximum: 50.
+
+Existing response structure:
+
+{
+  "items": [],
+  "page": 1,
+  "limit": 10,
+  "total": 0,
+  "totalPages": 0
+}
+
+Reuse the existing Page<T> interface.
+
+Do not redefine or change the backend response structure.
+
+FUNCTIONAL REQUIREMENTS
+
+The hook must:
+
+- Start on page 1.
+- Use a default limit of 10.
+- Manage selected-page state.
+- Expose the current page's items.
+- Expose pagination metadata.
+- Expose loading state.
+- Expose error state.
+- Expose navigation functions or a page setter.
+- Expose current-page revalidation through the existing SWR mechanism.
+- Support arbitrary paginated endpoints.
+- Support additional query filters.
+- Support disabling a request when its endpoint is unavailable.
+- Generate distinct request keys for different endpoints, pages, and filters.
+- Reset pagination when the endpoint or meaningful filters change.
+- Prevent filters from accidentally overriding page and limit.
+- Prevent navigation below page 1.
+- Prevent navigation beyond known valid page boundaries.
+- Handle empty results.
+- Handle API errors.
+- Handle datasets that shrink after deletion or revalidation.
+- Preserve existing authentication and error behavior.
+
+If a configurable page size is supported, validate it against the existing backend contract.
+
+Do not introduce a page-size selection UI unless explicitly required.
+
+FILTER AND CACHE BEHAVIOR
+
+- Use stable, deterministic SWR request keys.
+- Equivalent filter objects must not reset pagination merely because their references differ.
+- A filter change must not produce an unintended request for the previous filter's page number.
+- Prevent stale responses from replacing the currently selected page's results.
+- Do not display old page metadata as if it belongs to the new page.
+- Distinguish initial loading from background revalidation where appropriate.
+- Avoid unnecessary API requests and rendering loops.
+
+Handle page shrinkage safely.
+
+For example, if the user is on page 4 and a deletion reduces the total number of pages to 3, the hook should recover to a valid page without an infinite request loop.
+
+If totalPages becomes 0, maintain a valid internal page selection of 1 while displaying an appropriate empty state.
+
+Do not double-paginate server-paginated responses.
+
+TYPE SAFETY
+
+- Use generic TypeScript types.
+- Reuse generated API types where applicable.
+- Reuse Page<T>.
+- Avoid any.
+- Avoid unnecessary type assertions.
+- Do not suppress compiler errors.
+- Never manually edit frontend/src/api/schema.d.ts.
+
+Keep the hook understandable and maintainable for downstream contributors.
+
+9. DESIGN AND INTEGRATION
+
+Follow the current frontend design system.
+
+Reuse:
+
+- Existing CSS variables.
+- Existing colors.
+- Existing typography.
+- Existing spacing.
+- Existing button styles.
+- Existing dark-mode behavior.
+- Existing error and loading components.
+
+If additional CSS is needed:
+
+- Prefer minimal additive styling.
+- Scope styles to the new components.
+- Preserve existing selectors and design tokens.
+- Do not redesign unrelated components.
+
+No new UI frameworks or large third-party libraries.
+
+Provide a concise usage example showing:
+
+1. Calling usePaginated with a paginated endpoint.
+2. Defining typed columns.
+3. Passing returned rows to DataTable.
+4. Handling loading, error, and empty states.
+5. Connecting Pagination to hook state.
+6. Updating filters.
+7. Refreshing data after a mutation.
+
+The three deliverables must work together without requiring backend changes.
+
+Do not:
+
+- Create unnecessary public demo routes.
+- Introduce fake production pages.
+- Modify existing business-domain pages just to demonstrate the components.
+- Implement downstream tickets.
+
+Use test fixtures and documentation for examples.
+
+10. AUTOMATED TESTING
+
+Use existing Vitest and React Testing Library infrastructure.
+
+Suggested files:
+
+frontend/src/components/DataTable.test.tsx
+frontend/src/components/Pagination.test.tsx
+frontend/src/api/usePaginated.test.tsx
+
+Follow existing naming conventions.
+
+A. DataTable tests
+
+Verify:
+
+- Correct column headers.
+- Correct row content.
+- Custom cell renderers.
+- Stable row identity where relevant.
+- Empty datasets.
+- Loading states.
+- Error states.
+- Correct distinction between loading, error, and empty states.
+- Semantic table markup.
+- Accessible table name and headers.
+- Interactive cell content.
+
+B. Pagination tests
+
+Verify:
+
+- Correct initial page display.
+- Previous disabled on the first page.
+- Next disabled on the last page.
+- Navigation callbacks.
+- Single-page behavior.
+- Zero-result behavior.
+- Invalid navigation prevention.
+- Accurate result counts.
+- Partial final pages.
+- Accessible button names.
+- Disabled controls do not invoke navigation.
+
+C. usePaginated tests
+
+Verify:
+
+- Initial request uses page=1 and limit=10.
+- Navigation changes the request key.
+- Correct pagination metadata and items are exposed.
+- Additional query filters are included.
+- Meaningful filter changes reset to page 1.
+- Equivalent filters do not cause unnecessary resets.
+- Endpoint changes reset pagination appropriately.
+- Invalid navigation is prevented.
+- Empty results are handled.
+- API errors are exposed.
+- Disabled requests do not fetch.
+- Stale responses do not replace the selected page.
+- Dataset shrinkage recovers to a valid page.
+- Revalidation works with the existing SWR behavior.
+- No accidental double-pagination occurs.
+
+D. Integration test
+
+Add a focused integration test where appropriate demonstrating:
+
+DataTable + Pagination + usePaginated
+
+working together using mocked paginated responses.
+
+TEST SAFETY
+
+- Mock API requests.
+- Use isolated SWR caches when necessary.
+- Do not access shared MongoDB Atlas data.
+- Do not access live Stripe services.
+- Do not use production credentials.
+- Do not create or delete live records.
+- Do not weaken existing tests.
+- Do not remove existing assertions.
+
+Use behavioral tests rather than tests that merely confirm components exist.
+
+Do not claim that jsdom tests verify actual responsive rendering.
+
+If a safe local browser environment is available, additionally verify:
+
+- Narrow mobile layout.
+- Desktop layout.
+- Horizontal scrolling.
+- Keyboard focus.
+- Dark mode.
+
+Otherwise document that visual verification was not performed.
+
+11. ALLOWED FILE SCOPE
+
+Expected new files:
+
+frontend/src/components/DataTable.tsx
+frontend/src/components/DataTable.test.tsx
+frontend/src/components/Pagination.tsx
+frontend/src/components/Pagination.test.tsx
+frontend/src/api/usePaginated.ts
+frontend/src/api/usePaginated.test.tsx
+
+Additional narrowly scoped frontend files are permitted if genuinely required and justified.
+
+Expected optional additive modifications:
+
+frontend/src/app/globals.css
+frontend/README.md
+
+Other existing frontend files should remain unchanged unless a minimal integration change is essential.
+
+AI_PROMPTS.txt must be updated according to repository policy.
+
+Preserve all existing AI_PROMPTS.txt entries.
+
+Append the prompt and any additional AI prompts used for this task in the required format.
+
+Do not:
+
+- Rewrite existing entries.
+- Remove other contributors' prompts.
+- Reformat the entire file.
+- Expose secrets.
+
+AI_PROMPTS.txt is the only expected root-level modification.
+
+PROTECTED PATHS
+
+Do not modify:
+
+- backend/**
+- docs/**
+- .github/**
+- .githooks/**
+- scripts/**
+- .env files
+- Existing deployment configuration
+- Generated OpenAPI schemas
+- Unrelated frontend features
+- Existing milestone tags and releases
+
+Do not modify package.json or package-lock.json.
+
+The task should be achievable using existing dependencies.
+
+If a new dependency is genuinely necessary, report the reason and request approval before adding it.
+
+Do not perform repository-wide formatting.
+
+Do not fix unrelated code.
+
+12. BASELINE VERIFICATION
+
+Before implementation, verify the frontend's existing condition where practical.
+
+Check that the installed dependencies match the lockfile.
+
+If installation is necessary, use:
+
+cd frontend
+npm ci
+
+Do not use npm install to upgrade dependencies.
+
+Record any pre-existing failures relevant to this task.
+
+Where practical, run existing frontend lint, typecheck, tests, and build before implementation, especially if there are signs of existing failures.
+
+This baseline helps distinguish pre-existing defects from regressions introduced by SCRUM-136.
+
+Do not repair unrelated baseline failures.
+
+Do not modify protected files to make baseline checks pass.
+
+13. FINAL VERIFICATION
+
+After implementation, run the focused new tests.
+
+Then run individually from frontend/:
+
+npm run lint
+npm run typecheck
+npm test
+npm run build
+
+Record the actual results of each command.
+
+Fix failures caused by SCRUM-136.
+
+If a check fails:
+
+1. Identify the failing command.
+2. Identify the failing file or test.
+3. Determine whether the failure was introduced by this task.
+4. Compare with baseline results where available.
+5. Fix only issues within SCRUM-136's authorized scope.
+6. Report unrelated failures without modifying unrelated code.
+
+Do not:
+
+- Disable lint rules merely to obtain a passing result.
+- Add TypeScript suppression comments merely to hide errors.
+- Weaken test assertions.
+- Delete failing tests.
+- Change protected backend code.
+- Claim verification passed when a command failed or was not executed.
+
+No database connection or backend modification should be necessary to test the shared frontend components.
+
+14. FINAL PROTECTED-FILE AUDIT
+
+Use the BASELINE_SHA recorded before implementation.
+
+Run:
+
+git status --short
+git diff --check
+git diff --stat
+git diff --name-status
+git diff --cached --name-status
+git ls-files --others --exclude-standard
+
+Inspect the full change set relative to BASELINE_SHA, including staged and unstaged tracked changes.
+
+Run:
+
+git diff BASELINE_SHA -- backend/
+git diff BASELINE_SHA -- docs/ .github/ .githooks/ scripts/
+git diff --name-status BASELINE_SHA
+
+Replace BASELINE_SHA with the actual recorded commit SHA.
+
+The backend diff must be empty.
+
+The protected-path diff must be empty.
+
+Also check staged and untracked files separately.
+
+Git diff alone does not include untracked files.
+
+Verify:
+
+- No backend files were created, modified, or deleted.
+- No existing backend tests were changed.
+- No database schemas were changed.
+- No existing API contracts were changed.
+- No Milestone 1 documentation was changed.
+- No CI workflows were changed.
+- No Git hooks were changed.
+- No environment configuration was changed.
+- No generated API schemas were changed.
+- No unrelated dependencies were changed.
+- No unrelated tickets were implemented.
+- No teammate work was overwritten.
+- No unexpected generated files are included.
+- No unrelated staged changes are present.
+
+Review every changed and newly created frontend file.
+
+Every change must be necessary for SCRUM-136.
+
+If you introduced an unauthorized change, remove only that specific change without disturbing existing work.
+
+If safe isolation is not possible, report the problem.
+
+Do not use destructive cleanup commands.
+
+Do not claim the protected-file audit passed unless it actually passed.
+
+15. PROJECT DEFINITION OF DONE
+
+Read the actual repository pull request template and relevant Milestone 2 instructions.
+
+Follow the project's existing Definition of Done.
+
+Ensure:
+
+- The assigned requirement is implemented.
+- Shared project contracts are respected.
+- Existing backend behavior is preserved.
+- Existing frontend behavior is preserved.
+- The code is strictly typed.
+- Accessibility is addressed.
+- Tests are added.
+- Existing relevant tests continue to pass.
+- Build, lint, and typecheck are verified.
+- AI_PROMPTS.txt is updated.
+- No secrets or credentials are exposed.
+- No dead code or debugging console.log statements remain.
+- No unrelated changes are included.
+
+Backend-specific checklist items may be marked as not applicable only when justified.
+
+Do not falsely claim backend testing or Swagger changes were performed.
+
+Do not create or submit a pull request.
+
+16. FINAL REPORT
+
+After implementation, provide a complete but concise report.
+
+A. IMPLEMENTATION STATUS
+
+- Jira: SCRUM-136.
+- Requirement: GEN-05.
+- Status: Complete, Partially Complete, or Blocked.
+- Summary of what was delivered.
+
+B. GIT INFORMATION
+
+- Repository remote.
+- Original local branch.
+- Fetched origin/develop commit SHA.
+- Implementation branch.
+- Current branch.
+- Whether a separate worktree was used.
+- Whether existing work was preserved.
+
+C. CHANGED FILES
+
+List every created, modified, or deleted file.
+
+Explain why each change is necessary.
+
+D. PUBLIC API
+
+Provide copyable usage examples for:
+
+- DataTable.
+- Pagination.
+- usePaginated.
+- All three working together.
+
+E. TEST RESULTS
+
+Report:
+
+- New test files.
+- Test cases added.
+- Tests passed.
+- Tests failed.
+- Tests skipped.
+- Integration tests.
+- Visual verification performed or not performed.
+
+F. VERIFICATION
+
+Provide the actual status of:
+
+- npm run lint
+- npm run typecheck
+- npm test
+- npm run build
+- git diff --check
+
+Use:
+
+Passed / Failed / Not Run
+
+Explain any failures.
+
+Distinguish pre-existing failures from new regressions.
+
+G. MILESTONE 1 PROTECTION
+
+Report actual audited values:
+
+- Backend files changed: expected 0.
+- Backend tests changed: expected 0.
+- Database schemas changed: expected 0.
+- API contracts changed: expected 0.
+- Milestone 1 documentation changed: expected 0.
+- CI workflows changed: expected 0.
+- Git hooks changed: expected 0.
+- Environment configuration changed: expected 0.
+- Generated API schemas changed: expected 0.
+- Unauthorized file changes: expected 0.
+
+State whether the protection audit passed.
+
+Do not simply repeat expected values without verification.
+
+H. DOWNSTREAM INTEGRATION
+
+Explain how downstream developers can reuse the new infrastructure.
+
+Identify any important integration assumptions.
+
+Do not claim that downstream Jira tickets are implemented.
+
+I. LIMITATIONS
+
+Report:
+
+- Unresolved problems.
+- Missing requirements.
+- Discovered backend issues.
+- Environmental limitations.
+- Assumptions.
+- Decisions made without explicit guidance.
+
+J. FINAL GIT STATUS
+
+Report:
+
+- Current branch.
+- Working-tree status.
+- Whether changes were committed.
+- Whether changes were pushed.
+- Whether a PR was created.
+- Whether Jira was modified.
+
+Expected:
+
+Committed: No.
+Pushed: No.
+PR created: No.
+Jira modified: No.
+
+K. REVIEW READINESS
+
+State whether SCRUM-136 is ready for review.
+
+If not, explain exactly what remains.
+
+L. SUGGESTED COMMIT AND PR
+
+Suggested commit:
+
+feat(frontend): add reusable table and pagination (GEN-05)
+
+Suggested PR title:
+
+feat(frontend): responsive DataTable and pagination (GEN-05 / SCRUM-136)
+
+Provide a suggested PR description based on the existing repository template.
+
+Do not tick checklist items dishonestly.
+
+Do not commit or create the PR.
+
+17. EXECUTION ORDER
+
+1. Inspect the repository.
+2. Preserve existing local work.
+3. Fetch the latest code from GitHub.
+4. Record origin/develop BASELINE_SHA.
+5. Create the isolated feature branch.
+6. Read project documentation and existing implementation.
+7. Verify the incoming dependency.
+8. Inspect baseline frontend behavior.
+9. Implement DataTable.
+10. Implement Pagination.
+11. Implement usePaginated.
+12. Write automated tests.
+13. Add concise usage documentation.
+14. Update AI_PROMPTS.txt.
+15. Run all required verification commands.
+16. Perform the protected-file audit.
+17. Review the complete change set.
+18. Provide the final report.
+
+Do not stop after planning.
+
+Implement and verify SCRUM-136 completely unless a genuine blocker prevents safe completion.
+
+Do not modify Milestone 1 for this frontend-only task.
+
+Do not implement unrelated Jira requirements.
+
+Do not commit, push, merge, or create a pull request.
+
+Leave all changes on the local feature branch for my review.
+
+Where Jira does not specify implementation details, choose the smallest reusable solution consistent with the current repository and document the decision.
+
+Preserving existing work and respecting the authorized task scope takes priority over forcing a successful implementation.
+
+Follow-up prompt:
+i had a problem with the internet try again
+
+How the output was used:
+Implemented the shared responsive DataTable, controlled Pagination and usePaginated hook in an isolated frontend worktree. Added component, hook and integration tests and a typed usage example. A recovery test caught a redundant request after deletion. Verified the correction with all 15 focused tests and the full 380-test frontend suite, lint, typecheck and production build. Checked phone cards, tablet and desktop tables, accessible headers, keyboard focus, dark mode and scoped scrolling in local headless Edge with synthetic rows.
 Student: Ahmed Sanad
 Tool: Claude Code (Claude Sonnet 5.5)
 Related Requirement: GEN-12 (M2-08: uploads rewrite, env example, dev setup doc, PR checklist)
