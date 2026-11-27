@@ -27,7 +27,7 @@ function checkNewPassword(value: string): string | undefined {
  * ACC-11 / ACC-08: change the password. For a user with a temporary password this is the only usable
  * page; the server then ends the session, so after success the person logs in again with the new one.
  */
-export function ChangePasswordForm() {
+export function ChangePasswordForm({ embedded = false }: { embedded?: boolean } = {}) {
   const router = useRouter();
   const toast = useToast();
   const { user, login, logout, resetSession } = useAuth();
@@ -97,8 +97,15 @@ export function ChangePasswordForm() {
 
   return (
     <>
-      <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Change password' }]} />
-      <PageHeader title="Change password" description="Choose a new password. You will then log in again." />
+      {embedded ? (
+        // ACC-08: inside a section of /account, which has its own heading.
+        <p className="field-hint">Enter your current password and a new one. You will then log in again.</p>
+      ) : (
+        <>
+          <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Change password' }]} />
+          <PageHeader title="Change password" description="Choose a new password. You will then log in again." />
+        </>
+      )}
       <form className="auth-form" onSubmit={onSubmit} noValidate>
         {formError ? (
           <Alert variant="error" hint={formError.hint} onRetry={formError.retryable ? () => void submit() : undefined}>
@@ -136,7 +143,7 @@ export function ChangePasswordForm() {
           onChange={(event) => setConfirm(event.target.value)}
           error={fieldErrors.confirm}
         />
-        <FormActions primaryLabel="Change password" submitting={submitting} submittingLabel="Changing password…" cancelHref="/" />
+        <FormActions primaryLabel="Change password" submitting={submitting} submittingLabel="Changing password…" cancelHref={embedded ? undefined : '/'} />
       </form>
     </>
   );

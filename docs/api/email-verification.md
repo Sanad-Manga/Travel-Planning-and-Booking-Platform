@@ -12,7 +12,7 @@ A new account must confirm its email address before it can create a booking.
 ## The link
 
 - After `POST /api/auth/register` (response unchanged, still 201) the API emails a link in the background. A failed send is logged (user id only) and never fails registration.
-- Link: `{PUBLIC_API_URL}/api/auth/verify-email?token=<token>`. `PUBLIC_API_URL` is optional (default `http://localhost:3001`); it is read once in `config/configuration.ts` (`publicApiUrl`) and used through `ConfigService`. See `.env.example`.
+- Link: `{FRONTEND_URL}/verify-email?token=<token>` (default `http://localhost:3000`, the same base as the password-reset link). It opens the frontend page, which calls `GET /api/auth/verify-email` below and shows the result (SCRUM-150).
 - The token is 32 random bytes (base64url). Only its SHA-256 hash is stored, in `emailVerificationTokens` (one row per user, TTL index on `expiresAt`). Valid for **24 hours**. Single use.
 
 ## `GET /api/auth/verify-email?token=...` (public)

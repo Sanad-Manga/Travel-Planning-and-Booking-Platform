@@ -196,11 +196,26 @@ describe('LoginForm (ACC-10)', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/locked/i);
   });
 
+  it('423 shows how long is really left, from the server (ACC-05)', async () => {
+    backend(() =>
+      Promise.reject(new ApiError(423, 'Account locked after too many failed login attempts. Try again in 12 minutes.')),
+    );
+    const user = await setup();
+    await fillAndSubmit(user);
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('This account is locked after too many failed attempts.');
+    expect(alert).toHaveTextContent('Try again in 12 minutes, or reset your password.');
+    expect(alert).not.toHaveTextContent('15 minutes');
+    // Retrying while locked only fails again, so there is no Try again button.
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+  });
+
   it('403 says the account is suspended', async () => {
     backend(() => Promise.reject(new ApiError(403, 'Account suspended')));
     const user = await setup();
     await fillAndSubmit(user);
     expect(await screen.findByRole('alert')).toHaveTextContent(/suspended/i);
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
   });
 
   it('a network failure shows an alert with Try again that submits again', async () => {
