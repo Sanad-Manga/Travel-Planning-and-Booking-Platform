@@ -335,6 +335,9 @@ a.btn {
 .confirm-panel {
   width: 100%;
   max-width: 28rem;
+  /* A short screen (a phone on its side) scrolls the panel instead of cutting off its title and buttons. */
+  max-height: 100%;
+  overflow-y: auto;
   padding: var(--space-6);
   border: var(--border-width) solid var(--border-strong);
   border-radius: var(--radius-lg);
