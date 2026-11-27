@@ -5,7 +5,6 @@ import FlightsPage from './flights/page';
 import HotelsPage from './hotels/page';
 import ItinerariesPage from './itineraries/page';
 import ForgotPasswordPage from './forgot-password/page';
-import RegisterPage from './register/page';
 import HomePage from './page';
 
 const pages = [
@@ -13,7 +12,6 @@ const pages = [
   ['Hotels', HotelsPage],
   ['Itineraries', ItinerariesPage],
   ['Blog', BlogPage],
-  ['Register', RegisterPage],
   ['Forgot password', ForgotPasswordPage],
 ] as const;
 
