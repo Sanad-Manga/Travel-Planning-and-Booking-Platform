@@ -1170,6 +1170,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/flights/mine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the flights of your own airline - FLT-29, FLT-30
+         * @description Paginated, latest departure first, in every status (SCHEDULED, CANCELLED, DEPARTED); `status` filters. A SCHEDULED flight whose departure time has passed is reported and filtered as DEPARTED. Use a flight id from here with `GET /flights/{id}/bookings`.
+         */
+        get: operations["MyFlightsController_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/flights/{id}": {
         parameters: {
             query?: never;
@@ -2049,6 +2069,26 @@ export interface paths {
          * @description Invalidates all previous access/refresh tokens atomically. Discloses a generated temporary password once, valid for one successful login before its 24-hour expiration. Restricted login permits only me, change-password and logout; refresh is rejected. Forced replacement invalidates that session and requires fresh login. No email/notification delivery.
          */
         post: operations["AdminPasswordResetController_reset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List providers by type (ADMIN only)
+         * @description Returns active and inactive providers of the selected type in ascending ID order.
+         */
+        get: operations["ProviderListController_list"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5832,6 +5872,13 @@ export interface components {
             available: boolean;
             /** @example 2026-11-18T10:00:00.000Z */
             addedAt: string;
+        };
+        ProviderListItemDto: {
+            /** @description Provider ID as a string. */
+            id: string;
+            name: string;
+            /** @description Whether the provider is active. */
+            isActive: boolean;
         };
     };
     responses: never;
@@ -10176,6 +10223,67 @@ export interface operations {
             };
         };
     };
+    MyFlightsController_list: {
+        parameters: {
+            query?: {
+                page?: number;
+                limit?: number;
+                /** @description Return only flights with this status. A SCHEDULED flight whose departure time has passed counts as DEPARTED. Omit it to list every flight of the airline. */
+                status?: "SCHEDULED" | "CANCELLED" | "DEPARTED";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["FlightResponseDto"][];
+                        /** @example 1 */
+                        page: number;
+                        /** @example 10 */
+                        limit: number;
+                        /** @example 0 */
+                        total: number;
+                        /** @example 0 */
+                        totalPages: number;
+                    };
+                };
+            };
+            /** @description Invalid page, limit or status */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Not logged in */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Caller is not an airline moderator */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+        };
+    };
     FlightsController_getDetails: {
         parameters: {
             query?: never;
@@ -13790,6 +13898,75 @@ export interface operations {
                 };
             };
             /** @description Generation/persistence/audit failed. Credentials may already have changed; another administrator reset may be needed. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+        };
+    };
+    ProviderListController_list: {
+        parameters: {
+            query: {
+                page?: number;
+                limit?: number;
+                /** @description Kind of provider to list. */
+                type: "hotel" | "airline";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["ProviderListItemDto"][];
+                        /** @example 1 */
+                        page: number;
+                        /** @example 10 */
+                        limit: number;
+                        /** @example 0 */
+                        total: number;
+                        /** @example 0 */
+                        totalPages: number;
+                    };
+                };
+            };
+            /** @description Missing or invalid type, invalid pagination, or unsupported query parameter. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Caller is not an ADMIN. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Providers could not be retrieved. */
             500: {
                 headers: {
                     [name: string]: unknown;
