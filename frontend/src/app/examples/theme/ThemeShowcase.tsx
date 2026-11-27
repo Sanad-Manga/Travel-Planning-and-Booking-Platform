@@ -5,9 +5,11 @@ import { Alert } from '@/components/Alert';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
 import { Card } from '@/components/Card';
 import { useConfirm } from '@/components/ConfirmProvider';
+import { DataTable, type TableColumn } from '@/components/DataTable';
 import { EmptyState } from '@/components/EmptyState';
 import { FormActions } from '@/components/FormActions';
 import { ImageUploader, type ImageReference } from '@/components/ImageUploader';
+import { Pagination } from '@/components/Pagination';
 import { Skeleton } from '@/components/Skeleton';
 import { Spinner } from '@/components/Spinner';
 import { StatusBadge } from '@/components/StatusBadge';
@@ -51,10 +53,21 @@ const BOOKINGS = [
   { id: 'TRV-20311', route: 'CAI to DXB', date: '14 Feb 2027', status: 'FAILED', total: '$355.20' },
 ];
 
+type Booking = (typeof BOOKINGS)[number];
+
+const BOOKING_COLUMNS: readonly TableColumn<Booking>[] = [
+  { id: 'id', header: 'Booking', cell: (row) => row.id },
+  { id: 'route', header: 'Route', cell: (row) => row.route },
+  { id: 'date', header: 'Date', cell: (row) => row.date },
+  { id: 'status', header: 'Status', cell: (row) => <StatusBadge status={row.status} /> },
+  { id: 'total', header: 'Total', cell: (row) => row.total },
+];
+
 export function ThemeShowcase({ name }: { name: string }) {
   const confirm = useConfirm();
   const toast = useToast();
   const [submitting, setSubmitting] = useState(false);
+  const [page, setPage] = useState(1);
   const [images, setImages] = useState<readonly ImageReference[]>([]);
 
   async function fakeUpload(file: File): Promise<ImageReference> {
@@ -152,40 +165,13 @@ export function ThemeShowcase({ name }: { name: string }) {
 
       <div className="styleguide-section">
         <p className="styleguide-label">Table with pagination</p>
-        <div className="table-scroll">
-          <table className="table">
-            <thead>
-              <tr>
-                <th scope="col">Booking</th>
-                <th scope="col">Route</th>
-                <th scope="col">Date</th>
-                <th scope="col">Status</th>
-                <th scope="col">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {BOOKINGS.map((row) => (
-                <tr key={row.id}>
-                  <td>{row.id}</td>
-                  <td>{row.route}</td>
-                  <td>{row.date}</td>
-                  <td><StatusBadge status={row.status} /></td>
-                  <td>{row.total}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <nav className="pagination" aria-label="Pagination">
-          <p className="pagination-info">Showing 1 to 4 of 38</p>
-          <ul className="pagination-pages">
-            <li><button type="button" className="pagination-button" disabled aria-label="Previous page">‹</button></li>
-            <li><button type="button" className="pagination-button" aria-current="page">1</button></li>
-            <li><button type="button" className="pagination-button">2</button></li>
-            <li><button type="button" className="pagination-button">3</button></li>
-            <li><button type="button" className="pagination-button" aria-label="Next page">›</button></li>
-          </ul>
-        </nav>
+        <DataTable
+          caption="Bookings"
+          columns={BOOKING_COLUMNS}
+          rows={BOOKINGS}
+          rowKey={(row) => row.id}
+        />
+        <Pagination page={page} totalPages={3} total={38} limit={4} onPageChange={setPage} />
       </div>
 
       <div className="styleguide-section">

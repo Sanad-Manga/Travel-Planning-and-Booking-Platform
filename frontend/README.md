@@ -1,3 +1,4 @@
+
 # Frontend (Milestone 2)
 
 Next.js (App Router) + TypeScript. The backend lives in `../backend` (NestJS, port 3001 by default).
@@ -114,3 +115,53 @@ like posts and logos. Activity uploads use `/api/activities/:id/images` and retu
 adapter can return the last entry. Post, hotel and activity deletes append the image ID to the
 collection path. Airline logo deletion uses the same path as upload, so an existing `logoUrl` can
 use the airline ID as its local preview key. Every successful deletion returns 204.
+
+## Server-paginated lists (GEN-05)
+
+Use `usePaginated<Row>(endpoint, filters)` in a client component under the existing SWR provider.
+Give it a query-free path, or `null` while a required input is unavailable. Pass flat filter values
+separately. The hook owns `page` and `limit`, requests ten rows at a time and returns the server's
+`Page<Row>` as `data`. `data` is undefined until the current request has a result. `setPage` accepts
+whole pages within the known range. A different path or filter starts at page one. After a
+successful mutation, `await list.revalidate()` refreshes the visible page and recovers if it disappeared.
+
+```tsx
+'use client';
+
+import { useState } from 'react';
+import { usePaginated } from '@/api/usePaginated';
+import type { QueryOf, ResponseOf } from '@/api/types';
+import { DataTable, type TableColumn } from '@/components/DataTable';
+import { Pagination } from '@/components/Pagination';
+
+type City = ResponseOf<'/api/cities'>['items'][number];
+const columns: TableColumn<City>[] = [
+  { id: 'city', header: 'City', cell: (city) => city.name },
+  { id: 'country', header: 'Country code', cell: (city) => city.countryCode },
+];
+
+export function Cities() {
+  const [countryCode, setCountryCode] = useState('');
+  const filters = { countryCode } satisfies QueryOf<'/api/cities'>;
+  const list = usePaginated<City>('/api/cities', filters);
+  return (
+    <>
+      <label>Country
+        <select value={countryCode} onChange={(event) => setCountryCode(event.target.value)}>
+          <option value="">All countries</option>
+          <option value="EG">Egypt</option>
+          <option value="DE">Germany</option>
+        </select>
+      </label>
+      <DataTable caption="Cities" columns={columns} rows={list.items} rowKey={(city) => city.cityId}
+        isLoading={list.isLoading} error={list.error} emptyTitle="No matching cities" />
+      {list.data && !list.error && <Pagination {...list.data} onPageChange={list.setPage} />}
+    </>
+  );
+}
+```
+
+Column IDs and row keys must stay stable across reordering. Each cell renderer can return text,
+a link, a button or other React content. The same rows appear as labeled cards below 40rem.
+Pass `isLoading` for initial loading and use `isValidating` separately for background activity.
+If the endpoint is disabled, the consuming screen decides what to show while waiting for input.

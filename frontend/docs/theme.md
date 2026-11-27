@@ -58,8 +58,8 @@ The older names (`--background`, `--foreground`, `--surface`, `--border`, `--mut
 ## Do
 
 - Use the shared components (`Alert`, `Card`, `EmptyState`, `Skeleton`, `ConfirmDialog` via `useConfirm`, `TextField`,
-  `StatusBadge`, `PageHeader`, `FormActions` ...) before writing your own markup.
-- Use the classes that already exist (`.btn`, `.btn-primary`, `.btn-danger`, `.card`, `.table`, `.pagination`, `.field`,
+  `StatusBadge`, `PageHeader`, `FormActions`, `DataTable`, `Pagination` ...) before writing your own markup.
+- Use the classes that already exist (`.btn`, `.btn-primary`, `.btn-danger`, `.card`, `.table`, `.field`,
   `.grid-cards`, `.page`). Add new rules to `globals.css` next to similar ones.
 - Colour, spacing, radius and font come from tokens: `color: var(--muted)`, `padding: var(--space-4)`.
 - Use **one** `.btn-primary` per view. Everything else is a plain `.btn`; destructive actions are `.btn-danger`.
