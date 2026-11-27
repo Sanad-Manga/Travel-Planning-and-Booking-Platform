@@ -13,7 +13,6 @@ export const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
 /** A new link can be requested at most once per this many seconds. */
 export const EMAIL_VERIFICATION_COOLDOWN_SECONDS = 60;
 const DUPLICATE_KEY = 11000;
-const DEFAULT_PUBLIC_API_URL = 'http://localhost:3001';
 
 /** 429 for a resend inside the cooldown; the controller turns `retryAfterSeconds` into the Retry-After header. */
 export class ResendCooldownException extends HttpException {
@@ -124,9 +123,10 @@ The link is valid for 24 hours. If you did not ask for this, ignore this email.`
     throw this.invalidLink();
   }
 
+  /** The link opens the frontend page (SCRUM-150), which calls GET /api/auth/verify-email and shows the result. */
   private linkFor(token: string): string {
-    const base = (this.config.get<string>('publicApiUrl') ?? DEFAULT_PUBLIC_API_URL).replace(/\/+$/, '');
-    return `${base}/api/auth/verify-email?token=${encodeURIComponent(token)}`;
+    const base = (this.config.get<string>('frontendUrl') ?? 'http://localhost:3000').replace(/\/+$/, '');
+    return `${base}/verify-email?token=${encodeURIComponent(token)}`;
   }
 
   private invalidLink(): BadRequestException {
