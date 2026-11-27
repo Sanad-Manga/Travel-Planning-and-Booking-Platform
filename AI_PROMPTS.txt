@@ -5617,3 +5617,13 @@ Prompt:
 Frontend only. Add an optional onRetry prop to DataTable that is passed to the error Alert so a Try again button shows, a test for it (button only when onRetry is given, click calls it), and wire onRetry in the README example.
 How the output was used:
 Test written first and seen failing, then the prop added in DataTable.tsx and the README example updated to onRetry={() => void list.revalidate()}. Existing props and behaviour unchanged. Lint, typecheck, tests and build checked in an isolated worktree.
+
+================================================
+Date: 2026-11-27
+Student: Ahmed Sanad
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: FLT-03 (M2-82: create flight form with local times)
+Prompt:
+Frontend only, airline moderator screen at /airline/flights/new. A form with flight number, departure and arrival airport (the shared AirportPicker) and departure and arrival time typed in each airport local time, showing which time zone each box is in. Send the local times as typed to POST /api/flights, show backend field errors on their fields and any other failure in one alert with retry. Tests first.
+How the output was used:
+Added features/airline/ (flightForm.ts validation of silly input only, api.ts createFlight with generated types, useAirportZone.ts reusing the picker airport list, components/CreateFlightForm.tsx) and the route app/airline/flights/new/page.tsx behind RequireRole. 14 new tests written first: validation, time zone hints, local times sent unchanged, field-error mapping, alert on failure. Two tests were wrong at first (a flight number the backend accepts, an error without a body) and were fixed in the tests, not the form. After success the form opens /airline/flights/<id>, which M2-83 builds, so that page is not there yet. Not yet tried in a browser against the real backend.
