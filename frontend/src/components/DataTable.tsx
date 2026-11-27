@@ -18,12 +18,14 @@ interface DataTableProps<T> {
   isLoading?: boolean;
   error?: unknown;
   emptyTitle?: string;
+  /** Shows a "Try again" button on the error alert, e.g. `list.revalidate`. */
+  onRetry?: () => void;
 }
 
-export function DataTable<T>({ caption, columns, rows, rowKey, isLoading, error, emptyTitle = 'No results' }: DataTableProps<T>) {
+export function DataTable<T>({ caption, columns, rows, rowKey, isLoading, error, emptyTitle = 'No results', onRetry }: DataTableProps<T>) {
   if (error) {
     const { message, hint } = toFriendlyError(error);
-    return <Alert variant="error" hint={hint}>{message}</Alert>;
+    return <Alert variant="error" hint={hint} onRetry={onRetry}>{message}</Alert>;
   }
   if (isLoading) return <Spinner label={`Loading ${caption}`} />;
   if (!rows.length) return <EmptyState title={emptyTitle} />;

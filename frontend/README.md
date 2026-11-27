@@ -154,7 +154,8 @@ export function Cities() {
         </select>
       </label>
       <DataTable caption="Cities" columns={columns} rows={list.items} rowKey={(city) => city.cityId}
-        isLoading={list.isLoading} error={list.error} emptyTitle="No matching cities" />
+        isLoading={list.isLoading} error={list.error} onRetry={() => void list.revalidate()}
+        emptyTitle="No matching cities" />
       {list.data && !list.error && <Pagination {...list.data} onPageChange={list.setPage} />}
     </>
   );
