@@ -24,6 +24,7 @@ beforeEach(() => {
   logout.mockResolvedValue(undefined);
   toastError.mockReset();
   auth = { user: null, loading: false, logout };
+  vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify({ unreadCount: 0 }), { status: 200 }))));
 });
 
 describe('SkipLink (GEN-14)', () => {
@@ -100,6 +101,7 @@ describe('Header (GEN-14)', () => {
       expect(screen.getByRole('link', { name: 'Login' })).toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'Register' })).toBeInTheDocument();
       expect(screen.queryByRole('link', { name: 'Account' })).toBeNull();
+      expect(screen.queryByRole('link', { name: /Notifications/ })).toBeNull();
       expect(screen.queryByRole('button', { name: 'Logout' })).toBeNull();
     });
 
@@ -107,6 +109,7 @@ describe('Header (GEN-14)', () => {
       auth = { user: { id: 'u1', name: 'Ziad' }, loading: false, logout };
       render(<Header />);
       expect(screen.getByRole('link', { name: 'Account' })).toHaveAttribute('href', '/account');
+      expect(screen.getByRole('link', { name: 'Notifications' })).toHaveAttribute('href', '/notifications');
       expect(screen.getByRole('button', { name: 'Logout' })).toBeInTheDocument();
       expect(screen.queryByRole('link', { name: 'Login' })).toBeNull();
       expect(screen.queryByRole('link', { name: 'Register' })).toBeNull();
