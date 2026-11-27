@@ -255,7 +255,7 @@ function CheckoutBody({ type, bookingId }: CheckoutProps) {
   const testMode = (process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? '').startsWith('pk_test_');
 
   return (
-    <>
+    <div className="checkout">
       <PageHeader
         title="Checkout"
         description={type === 'flight' ? 'Read the policies, then pay to confirm your flight.' : 'Read the policies, then pay to confirm your stay.'}
@@ -322,6 +322,6 @@ function CheckoutBody({ type, bookingId }: CheckoutProps) {
           cancelLabel="Back"
         />
       </form>
-    </>
+    </div>
   );
 }
