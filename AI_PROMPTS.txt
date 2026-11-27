@@ -5617,3 +5617,13 @@ Prompt:
 Frontend only. Add an optional onRetry prop to DataTable that is passed to the error Alert so a Try again button shows, a test for it (button only when onRetry is given, click calls it), and wire onRetry in the README example.
 How the output was used:
 Test written first and seen failing, then the prop added in DataTable.tsx and the README example updated to onRetry={() => void list.revalidate()}. Existing props and behaviour unchanged. Lint, typecheck, tests and build checked in an isolated worktree.
+
+================================================
+Date: 2026-11-27
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Opus 5.5)
+Related Requirement: ACC-01 (SCRUM-145)
+Prompt:
+Start SCRUM-145: the /register page with name, email, password and a required terms checkbox, validated with zod, backend field errors shown next to the field, a clear duplicate-email message, and a verify-your-email notice after success. Follow the theme guide and the frontend PR template; tests first and small; check it against the real backend at phone width.
+How the output was used:
+Tests written first and watched fail (every field checked before sending, password rule and invalid email, a successful send and the notice, a 409 duplicate email on the email field, other backend field errors on their field, a network failure with Try again). Added src/features/account/RegisterForm.tsx (react-hook-form + zod with the same rules as the backend RegisterDto, applyApiErrors for backend details, a friendly message for 409, an Alert with Try again for other failures, then a "Check your email" notice with a Log in link) and the /register route; removed Register from the placeholder-pages test; checkbox styles from theme tokens. Checked on the real backend at 375 px: empty submit, duplicate email, a successful registration, no horizontal scroll.

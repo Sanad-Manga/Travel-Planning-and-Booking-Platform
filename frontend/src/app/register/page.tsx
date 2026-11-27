@@ -1,8 +1,8 @@
 import type { Metadata } from 'next';
-import { ComingSoon } from '@/components/ComingSoon';
+import { RegisterForm } from '@/features/account/RegisterForm';
 
 export const metadata: Metadata = { title: 'Register | Travel Planning and Booking Platform' };
 
 export default function RegisterPage() {
-  return <ComingSoon title="Register" description="Create your account." />;
+  return <RegisterForm />;
 }
