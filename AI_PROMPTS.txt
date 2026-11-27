@@ -4824,3 +4824,778 @@ Choose the simplest reusable implementation satisfying the actual Jira requireme
 
 How the output was used:
 Added the shared ImageUploader, its styles, and authenticated FormData support in the existing API client. Added validation, confirmation, preview, error, concurrency and request regression tests. Verified 38 focused tests and 441 total frontend tests, lint, typecheck and production build. Exercised the component and the existing Next.js rewrites in headless Edge with synthetic images and cookies, then removed the temporary preview and generated dev artifacts. Recorded usage examples for post images and airline logos.
+
+================================================
+Date: 2026-11-27
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: ACC-13 / ACC-15 (SCRUM-141, G2)
+Prompt:
+# TASK: SCRUM-141 — Admin Provider List (ACC-13 / ACC-15)
+
+Repository:
+Sanad-Manga/Travel-Planning-and-Booking-Platform
+
+GitHub:
+https://github.com/Sanad-Manga/Travel-Planning-and-Booking-Platform
+
+Jira:
+https://ahmedsanadprojects.atlassian.net/browse/SCRUM-141
+
+Owner: Mohamed Walid
+Milestone: M2
+Sprint: M2 S0 — Foundations
+Module: Shared & Setup / Admin
+Estimated effort: 1.5 hours
+Kind: Mandatory
+Approved backend gap: G2
+
+Implement this small backend addition completely, test it, and leave it ready for review.
+
+Keep the implementation focused. Do not overengineer it or implement unrelated functionality.
+
+==================================================
+1. GIT SETUP AND SAFETY
+==================================================
+
+Inspect the repository before making changes:
+
+git status
+git branch --show-current
+git remote -v
+git worktree list
+
+Verify the correct repository.
+
+Fetch the latest development branch from GitHub:
+
+git fetch origin
+git rev-parse origin/develop
+
+Record the full origin/develop commit SHA as BASELINE_SHA.
+
+Create a new feature branch:
+
+feature/ACC-13-ACC-15-admin-provider-list
+
+Prefer an isolated Git worktree:
+
+git worktree add -b feature/ACC-13-ACC-15-admin-provider-list "../Travel-Planning-and-Booking-Platform-G2" origin/develop
+
+Check that the branch and destination directory do not already exist before executing this command.
+
+Preserve all existing work.
+
+Do not:
+
+- Modify the original worktree.
+- Modify the GEN-05 worktree.
+- Modify the GEN-08 worktree.
+- Branch from either previous feature branch.
+- Wait unnecessarily for SCRUM-136 or SCRUM-137 to merge.
+- Discard, overwrite, or stash existing changes.
+- Merge or rebase automatically.
+- Force-push.
+- Delete branches.
+- Commit or push automatically.
+- Create a PR automatically.
+- Change Jira.
+
+All implementation must remain local until I approve publication.
+
+==================================================
+2. MILESTONE 1 PROTECTION POLICY
+==================================================
+
+Treat completed Milestone 1 functionality as protected.
+
+Unlike SCRUM-136 and SCRUM-137, SCRUM-141 explicitly authorizes a small backend addition.
+
+Backend modifications are therefore permitted ONLY within the scope required to implement the admin provider list endpoint.
+
+The new functionality must be additive.
+
+Preserve:
+
+- Existing API endpoints.
+- Existing authentication and authorization.
+- Existing moderator account creation.
+- Existing account suspension and reactivation.
+- Existing provider deactivation and reactivation.
+- Existing booking behavior.
+- Existing notifications.
+- Existing audit logging.
+- Existing database schemas.
+- Existing API response contracts.
+
+Do not modify airline, hotel, booking, user, payment, authentication, notification, or other business modules merely to simplify the new endpoint.
+
+Do not change database schemas or create migrations.
+
+Do not refactor existing Milestone 1 functionality.
+
+Do not weaken validation, role checks, ownership checks, or regression tests.
+
+If you discover an unrelated backend bug, document it without fixing it.
+
+The new endpoint must coexist with all existing functionality.
+
+==================================================
+3. ACTUAL JIRA REQUIREMENTS
+==================================================
+
+What to build:
+
+Small backend fix. Admin needs to pick an airline or hotel when creating a moderator or deactivating a provider, but no endpoint lists them. Add a list endpoint for admin only.
+
+ACC-13:
+
+The system shall allow an admin to create a hotel or airline moderator account (name, email, role) linked to exactly one hotel or airline, with a temporary password set by the admin. The moderator must change the password on first login.
+
+ACC-15:
+
+The system shall allow an admin to suspend and reactivate a moderator account and, separately, deactivate and reactivate a hotel or airline.
+
+A deactivated provider's listings are hidden from search and cannot be booked. Existing Confirmed bookings remain valid. Affected parties receive an in-app notification.
+
+IMPORTANT:
+
+These requirements explain why the provider list is necessary.
+
+Do not reimplement ACC-13 or ACC-15.
+
+Their existing functionality must remain unchanged.
+
+New endpoint:
+
+GET /api/admin/providers?type=airline
+GET /api/admin/providers?type=hotel
+
+The repository uses the global /api prefix, so the controller route should follow the existing admin route conventions.
+
+Return:
+
+- Provider ID.
+- Provider name.
+- Active state.
+
+Admin only.
+
+Document the endpoint in Swagger.
+
+Acceptance criteria:
+
+- Returns airlines or hotels by type for an admin.
+- Other authenticated roles receive 403.
+- Documented in Swagger.
+
+Jira checklist:
+
+- Endpoint added with a test.
+- Swagger updated.
+- Role check tested.
+- PR title includes the requirement IDs and ticket number.
+- PR checklist completed.
+- AI_PROMPTS.txt entry added.
+
+Unblocks:
+
+SCRUM-155 — Create moderator form.
+SCRUM-156 — Providers page.
+
+Do not implement those frontend tickets.
+
+==================================================
+4. READ THE EXISTING IMPLEMENTATION
+==================================================
+
+Inspect these files and relevant surrounding code:
+
+- README.md
+- docs/contracts.md
+- backend/src/admin/README.md
+- backend/src/admin/admin.module.ts
+- backend/src/admin/admin.controller.ts
+- backend/src/admin/admin.service.ts
+- backend/src/admin/provider-status.controller.ts
+- backend/src/admin/provider-status.service.ts
+- backend/src/admin/dto/provider-status.dto.ts
+- backend/src/admin/moderator-accounts.controller.ts
+- backend/src/admin/moderator-accounts.service.ts
+- backend/src/admin/dto/
+- backend/src/airlines/schemas/airline.schema.ts
+- backend/src/hotels/schemas/hotel.schema.ts
+- backend/src/common/pagination/
+- backend/test/admin-accounts.e2e-spec.ts
+- backend/test/admin-moderators.e2e-spec.ts
+- backend/test/provider-status.e2e-spec.ts
+- backend/test/pagination.e2e-spec.ts
+- backend/package.json
+- .github/pull_request_template.md
+- AI_PROMPTS.txt
+
+Read any applicable AGENTS.md and Milestone 2 instructions.
+
+Existing repository findings:
+
+1. AdminModule already registers the Hotel and Airline Mongoose models.
+
+2. ProviderStatusController already uses the admin/providers controller path for deactivation and reactivation.
+
+3. Existing admin controllers use @Roles(Role.ADMIN), @CurrentUser(), and the project's global authentication guards.
+
+4. Existing admin services perform additional role checks.
+
+5. Existing pagination utilities and Swagger decorators are available in common.
+
+6. The whole-app pagination E2E suite checks new list endpoints against Swagger.
+
+Verify these findings against the freshly fetched baseline.
+
+Do not duplicate existing models, guards, services, or shared utilities.
+
+==================================================
+5. ENDPOINT IMPLEMENTATION
+==================================================
+
+Implement:
+
+GET /api/admin/providers
+
+Required query parameter:
+
+type=airline|hotel
+
+Use the existing controller, DTO, and service conventions.
+
+Choose the smallest clean implementation within the admin module.
+
+A separate narrowly scoped controller/service is acceptable if it avoids modifying the existing provider status logic.
+
+Do not create an entirely new NestJS module.
+
+FUNCTIONAL REQUIREMENTS
+
+For type=airline:
+
+Return airline providers only.
+
+For type=hotel:
+
+Return hotel providers only.
+
+Return both active and inactive providers.
+
+Inactive providers must remain available to admins so they can be reactivated.
+
+Each provider item should contain only:
+
+{
+  "id": "provider-id",
+  "name": "Provider name",
+  "isActive": true
+}
+
+Confirm field names against existing project conventions.
+
+Use string IDs consistent with existing API DTOs.
+
+Do not return raw MongoDB documents.
+
+Do not expose internal schema fields, private metadata, moderator credentials, payment information, or unrelated provider data.
+
+Use explicit database projection and response mapping.
+
+Use deterministic sorting consistent with existing list endpoints, such as name followed by ID, or stable ascending ID order.
+
+The endpoint must be read-only.
+
+It must never:
+
+- Create a provider.
+- Update a provider.
+- Change provider status.
+- Create a moderator.
+- Change account status.
+- Modify a booking.
+- Send notifications.
+- Trigger existing mutation logic.
+
+Do not add unrelated filters or features.
+
+==================================================
+6. PAGINATION AND RESPONSE CONTRACT
+==================================================
+
+The project already requires shared pagination for list endpoints.
+
+Reuse the existing:
+
+- PaginationDto.
+- paginate().
+- PaginatedResponse.
+- ApiPaginatedResponse.
+
+Follow docs/contracts.md and the actual current implementation.
+
+Default page:
+
+1
+
+Default limit:
+
+10
+
+Maximum limit:
+
+50
+
+Expected response:
+
+{
+  "items": [
+    {
+      "id": "provider-id",
+      "name": "Example Airline",
+      "isActive": true
+    }
+  ],
+  "page": 1,
+  "limit": 10,
+  "total": 1,
+  "totalPages": 1
+}
+
+Example requests:
+
+GET /api/admin/providers?type=airline
+
+GET /api/admin/providers?type=hotel&page=2&limit=10
+
+GET /api/admin/providers?type=hotel&limit=50
+
+Support an empty collection using the existing shared pagination envelope.
+
+Do not return an unpaginated array.
+
+Do not change the common pagination implementation.
+
+Inspect the whole-app pagination E2E test and add the new endpoint to its route coverage as required.
+
+Update the test additively without weakening existing assertions.
+
+Account for the mandatory type query parameter.
+
+If an authoritative approved specification explicitly requires a different response format, report the conflict and follow the approved project contract rather than silently inventing an incompatible response.
+
+==================================================
+7. VALIDATION AND AUTHORIZATION
+==================================================
+
+Create or reuse appropriate query and response DTOs within the admin module.
+
+Validate type using the existing provider-type convention where possible.
+
+Valid values:
+
+airline
+hotel
+
+Missing, invalid, or unsupported type values must return HTTP 400 with the project's standard validation error structure.
+
+Invalid pagination and unsupported query parameters must follow the existing ValidationPipe behavior.
+
+Do not pass arbitrary client-supplied objects directly to MongoDB.
+
+AUTHORIZATION
+
+Use the existing authentication and role guards.
+
+Reuse:
+
+@Roles(Role.ADMIN)
+
+Use @CurrentUser() where appropriate.
+
+Follow existing admin service conventions by checking the authenticated actor and ADMIN role at the service level as well.
+
+Expected authorization results:
+
+Authenticated ADMIN:
+200
+
+Authenticated USER:
+403
+
+Authenticated AIRLINE_MODERATOR:
+403
+
+Authenticated HOTEL_MODERATOR:
+403
+
+Unauthenticated caller:
+401
+
+Do not expose the endpoint through @Public().
+
+Do not modify the authentication guards.
+
+Do not create new authorization rules.
+
+ERROR HANDLING
+
+Follow the project's existing error format.
+
+Use sanitized errors for database failures.
+
+Do not expose raw MongoDB errors, credentials, connection strings, or internal stack traces.
+
+==================================================
+8. SWAGGER DOCUMENTATION
+==================================================
+
+Document the endpoint under the existing admin Swagger tag.
+
+Include:
+
+- Endpoint summary.
+- ADMIN-only authorization.
+- Cookie authentication.
+- Required type query parameter.
+- Allowed values: airline and hotel.
+- Shared page and limit parameters.
+- Provider response DTO.
+- Paginated success response.
+- 400 validation error.
+- 401 unauthorized response.
+- 403 forbidden response.
+- Appropriate sanitized server-error response.
+
+Document that both active and inactive providers are returned.
+
+Use existing Swagger decorators and shared DTOs.
+
+Do not modify unrelated Swagger documentation.
+
+Do not manually edit generated frontend API schemas.
+
+If the repository requires regenerating the OpenAPI snapshot or frontend API types when introducing an endpoint, use its official generation workflow only if authorized by the project's instructions.
+
+Report any generated-contract updates separately.
+
+If regeneration belongs to another owner or ticket, document that follow-up for SCRUM-155 and SCRUM-156.
+
+==================================================
+9. AUTOMATED TESTING
+==================================================
+
+Use existing Jest, Supertest, and isolated MongoDB test infrastructure.
+
+Add focused tests for the new endpoint.
+
+Suggested test location:
+
+backend/test/admin-providers.e2e-spec.ts
+
+Also add service-level tests if needed to match existing admin patterns.
+
+Test the following:
+
+A. Successful responses
+
+- An admin can list airlines.
+- An admin can list hotels.
+- Airlines are not returned in the hotel list.
+- Hotels are not returned in the airline list.
+- Active providers are returned.
+- Inactive providers are returned.
+- Every item contains only the intended fields.
+- IDs are strings.
+- Active state is correct.
+- Results are deterministically ordered.
+- Empty provider collections return a valid empty page.
+
+B. Pagination
+
+- Default page is 1.
+- Default limit is 10.
+- Custom valid page and limit work.
+- Maximum limit 50 works.
+- Invalid pagination returns 400.
+- Pagination metadata is correct.
+- No records are duplicated across pages.
+- Pages beyond the end follow existing backend behavior.
+
+C. Authorization
+
+- ADMIN receives 200.
+- USER receives 403.
+- AIRLINE_MODERATOR receives 403.
+- HOTEL_MODERATOR receives 403.
+- Unauthenticated requests receive 401.
+
+Use the actual authentication and role guards in the E2E tests.
+
+Do not mock away authorization checks.
+
+D. Validation
+
+- Missing type returns 400.
+- Invalid type returns 400.
+- Unexpected query parameters are rejected according to existing rules.
+- Validation errors follow the project's shared error format.
+
+E. Swagger
+
+Verify that the generated Swagger document includes:
+
+- GET /api/admin/providers.
+- Required type parameter and allowed values.
+- Pagination parameters.
+- Paginated provider response.
+- Authentication requirements.
+- Relevant error responses.
+
+F. Regression protection
+
+Verify that existing provider deactivation and reactivation still work.
+
+Verify that existing moderator creation behavior remains unchanged.
+
+Run the relevant existing tests without changing their assertions.
+
+G. Whole-app pagination
+
+Add the new provider endpoint to backend/test/pagination.e2e-spec.ts as required by its completeness checks.
+
+Do not weaken the completeness test or remove existing endpoints.
+
+TEST SAFETY
+
+- Use disposable MongoDB instances.
+- Use synthetic users and provider records.
+- Never use the shared MongoDB Atlas database.
+- Never access live Stripe services.
+- Never use production credentials.
+- Never modify live provider records.
+- Never run destructive operations against shared services.
+
+==================================================
+10. ALLOWED CHANGE SCOPE
+==================================================
+
+Primary permitted implementation scope:
+
+backend/src/admin/
+
+Permitted additions:
+
+- New provider-list controller and/or service.
+- Query DTO.
+- Response DTO.
+- Focused service tests.
+- Minimal AdminModule registration changes if necessary.
+
+Permitted test changes:
+
+- New admin provider E2E tests.
+- Additive coverage in backend/test/pagination.e2e-spec.ts.
+
+Permitted documentation changes:
+
+- Narrow documentation for the new admin provider endpoint.
+- AI_PROMPTS.txt.
+
+Generated API artifacts:
+
+Only update through the official generation workflow if required and authorized. Never edit generated schemas manually.
+
+PROHIBITED CHANGES
+
+Do not modify:
+
+- Airline schemas.
+- Hotel schemas.
+- User schemas.
+- Booking schemas.
+- Authentication guards.
+- Existing notification behavior.
+- Existing audit behavior.
+- Existing provider status mutations.
+- Existing moderator creation logic.
+- Shared pagination implementation.
+- Existing business API contracts.
+- Unrelated frontend features.
+- Existing GEN-05 or GEN-08 implementation.
+- CI workflows.
+- Git hooks.
+- Environment files.
+- Package manifests or lockfiles.
+- Milestone tags or releases.
+
+Do not introduce new dependencies.
+
+Use existing repository infrastructure.
+
+Append the task prompt and any additional relevant AI prompts to AI_PROMPTS.txt.
+
+Preserve all previous entries and contributors' work.
+
+==================================================
+11. VERIFICATION
+==================================================
+
+Install locked backend dependencies if necessary:
+
+npm ci
+
+Do not upgrade dependencies.
+
+Run focused tests first:
+
+- New provider-list tests.
+- Existing provider-status tests.
+- Existing admin moderator tests.
+- Whole-app pagination E2E tests.
+
+Use the actual test scripts and filenames present in the repository.
+
+Run from backend/:
+
+npm run lint
+npm run build
+npm test
+npm run test:e2e
+
+Use the repository's supported serial test options if necessary to avoid resource contention with disposable MongoDB instances.
+
+If the full E2E suite is too resource-intensive or encounters an environmental blocker, run the relevant suites and report exactly what remains unverified.
+
+Do not falsely report full-suite success.
+
+Do not fix unrelated failures.
+
+Do not disable validation, suppress TypeScript errors, weaken lint rules, or remove tests to obtain passing results.
+
+==================================================
+12. FINAL SCOPE AND REGRESSION AUDIT
+==================================================
+
+Compare all changes against the recorded BASELINE_SHA.
+
+Run:
+
+git status --short
+git diff --check
+git diff --stat
+git diff --name-status BASELINE_SHA
+git diff --cached --name-status
+git ls-files --others --exclude-standard
+
+Inspect every tracked, staged, and untracked change.
+
+Verify:
+
+- All backend implementation changes belong to the authorized admin provider-list scope.
+- Existing backend endpoints and behavior remain unchanged.
+- No existing database schemas were changed.
+- No authentication guards were changed.
+- No booking or payment modules were changed.
+- No unrelated business functionality was changed.
+- No existing regression assertions were weakened.
+- No unrelated frontend files were changed.
+- No unauthorized dependency changes occurred.
+- No CI or environment changes occurred.
+- Original, GEN-05, and GEN-08 worktrees remain untouched.
+- AI_PROMPTS.txt preserves existing entries.
+
+Unlike the previous two tickets, the backend diff is expected to contain changes.
+
+Do not require the entire backend diff to be empty.
+
+Instead, verify that every backend change is explicitly necessary for SCRUM-141.
+
+Report any unexpected file changes.
+
+==================================================
+13. FINAL REPORT
+==================================================
+
+Provide a concise but complete report containing:
+
+1. Implementation summary.
+2. Exact endpoint path.
+3. Query parameters.
+4. Example successful JSON response.
+5. Authorization behavior for every role.
+6. Jira acceptance criteria and checklist coverage.
+7. Every file created or modified.
+8. Swagger documentation verification.
+9. Automated test results.
+10. Existing regression test results.
+11. Actual build and lint results.
+12. Milestone 1 protection and authorized-change audit.
+13. Git baseline SHA and feature branch.
+14. Any assumptions, limitations, or remaining issues.
+15. Integration guidance for SCRUM-155 and SCRUM-156.
+16. Whether SCRUM-141 is ready for review.
+
+Suggested commit message:
+
+feat(admin): add provider list endpoint (ACC-13/ACC-15)
+
+Suggested PR title:
+
+feat(admin): list providers (ACC-13 / ACC-15 / SCRUM-141)
+
+Provide a suggested PR description using the current repository template.
+
+Do not tick checklist items dishonestly.
+
+Expected final Git status:
+
+Committed: No.
+Pushed: No.
+PR created: No.
+Jira modified: No.
+
+==================================================
+14. EXECUTION INSTRUCTIONS
+==================================================
+
+Fetch the latest GitHub code.
+
+Create the isolated feature branch.
+
+Inspect the existing admin provider implementation.
+
+Implement the smallest authorized read-only endpoint.
+
+Reuse existing pagination and authorization infrastructure.
+
+Document it in Swagger.
+
+Write meaningful tests.
+
+Run relevant regression tests and backend verification.
+
+Update AI_PROMPTS.txt.
+
+Audit the complete change set.
+
+Provide the final report.
+
+Do not stop after planning.
+
+Do not reimplement ACC-13 or ACC-15.
+
+Do not implement the downstream frontend tickets.
+
+Do not modify unrelated Milestone 1 functionality.
+
+Do not commit, push, merge, or create a pull request until I approve.
+
+Keep this task small, secure, backward-compatible, and consistent with the existing repository.
+
+How the output was used:
+Implemented an ADMIN-only paginated provider list using the existing provider models and shared validation, authorization, pagination and Swagger conventions. Added real-AppModule tests and a route-table entry to the existing pagination suite. The five focused suites passed 477 tests using disposable MongoDB. Backend build and lint passed. Added downstream integration guidance to the admin README. Existing mutation logic and generated frontend API artifacts were preserved.
