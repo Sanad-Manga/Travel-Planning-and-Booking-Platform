@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ApiError } from '@/lib/api';
+import { ApiError } from '@/lib/api';
 import type { Schema } from './types';
 import { useApi } from './useApi';
 
@@ -12,7 +12,7 @@ export type BookingView = Schema<'FlightBookingResponseDto'> | Schema<'HotelBook
  * What the page should show. The backend has no "failed" booking status: a booking is waiting, confirmed,
  * expired (the hold ran out) or cancelled. A declined card is a payment problem, shown on the checkout page.
  */
-export type BookingPhase = 'loading' | 'pending' | 'confirmed' | 'expired' | 'cancelled' | 'timeout' | 'error';
+export type BookingPhase = 'loading' | 'pending' | 'confirmed' | 'expired' | 'cancelled' | 'unavailable' | 'timeout' | 'error';
 
 /** Ask every 2 s at first (the webhook usually lands within seconds), then every 5 s. */
 export const FAST_POLL_MS = 2000;
@@ -31,6 +31,9 @@ export function isFinalStatus(status: BookingView['status'] | undefined): boolea
 }
 
 export function phaseOf(booking: BookingView | undefined, error: unknown, timedOut: boolean): BookingPhase {
+  // The flight booking endpoint answers 409 once a booking is neither pending nor confirmed (it expired or was cancelled),
+  // so there is no EXPIRED body to read. If we had seen it pending, the hold ran out; if this is the first answer, we cannot tell which.
+  if (error instanceof ApiError && error.statusCode === 409) return booking ? 'expired' : 'unavailable';
   if (booking) {
     if (booking.status === 'CONFIRMED' || booking.status === 'COMPLETED') return 'confirmed';
     if (booking.status === 'EXPIRED') return 'expired';
@@ -63,9 +66,15 @@ export function usePollBooking(type: BookingType, id: string | null | undefined)
   const windowId = `${key}#${round}`;
   const timedOut = expiredWindow === windowId;
 
+  /** A 4xx answer (booking closed, not found, not yours) will not change by asking again, so polling stops. */
+  const refused = useRef(false);
+
   const { data, error, mutate } = useApi<BookingView>(key, {
+    onError: (failure) => {
+      if (failure instanceof ApiError && failure.statusCode >= 400 && failure.statusCode < 500) refused.current = true;
+    },
     refreshInterval: (latest) => {
-      if (isFinalStatus(latest?.status)) return 0;
+      if (refused.current || isFinalStatus(latest?.status)) return 0;
       const elapsed = startedAt.current === 0 ? 0 : Date.now() - startedAt.current;
       return elapsed >= MAX_WAIT_MS ? 0 : pollIntervalMs(elapsed);
     },
@@ -83,6 +92,7 @@ export function usePollBooking(type: BookingType, id: string | null | undefined)
     // Restart the clock before asking: the answer can arrive before the re-render, and SWR decides whether to
     // schedule the next poll from this clock when the answer arrives.
     startedAt.current = Date.now();
+    refused.current = false;
     setRound((current) => current + 1);
     void mutate();
   }, [mutate]);
