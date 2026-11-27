@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 import { api } from '@/lib/api';
 import { toFriendlyError, type FriendlyError } from '@/lib/apiError';
+import { homePathFor } from '@/lib/roles';
 import { Alert } from './Alert';
 import { useAuth } from './AuthProvider';
 import { Breadcrumbs } from './Breadcrumbs';
@@ -29,7 +30,7 @@ function checkNewPassword(value: string): string | undefined {
 export function ChangePasswordForm() {
   const router = useRouter();
   const toast = useToast();
-  const { logout, resetSession } = useAuth();
+  const { user, login, logout, resetSession } = useAuth();
 
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -62,8 +63,24 @@ export function ChangePasswordForm() {
       return;
     }
 
-    // Changed. A forced change has already cleared the cookies; an ordinary one is ended here so
-    // the person signs in with the new password. If that call fails the screen still must not keep the old session.
+    // ACC-13 / ACC-07a: a forced change has already ended the session on the server. Sign straight back in
+    // with the new password and go to the role's home; if that fails, fall through to "please log in again".
+    if (user?.mustChangePassword) {
+      try {
+        const me = await login(user.email, newPassword);
+        toast.success('Password changed.');
+        router.replace(homePathFor(me.role));
+        return;
+      } catch {
+        resetSession();
+        toast.success('Password changed, please log in again.');
+        router.replace('/login');
+        return;
+      }
+    }
+
+    // An ordinary change is ended here so the person signs in with the new password.
+    // If that call fails the screen still must not keep the old session.
     try {
       await logout();
     } catch {

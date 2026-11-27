@@ -5617,3 +5617,13 @@ Prompt:
 Frontend only. Add an optional onRetry prop to DataTable that is passed to the error Alert so a Try again button shows, a test for it (button only when onRetry is given, click calls it), and wire onRetry in the README example.
 How the output was used:
 Test written first and seen failing, then the prop added in DataTable.tsx and the README example updated to onRetry={() => void list.revalidate()}. Existing props and behaviour unchanged. Lint, typecheck, tests and build checked in an isolated worktree.
+
+================================================
+Date: 2026-11-27
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Opus 5.5)
+Related Requirement: ACC-13, ACC-07a (SCRUM-148)
+Prompt:
+Start SCRUM-148: a moderator or user with a temporary password must set a new one before anything else (redirect from any page), the new password rules shown and enforced, and after success they land on their role home. Check what SCRUM-134 already covers and fill only the gaps, tests first.
+How the output was used:
+The /change-password page, the password rules and the redirect on protected pages already existed from SCRUM-134. Two gaps fixed, tests first: (1) public pages did not redirect, so a new ForcedPasswordRedirect (mounted once in AppShell) sends a user with mustChangePassword to /change-password from every page; (2) after a forced change the backend ends the session, so the form now logs straight back in with the new password and goes to the role home (homePathFor), falling back to /login if that fails. The ordinary change on /account is unchanged. Not checked against the real backend: a temporary password needs an admin, and that step was skipped.

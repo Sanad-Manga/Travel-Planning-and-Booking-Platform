@@ -11,7 +11,9 @@ const logout = vi.fn();
 const resetSession = vi.fn();
 const toastSuccess = vi.fn();
 vi.mock('next/navigation', () => ({ useRouter: () => ({ replace }) }));
-vi.mock('./AuthProvider', () => ({ useAuth: () => ({ user: { id: 'u1' }, loading: false, logout, resetSession }) }));
+const login = vi.fn();
+let authUser: Record<string, unknown> = { id: 'u1' };
+vi.mock('./AuthProvider', () => ({ useAuth: () => ({ user: authUser, loading: false, logout, resetSession, login }) }));
 vi.mock('./ToastProvider', () => ({ useToast: () => ({ success: toastSuccess, error: vi.fn() }) }));
 
 const apiMock = vi.mocked(api);
@@ -23,6 +25,8 @@ beforeEach(() => {
   logout.mockResolvedValue(undefined);
   resetSession.mockReset();
   toastSuccess.mockReset();
+  login.mockReset();
+  authUser = { id: 'u1' };
 });
 
 async function fill(current = 'Temp0rary1', next = 'N3wPassw0rd', confirm = next) {
@@ -121,5 +125,30 @@ describe('ChangePasswordForm (ACC-11)', () => {
     apiMock.mockReturnValue(new Promise(() => undefined));
     await fill();
     await waitFor(() => expect(screen.getByRole('button', { name: /changing password/i })).toBeDisabled());
+  });
+
+  describe('forced change with a temporary password (ACC-13, ACC-07a)', () => {
+    beforeEach(() => {
+      authUser = { id: 'm1', email: 'mod@example.com', role: 'AIRLINE_MODERATOR', mustChangePassword: true };
+    });
+
+    it('logs in again with the new password and lands on the role home, not on /login', async () => {
+      apiMock.mockResolvedValue(undefined);
+      login.mockResolvedValue({ id: 'm1', role: 'AIRLINE_MODERATOR', mustChangePassword: false });
+      await fill();
+      await waitFor(() => expect(replace).toHaveBeenCalledWith('/airline'));
+      expect(login).toHaveBeenCalledWith('mod@example.com', 'N3wPassw0rd');
+      expect(logout).not.toHaveBeenCalled();
+      expect(toastSuccess).toHaveBeenCalledWith('Password changed.');
+    });
+
+    it('if that login fails, it still ends the session and asks to log in', async () => {
+      apiMock.mockResolvedValue(undefined);
+      login.mockRejectedValue(new TypeError('offline'));
+      await fill();
+      await waitFor(() => expect(replace).toHaveBeenCalledWith('/login'));
+      expect(resetSession).toHaveBeenCalledTimes(1);
+      expect(toastSuccess).toHaveBeenCalledWith('Password changed, please log in again.');
+    });
   });
 });
