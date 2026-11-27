@@ -1,0 +1,116 @@
+.page {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.page > :global(.card) {
+  min-width: 0;
+}
+
+.form, .providers {
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+
+.form, .section, .details, .providers {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.form {
+  gap: var(--space-6);
+}
+
+.section + .section {
+  border-block-start: var(--border-width) solid var(--border);
+  padding-block-start: var(--space-6);
+}
+
+.section h2, .dialog h2 {
+  margin: 0;
+  font-size: var(--font-size-lg);
+}
+
+.providers legend {
+  padding: 0;
+  margin-block-end: var(--space-2);
+}
+
+.choice {
+  display: inline-grid;
+  place-items: center;
+  min-inline-size: var(--touch-target);
+  min-block-size: var(--touch-target);
+  cursor: pointer;
+}
+
+.choice input {
+  accent-color: var(--primary);
+}
+
+.choice input:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.providers :global(.alert-action) {
+  min-block-size: var(--touch-target);
+}
+
+.dialog {
+  width: min(28rem, calc(100% - var(--space-8)));
+  max-height: calc(100dvh - var(--space-8));
+  overflow: auto;
+  overscroll-behavior: contain;
+  margin: auto;
+  padding: var(--space-4);
+  background: var(--surface);
+  color: var(--foreground);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow-wrap: anywhere;
+}
+
+.dialog[open] {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.dialog::backdrop {
+  background: var(--scrim);
+}
+
+.dialog p, .identity, .identity dd {
+  margin: 0;
+}
+
+.dialog p + p {
+  margin-block-start: var(--space-2);
+}
+
+.dialog button {
+  justify-self: start;
+}
+
+.identity {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+}
+
+.identity dt {
+  color: var(--muted);
+}
+
+.secret {
+  font-family: ui-monospace, monospace;
+  resize: vertical;
+}
+
+@media (min-width: 40rem) {
+  .details {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

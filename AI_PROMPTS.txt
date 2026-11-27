@@ -5627,6 +5627,28 @@ Test written first and seen failing, then the prop added in DataTable.tsx and th
 
 ================================================
 Date: 2026-11-27
+Student: Mohamed Walid
+Tool: OpenAI Codex
+Related Requirement: SCRUM-155 / ACC-13
+Prompt:
+Build the admin moderator creation form with role-dependent paginated provider selection, validation, field errors and one-time password disclosure.
+Use the existing backend, Harbor x Linen theme and generated API types; synchronize the missing provider-list contract without changing backend code.
+How the output was used:
+Used the protected form, shared pagination, typed API integration, validation and copyable success dialog produced by Codex.
+Kept the two moderator roles and their provider IDs mutually exclusive; the frontend displays the submitted password because the API never returns it.
+Reviewed the synthetic browser preview and retained the official theme. Regenerated the provider-list types from develop Swagger without changing the moderator POST contract.
+Verification:
+50 focused tests and 507 full frontend tests passed; ESLint, TypeScript, production build and Git whitespace checks passed.
+Edge checks at 320, 375 and 1280px in light/dark covered pagination, keyboard selection, validation and dialog behavior. Swagger used disposable MongoDB with email disabled.
+Live moderator creation, invitation delivery and first-login password change were not verified.
+Student: Abdelrahman ElGabarty
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GEN-09 (SCRUM-182, M2 S1: report dialog)
+Prompt:
+Frontend only. Build a reusable report dialog any page can open to report a post, comment, review or itinerary: a required reason (up to 500 characters, counted after trimming like the backend), POST /api/reports, a thank-you state, a 409 shown as "already reported" and a 404 as "no longer available", backend field errors next to the box, a retry for server errors. Only theme tokens and shared components, no new CSS rules except what a real problem needs.
+How the output was used:
+Tests written first. lib/reports.ts holds the rules (checkReason, classifyReportError) and components/ReportDialog.tsx the modal (it reuses the confirm dialog classes, has its own focus trap, returns focus to the opener, locks page scroll). Mutation checks: a blank reason and a missing trim each made tests fail. An independent code review (subagent, read-only) found four real problems that I fixed with a failing test first each time: after a failed send focus fell to the page behind so Escape stopped working; the result was not announced to screen readers; the red message stayed after editing; the page was called back after it had been closed. It also confirmed the request and error shapes against backend/src/reports. A real-browser run found two more: on a phone held sideways the panel was taller than the screen and could not scroll (fixed with max-height and overflow on .confirm-panel, which ConfirmDialog shares), and a click outside lost focus to the page instead of the opener (fixed by preventing the default on mouse down).
+Verification: npm run lint, npx tsc --noEmit, npm run build clean; npx vitest run 484/484 passed (24 new tests in two files). A subagent drove the production build against the real backend (in-memory MongoDB, real login cookie, throwaway page and test deleted afterwards): focus on open, empty and 501-character reasons blocked with no request, one report saved with the trimmed reason and status OPEN, a second send showed "already reported" with still one row, a missing itinerary showed "no longer available", a post worked, Tab stayed inside, Escape closed, no horizontal scroll at 1024, 375 and 320 px in light and dark, a logged-out visitor was sent to login. A second run on the final code repeated it and also saw: the panel scrolls at 568x320 with Send and Cancel reachable, a click outside returns focus to the opener, a failed send with the backend stopped shows the retry alert with focus still inside and Escape closing it, the red message clears on edit, and Close is described by the result text (guest redirect not re-run). Not checked: a field error from the real backend, comment and review targets, and no page uses the dialog yet (the feed, review and itinerary pages will).
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Opus 5.5)
 Related Requirement: GEN-01 (SCRUM-151)
