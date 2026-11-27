@@ -5629,6 +5629,11 @@ Test written first and seen failing, then the prop added in DataTable.tsx and th
 Date: 2026-11-27
 Student: Ziad Mohamed
 Tool: Claude Code (Claude Opus 5.5)
+Related Requirement: ACC-08, ACC-09 (SCRUM-147)
+Prompt:
+Start SCRUM-147: the /account page where a signed-in user edits name, phone and preferred currency (with the shared currency picker) and changes their password with the current one; backend errors on the fields, a slot for SCRUM-149's deactivation. Tests first and small, then check against the real backend at phone width.
+How the output was used:
+Tests written first and watched fail. Added src/features/account/ProfileForm.tsx (react-hook-form + zod with the backend's UpdateProfileDto rules: name, phone 7 to 15 digits with an optional + and typing aids stripped, empty phone removes it, currency from the shared CurrencyPicker; PATCH /api/users/me, backend details on their fields, then AuthProvider.refresh() and a "Profile saved." toast) and AccountSections.tsx (Profile and Password cards plus a marked slot for SCRUM-149). ChangePasswordForm gained an `embedded` option (no page heading, breadcrumbs or Cancel) so the existing, already tested password form is reused on /account. AuthProvider.refresh() is the identical change from PR #212 so the two merge cleanly. Checked on the real backend at 375 px: profile values load, a bad phone is caught, saving stores the normalized phone and EUR, a wrong current password shows the backend field error, a short new password shows the rule, and a real change ends the session and goes to login. Removed a duplicate inline "Profile saved." found during that check (the toast stays).
 Related Requirement: ACC-04, ACC-05, ACC-06 (SCRUM-146)
 Prompt:
 Start SCRUM-146: finish login (role landing, generic wrong-password message, suspended message, lockout message with the retry time), logout in the header that clears the session, and an expired session sending the user to login. Check what SCRUM-134 already covers, fill only the gaps, tests first, then check against the real backend at phone width.
