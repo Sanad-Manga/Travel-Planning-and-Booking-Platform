@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { VerifyEmailBanner } from '@/features/account/VerifyEmailBanner';
 import { Footer } from './Footer';
 import { Header } from './Header';
 import { SkipLink } from './SkipLink';
@@ -9,6 +10,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="app-shell">
       <SkipLink />
       <Header />
+      <VerifyEmailBanner />
       <main id="main-content" tabIndex={-1} className="page app-main">
         {children}
       </main>
