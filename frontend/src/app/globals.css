@@ -1115,6 +1115,42 @@ a.btn {
 /* =============================================================================================
    AUTH: login form and the Logout button in the header (ACC-10)
    ============================================================================================= */
+/* Notifications (GEN-01) */
+.notification-bell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.notification-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-pill);
+  background: var(--primary);
+  color: var(--on-primary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  line-height: 1.5rem;
+}
+.notification-text p {
+  margin: 0 0 var(--space-1);
+}
+.notification-title-unread {
+  font-weight: var(--font-weight-bold);
+}
+.notification-message {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.notification-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 .auth-form {
   max-width: 26rem;
 }

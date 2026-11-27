@@ -5617,3 +5617,13 @@ Prompt:
 Frontend only. Add an optional onRetry prop to DataTable that is passed to the error Alert so a Try again button shows, a test for it (button only when onRetry is given, click calls it), and wire onRetry in the README example.
 How the output was used:
 Test written first and seen failing, then the prop added in DataTable.tsx and the README example updated to onRetry={() => void list.revalidate()}. Existing props and behaviour unchanged. Lint, typecheck, tests and build checked in an isolated worktree.
+
+================================================
+Date: 2026-11-27
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Opus 5.5)
+Related Requirement: GEN-01 (SCRUM-151)
+Prompt:
+Start SCRUM-151: a notification bell with the unread count in the header (only the bell, nothing else in the header), a paginated /notifications list with an empty state, and mark-as-read one at a time (no mark-all route) that updates the count, for every role. Use the GEN-05 table and pagination; tests first and small; check against the real backend at phone width.
+How the output was used:
+Tests written first. Added src/features/notifications/NotificationBell.tsx (GET /api/notifications/unread-count every minute and on focus, a badge capped at 99+, an accessible name with the count, current-page state) and NotificationList.tsx (usePaginated + DataTable + Pagination, ten per page; title, message, Open link, received time in the viewer's zone, and "Mark as read" per unread row that PATCHes /notifications/:id/read and then reloads the list and the bell count; error with Try again and an empty state from DataTable), the /notifications route behind RequireAuth, the bell in the Header's signed-in list (not during a forced password change), and token-only styles. Checked on the real backend at 375 px: bell in the header, the empty list for a new account, no horizontal scroll. Marking read with real notifications was not clicked through (the test account has none); it is covered by the unit tests.
