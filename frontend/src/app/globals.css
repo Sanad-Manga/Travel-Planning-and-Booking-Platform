@@ -335,6 +335,9 @@ a.btn {
 .confirm-panel {
   width: 100%;
   max-width: 28rem;
+  /* A short screen (a phone on its side) scrolls the panel instead of cutting off its title and buttons. */
+  max-height: 100%;
+  overflow-y: auto;
   padding: var(--space-6);
   border: var(--border-width) solid var(--border-strong);
   border-radius: var(--radius-lg);
@@ -1450,6 +1453,13 @@ a.btn {
   .styleguide-panels {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+/* =============================================================================================
+   CHECKOUT (PAY-01 / PAY-02): the cards above the payment form keep the standard gap between them.
+   ============================================================================================= */
+.checkout > .card {
+  margin-bottom: var(--space-4);
 }
 
 /* =============================================================================================
