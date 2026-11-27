@@ -31,6 +31,14 @@ export function BookingStatus({ type, bookingId }: BookingStatusProps) {
     );
   }
 
+  if (phase === 'unavailable') {
+    return (
+      <Alert variant="warning" title={`This ${noun} is no longer open`} hint="It has expired or been cancelled. Nothing is waiting for payment.">
+        <p>We cannot show its details any more.</p>
+      </Alert>
+    );
+  }
+
   if (phase === 'error' || !booking) {
     const friendly = toFriendlyError(error);
     return (

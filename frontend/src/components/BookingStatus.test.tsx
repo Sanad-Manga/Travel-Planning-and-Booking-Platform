@@ -68,6 +68,24 @@ describe('BookingStatus (FLT-23 / HTL-17)', () => {
     expect(await screen.findByText('This booking was cancelled')).toBeInTheDocument();
   });
 
+  it('shows "no longer open" when the backend refuses a booking that is not pending or confirmed (flight endpoint answers 409)', async () => {
+    fetchMock.mockImplementation(() => reply({ statusCode: 409, message: 'A booking is available only while it is pending payment or after it is confirmed' }, 409));
+    renderStatus();
+    expect(await screen.findByText('This booking is no longer open')).toBeInTheDocument();
+  });
+
+  it('shows the expired message when a pending booking turns into a 409', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let calls = 0;
+    fetchMock.mockImplementation(() =>
+      ++calls === 1 ? reply(booking('PENDING_PAYMENT')) : reply({ statusCode: 409, message: 'A booking is available only while it is pending payment or after it is confirmed' }, 409),
+    );
+    renderStatus();
+    expect(await screen.findByText('Confirming your payment')).toBeInTheDocument();
+    await act(async () => void (await vi.advanceTimersByTimeAsync(3000)));
+    expect(await screen.findByText('Time to pay ran out')).toBeInTheDocument();
+  });
+
   it('shows a load error with a retry that asks again', async () => {
     fetchMock.mockImplementationOnce(() => reply({ statusCode: 404, message: 'Not found' }, 404)).mockImplementation(() => reply(booking('CONFIRMED', { bookingReference: 'TRV-1' })));
     const user = userEvent.setup();

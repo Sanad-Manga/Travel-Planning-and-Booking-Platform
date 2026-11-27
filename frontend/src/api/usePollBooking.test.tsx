@@ -1,6 +1,7 @@
 import { act, render, screen } from '@testing-library/react';
 import { SWRConfig } from 'swr';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '@/lib/api';
 import { swrDefaults } from './useApi';
 import { FAST_POLL_MS, MAX_WAIT_MS, SLOW_POLL_MS, isFinalStatus, phaseOf, pollIntervalMs, usePollBooking } from './usePollBooking';
 
@@ -50,6 +51,13 @@ describe('pure helpers', () => {
     expect(phase('CANCELLED')).toBe('cancelled');
     expect(phaseOf(undefined, undefined, false)).toBe('loading');
     expect(phaseOf(undefined, new Error('x'), false)).toBe('error');
+    expect(phaseOf(undefined, new ApiError(404, 'nope'), false)).toBe('error');
+  });
+
+  it('reads a 409 (the flight endpoint refuses a booking that is no longer pending or confirmed) as expired when it was seen pending, else unavailable', () => {
+    const closed = new ApiError(409, 'A booking is available only while it is pending payment or after it is confirmed');
+    expect(phaseOf(booking('PENDING_PAYMENT') as never, closed, false)).toBe('expired');
+    expect(phaseOf(undefined, closed, false)).toBe('unavailable');
   });
 });
 
@@ -119,6 +127,26 @@ describe('usePollBooking (FLT-23 / HTL-17)', () => {
     expect(callsAfterRefresh).toBeGreaterThan(callsAtTimeout);
     await tick(FAST_POLL_MS * 2);
     expect(fetchMock.mock.calls.length).toBeGreaterThan(callsAfterRefresh);
+  });
+
+  it('turns pending into expired when the backend starts answering 409, and stops asking', async () => {
+    let calls = 0;
+    fetchMock.mockImplementation(() =>
+      ++calls === 1 ? reply(booking('PENDING_PAYMENT')) : reply({ statusCode: 409, message: 'A booking is available only while it is pending payment or after it is confirmed' }, 409),
+    );
+    renderProbe();
+    expect(await screen.findByText('phase:pending')).toBeInTheDocument();
+    await tick(FAST_POLL_MS);
+    expect(await screen.findByText('phase:expired')).toBeInTheDocument();
+    const callsAtExpiry = fetchMock.mock.calls.length;
+    await tick(20_000);
+    expect(fetchMock).toHaveBeenCalledTimes(callsAtExpiry);
+  });
+
+  it('says unavailable when the very first answer is a 409', async () => {
+    fetchMock.mockImplementation(() => reply({ statusCode: 409, message: 'A booking is available only while it is pending payment or after it is confirmed' }, 409));
+    renderProbe();
+    expect(await screen.findByText('phase:unavailable')).toBeInTheDocument();
   });
 
   it('reports a 404 as an error and does not retry it', async () => {
