@@ -55,4 +55,15 @@ describe('DataTable', () => {
     rerender(<DataTable {...empty} />);
     expect(screen.getByRole('heading', { name: empty.emptyTitle })).toBeInTheDocument();
   });
+
+  it('offers Try again on a failure only when onRetry is given, and calls it', async () => {
+    const user = userEvent.setup();
+    const onRetry = vi.fn();
+    const failed = { ...props, rows: [], error: { status: 503, body: {} } };
+    const { rerender } = render(<DataTable {...failed} />);
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+    rerender(<DataTable {...failed} onRetry={onRetry} />);
+    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
 });

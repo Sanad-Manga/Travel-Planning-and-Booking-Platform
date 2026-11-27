@@ -5607,3 +5607,13 @@ Keep this task small, secure, backward-compatible, and consistent with the exist
 
 How the output was used:
 Implemented an ADMIN-only paginated provider list using the existing provider models and shared validation, authorization, pagination and Swagger conventions. Added real-AppModule tests and a route-table entry to the existing pagination suite. The five focused suites passed 477 tests using disposable MongoDB. Backend build and lint passed. Added downstream integration guidance to the admin README. Existing mutation logic and generated frontend API artifacts were preserved.
+
+================================================
+Date: 2026-11-27
+Student: Ahmed Sanad
+Tool: Claude Code (Claude Sonnet 5.5)
+Related Requirement: GEN-05 follow-up (review blocker A7 on PR 206: DataTable error state had no Retry)
+Prompt:
+Frontend only. Add an optional onRetry prop to DataTable that is passed to the error Alert so a Try again button shows, a test for it (button only when onRetry is given, click calls it), and wire onRetry in the README example.
+How the output was used:
+Test written first and seen failing, then the prop added in DataTable.tsx and the README example updated to onRetry={() => void list.revalidate()}. Existing props and behaviour unchanged. Lint, typecheck, tests and build checked in an isolated worktree.
