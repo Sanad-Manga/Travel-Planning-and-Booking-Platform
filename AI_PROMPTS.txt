@@ -5607,3 +5607,13 @@ Keep this task small, secure, backward-compatible, and consistent with the exist
 
 How the output was used:
 Implemented an ADMIN-only paginated provider list using the existing provider models and shared validation, authorization, pagination and Swagger conventions. Added real-AppModule tests and a route-table entry to the existing pagination suite. The five focused suites passed 477 tests using disposable MongoDB. Backend build and lint passed. Added downstream integration guidance to the admin README. Existing mutation logic and generated frontend API artifacts were preserved.
+
+================================================
+Date: 2026-11-27
+Student: Ziad Mohamed
+Tool: Claude Code (Claude Opus 5.5)
+Related Requirement: ACC-02 (SCRUM-150)
+Prompt:
+Start SCRUM-150: the /verify-email page opened from the email link, a banner for unverified users and a resend button, following Sanad's theme guide and the frontend PR template. Also make the email link open the frontend page instead of the API (it pointed at /api/auth/verify-email and showed raw JSON). Tests first, keep them small, then check it against the real backend at phone width.
+How the output was used:
+Tests written first and watched fail. Backend: the verification link is now {FRONTEND_URL}/verify-email?token=... (the same base as the password-reset link); the PUBLIC_API_URL setting, used only for that link, was removed from configuration, .env.example and the API doc. Frontend: src/features/account/ with VerifyEmail (sends the single-use token exactly once, even under StrictMode; shows verified, already verified, invalid or expired with a way to get a new link, or an error with Try again), VerifyEmailBanner (only for signed-in users with emailVerified false, shown under the header from AppShell) and ResendVerification (sent confirmation with the address, a 429 says how long to wait); the /verify-email route; refresh() on AuthProvider so the banner disappears after verifying; banner styles from theme tokens. Checked on the real backend with the Ethereal test inbox at 375 px: banner, cooldown message, resend, the replaced link answering "invalid or expired", the new link verifying, and the banner gone afterwards. Fixed a short "Log in" flash found during that check.
