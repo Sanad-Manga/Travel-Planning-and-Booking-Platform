@@ -3,7 +3,7 @@ import { SWRConfig } from 'swr';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { swrDefaults } from '@/api/useApi';
 import type { AuthUser } from '@/components/AuthProvider';
-import AdminPage from '../../page';
+import AdminLayout from '../../layout';
 import CreateModeratorPage from './page';
 
 const router = { replace: vi.fn(), push: vi.fn() };
@@ -80,7 +80,7 @@ it.each(['guest', 'loading', 'USER', 'AIRLINE_MODERATOR', 'HOTEL_MODERATOR', 'fo
 );
 
 it('links from admin and cancels without requesting providers or creating an account', () => {
-  const entry = render(<AdminPage />);
+  const entry = render(<AdminLayout><h1>Admin dashboard</h1></AdminLayout>);
   expect(screen.getByRole('link', { name: 'Create moderator' })).toHaveAttribute('href', '/admin/moderators/new');
   entry.unmount();
   mount();
