@@ -2247,6 +2247,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List providers by type (ADMIN only)
+         * @description Returns active and inactive providers of the selected type in ascending ID order.
+         */
+        get: operations["ProviderListController_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -14610,6 +14630,75 @@ export interface operations {
             };
             /** @description Unknown or malformed id, or someone else's favourite */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+        };
+    };
+    ProviderListController_list: {
+        parameters: {
+            query: {
+                page?: number;
+                limit?: number;
+                /** @description Kind of provider to list. */
+                type: "hotel" | "airline";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["ProviderListItemDto"][];
+                        /** @example 1 */
+                        page: number;
+                        /** @example 10 */
+                        limit: number;
+                        /** @example 0 */
+                        total: number;
+                        /** @example 0 */
+                        totalPages: number;
+                    };
+                };
+            };
+            /** @description Missing or invalid type, invalid pagination, or unsupported query parameter. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Caller is not an ADMIN. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponseDto"];
+                };
+            };
+            /** @description Providers could not be retrieved. */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

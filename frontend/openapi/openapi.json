@@ -13190,6 +13190,140 @@
           "favourites"
         ]
       }
+    },
+    "/api/admin/providers": {
+      "get": {
+        "description": "Returns active and inactive providers of the selected type in ascending ID order.",
+        "operationId": "ProviderListController_list",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "number"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 10,
+              "type": "number"
+            }
+          },
+          {
+            "name": "type",
+            "required": true,
+            "in": "query",
+            "description": "Kind of provider to list.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "hotel",
+                "airline"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items",
+                    "page",
+                    "limit",
+                    "total",
+                    "totalPages"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ProviderListItemDto"
+                      }
+                    },
+                    "page": {
+                      "type": "integer",
+                      "example": 1
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "example": 10
+                    },
+                    "total": {
+                      "type": "integer",
+                      "example": 0
+                    },
+                    "totalPages": {
+                      "type": "integer",
+                      "example": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing or invalid type, invalid pagination, or unsupported query parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller is not an ADMIN.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Providers could not be retrieved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookie": []
+          }
+        ],
+        "summary": "List providers by type (ADMIN only)",
+        "tags": [
+          "admin"
+        ]
+      }
     }
   },
   "info": {
