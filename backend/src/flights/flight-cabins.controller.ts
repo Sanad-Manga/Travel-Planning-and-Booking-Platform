@@ -1,4 +1,4 @@
-import { Body, Controller, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
@@ -12,8 +12,10 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import {
+  ApiPaginatedResponse,
   AuthenticatedUser,
   CurrentUser,
+  PaginationDto,
   ErrorResponseDto,
   Role,
   Roles,
@@ -42,6 +44,26 @@ import { FlightCabinsService } from './flight-cabins.service';
 @Controller('flights/:id/cabins')
 export class FlightCabinsController {
   constructor(private readonly cabins: FlightCabinsService) {}
+
+  @Get()
+  @Roles(Role.AIRLINE_MODERATOR)
+  @ApiOperation({
+    summary: 'List the cabins of your own flight with ids and seat totals - FLT-04',
+    description:
+      'Paginated, dearest cabin first. Each row has the cabin id (needed to edit it), total, booked, held and available seats, price in integer cents and baggage. Read only: it also works on a cancelled or departed flight.',
+  })
+  @ApiPaginatedResponse(CabinResponseDto)
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: 'Invalid flight id, page or limit',
+  })
+  list(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param() params: FlightIdParamDto,
+    @Query() query: PaginationDto,
+  ) {
+    return this.cabins.list(user, params.id, query);
+  }
 
   @Post()
   @Roles(Role.AIRLINE_MODERATOR)

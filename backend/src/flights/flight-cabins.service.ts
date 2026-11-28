@@ -7,7 +7,16 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { FilterQuery, Model, Types } from 'mongoose';
-import { AuthenticatedUser, FlightStatus, Role } from '../common';
+import {
+  AuthenticatedUser,
+  DEFAULT_PAGE,
+  DEFAULT_PAGE_SIZE,
+  FlightStatus,
+  PaginatedResponse,
+  PaginationDto,
+  Role,
+  toPaginated,
+} from '../common';
 import { CabinResponseDto, toCabinResponse } from './dto/cabin-response.dto';
 import { CreateCabinDto } from './dto/create-cabin.dto';
 import { UpdateCabinDto } from './dto/update-cabin.dto';
@@ -24,6 +33,33 @@ export class FlightCabinsService {
     @InjectModel(Cabin.name) private readonly cabins: Model<Cabin>,
     @InjectModel(Flight.name) private readonly flights: Model<Flight>,
   ) {}
+
+  /**
+   * FLT-04 (read): the cabins of the moderator's own flight, dearest first, with the ids and seat totals the
+   * edit screen needs (the public flight details show neither). Read only, so it works on a cancelled or
+   * departed flight too.
+   */
+  async list(
+    user: AuthenticatedUser,
+    flightId: string,
+    query: Partial<PaginationDto>,
+  ): Promise<PaginatedResponse<CabinResponseDto>> {
+    const flight = await this.ownedFlight(user, flightId);
+    const page = query.page ?? DEFAULT_PAGE;
+    const limit = query.limit ?? DEFAULT_PAGE_SIZE;
+    const filter = { flightId: flight._id };
+    const [rows, total] = await Promise.all([
+      this.cabins
+        .find(filter)
+        .sort({ priceCents: -1, _id: 1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean<CabinLean[]>()
+        .exec(),
+      this.cabins.countDocuments(filter).exec(),
+    ]);
+    return toPaginated(rows.map(toCabinResponse), total, page, limit);
+  }
 
   async create(
     user: AuthenticatedUser,
@@ -125,11 +161,8 @@ export class FlightCabinsService {
     });
   }
 
-  /**
-   * The flight must exist (404), belong to the moderator's airline (403: a flight is public, nothing to hide)
-   * and still be SCHEDULED (409: a cancelled or departed flight is not edited).
-   */
-  private async ownedScheduledFlight(
+  /** The flight must exist (404) and belong to the moderator's airline (403: a flight is public, nothing to hide). */
+  private async ownedFlight(
     user: AuthenticatedUser,
     flightId: string,
   ): Promise<FlightLean> {
@@ -145,6 +178,15 @@ export class FlightCabinsService {
     if (flight.airlineId.toString() !== user.airlineId) {
       throw new ForbiddenException('You can only manage your own flights');
     }
+    return flight;
+  }
+
+  /** As `ownedFlight`, and the flight must still be SCHEDULED (409: a cancelled or departed flight is not edited). */
+  private async ownedScheduledFlight(
+    user: AuthenticatedUser,
+    flightId: string,
+  ): Promise<FlightLean> {
+    const flight = await this.ownedFlight(user, flightId);
     const status = effectiveFlightStatus(flight);
     if (status !== FlightStatus.SCHEDULED) {
       throw new ConflictException(
