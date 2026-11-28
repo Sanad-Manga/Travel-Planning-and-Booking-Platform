@@ -1,0 +1,367 @@
+<title>Platform Architecture</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+<style>
+  /* Layout concept: a quiet reading page. Left rail of documents, one calm column of text, diagrams on
+     their own light-bordered panels. Colours are the platform theme tokens (docs: frontend/docs/theme.md). */
+  :root {
+    --bg: #f5f3ee; --surface: #fcfbf8; --surface-2: #ece9e1;
+    --border: #dfdbd0; --border-strong: #85807a;
+    --fg: #22232a; --muted: #5a5b63;
+    --accent: #2d6370; --accent-hover: #224f5a; --accent-soft: #dde8e8; --on-accent: #ffffff;
+    --good-bg: #e6efe8; --good-fg: #2f6b45;
+    --warn-bg: #f5ebd6; --warn-fg: #8a5a12;
+    --bad-bg: #f6e4e1; --bad-fg: #a33a32;
+    --font: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+    --radius: 5px; --radius-lg: 8px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme='light']) {
+      --bg: #171614; --surface: #1f1e1b; --surface-2: #282622;
+      --border: #36332e; --border-strong: #7d766a;
+      --fg: #ece8e0; --muted: #a8a196;
+      --accent: #88b9c3; --accent-hover: #a2cad2; --accent-soft: #1d2e31; --on-accent: #0f2024;
+      --good-bg: #1c2a21; --good-fg: #8fcba5;
+      --warn-bg: #33291a; --warn-fg: #e0b873;
+      --bad-bg: #351f1c; --bad-fg: #e8a39b;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme='dark'] {
+    --bg: #171614; --surface: #1f1e1b; --surface-2: #282622;
+    --border: #36332e; --border-strong: #7d766a;
+    --fg: #ece8e0; --muted: #a8a196;
+    --accent: #88b9c3; --accent-hover: #a2cad2; --accent-soft: #1d2e31; --on-accent: #0f2024;
+    --good-bg: #1c2a21; --good-fg: #8fcba5;
+    --warn-bg: #33291a; --warn-fg: #e0b873;
+    --bad-bg: #351f1c; --bad-fg: #e8a39b;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; scroll-padding-top: 7.5rem; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: var(--font); font-size: 16px; line-height: 1.6;
+    padding-block: 0;
+  }
+  body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 30; background: var(--surface); }
+  a { color: var(--accent); text-underline-offset: 2px; }
+  a:hover { color: var(--accent-hover); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+  .wrap {
+    max-width: 82rem; margin-inline: auto;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+
+  /* Header */
+  .top {
+    position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20;
+    background: var(--surface); border-bottom: 1px solid var(--border);
+  }
+  .top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-block: 0.7rem; flex-wrap: wrap; }
+  .brand { display: flex; flex-direction: column; min-width: 0; }
+  .brand strong { font-size: 1.05rem; font-weight: 600; letter-spacing: -0.01em; }
+  .brand span { font-size: 0.8rem; color: var(--muted); }
+  .brand code { font-family: var(--mono); font-size: 0.78rem; background: var(--surface-2); padding: 0.05rem 0.35rem; border-radius: 3px; }
+  .theme { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius); overflow: hidden; }
+  .theme button {
+    font: inherit; font-size: 0.8rem; background: transparent; color: var(--fg); border: 0;
+    padding: 0.35rem 0.75rem; min-height: 2rem; cursor: pointer;
+  }
+  .theme button + button { border-left: 1px solid var(--border-strong); }
+  .theme button[aria-pressed='true'] { background: var(--accent); color: var(--on-accent); }
+
+  /* Document rail */
+  .shell { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; align-items: start; }
+  .rail {
+    position: sticky; top: calc(env(safe-area-inset-top, 0px) + 3.6rem); z-index: 10;
+    background: var(--bg); border-bottom: 1px solid var(--border);
+    display: flex; gap: 0.4rem; overflow-x: auto; padding-block: 0.6rem;
+  }
+  .rail a {
+    white-space: nowrap; text-decoration: none; color: var(--muted); font-size: 0.85rem;
+    padding: 0.3rem 0.7rem; border: 1px solid var(--border); border-radius: 999px; background: var(--surface);
+  }
+  .rail a[aria-current='true'] { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
+  @media (min-width: 62rem) {
+    .shell { grid-template-columns: 13.5rem minmax(0, 1fr); column-gap: 3rem; }
+    .rail {
+      top: calc(env(safe-area-inset-top, 0px) + 5rem); flex-direction: column; overflow: visible;
+      border-bottom: 0; padding-block: 2rem; background: transparent; gap: 0.15rem;
+    }
+    .rail a { border: 0; border-radius: var(--radius); background: transparent; padding: 0.4rem 0.7rem; white-space: normal; }
+    .rail a:hover { background: var(--surface-2); }
+    .rail a[aria-current='true'] { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+  }
+
+  /* Reading column */
+  main { min-width: 0; padding-block: 1.5rem 5rem; }
+  section.doc { padding-block: 0 3.5rem; margin-block-end: 3rem; border-bottom: 1px solid var(--border); min-width: 0; }
+  section.doc:last-child { border-bottom: 0; }
+  h1, h2, h3 { line-height: 1.25; text-wrap: balance; letter-spacing: -0.01em; }
+  h1 { font-size: 1.9rem; font-weight: 600; margin: 0.5rem 0 0.75rem; }
+  h2 { font-size: 1.3rem; font-weight: 600; margin: 2.4rem 0 0.6rem; }
+  h3 { font-size: 1.05rem; font-weight: 600; margin: 1.8rem 0 0.4rem; }
+  p, li { max-width: 72ch; }
+  p { margin: 0.7rem 0; }
+  ul, ol { padding-left: 1.3rem; }
+  li { margin: 0.25rem 0; }
+  code { font-family: var(--mono); font-size: 0.86em; background: var(--surface-2); padding: 0.1rem 0.3rem; border-radius: 3px; overflow-wrap: anywhere; }
+  pre { background: var(--surface-2); padding: 0.8rem 1rem; border-radius: var(--radius); overflow-x: auto; }
+  pre code { background: transparent; padding: 0; }
+  hr { border: 0; border-top: 1px solid var(--border); margin: 2rem 0; }
+  blockquote {
+    margin: 0.6rem 0 1.2rem; padding: 0.35rem 0.8rem; border-left: 2px solid var(--accent);
+    background: var(--surface); color: var(--muted); font-size: 0.86rem; max-width: none;
+  }
+  blockquote p { margin: 0.2rem 0; max-width: none; }
+  .tablewrap { overflow-x: auto; margin: 1rem 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 0.88rem; line-height: 1.45; }
+  th, td { text-align: left; vertical-align: top; padding: 0.55rem 0.75rem; border-bottom: 1px solid var(--border); min-width: 7rem; }
+  td p, th p { margin: 0; }
+  th { font-weight: 600; background: var(--surface-2); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+  tr:last-child td { border-bottom: 0; }
+
+  .sev { display: inline-block; font-size: 0.75rem; font-weight: 600; padding: 0.05rem 0.5rem; border-radius: 999px; letter-spacing: 0.02em; vertical-align: middle; }
+  .sev-high { background: var(--bad-bg); color: var(--bad-fg); }
+  .sev-medium { background: var(--warn-bg); color: var(--warn-fg); }
+  .sev-low { background: var(--accent-soft); color: var(--accent); }
+  .sev-info { background: var(--surface-2); color: var(--muted); }
+
+  /* Diagrams */
+  figure.diagram { margin: 1.2rem 0 1.6rem; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
+  figure.diagram .bar { display: flex; justify-content: flex-end; padding: 0.35rem 0.5rem 0; }
+  figure.diagram button {
+    font: inherit; font-size: 0.78rem; color: var(--muted); background: transparent; border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 0.2rem 0.6rem; cursor: pointer; min-height: 1.8rem;
+  }
+  figure.diagram button:hover { color: var(--fg); border-color: var(--border-strong); }
+  .diagram-body { overflow-x: auto; padding: 0.5rem 1rem 1rem; text-align: center; min-height: 6rem; }
+  .diagram-body svg { max-width: 100%; height: auto; }
+  .diagram-body foreignObject { overflow: visible; }
+  .diagram-body .nodeLabel, .diagram-body .edgeLabel { overflow: visible; }
+  .diagram-body .pending { color: var(--muted); font-size: 0.85rem; padding: 2rem 0; }
+  .diagram-body .err { text-align: left; color: var(--bad-fg); font-size: 0.85rem; }
+  figure.diagram.expanded {
+    position: fixed; inset: 0; z-index: 40; margin: 0; border-radius: 0; overflow: auto;
+    padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  figure.diagram.expanded .bar { position: sticky; top: 0; background: var(--surface); padding-block: 0.5rem; }
+  figure.diagram.expanded .diagram-body { overflow: visible; }
+
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+</style>
+
+<header class="top">
+  <div class="wrap">
+    <div class="brand">
+      <strong>Platform architecture</strong>
+      <span>C4 levels 1 to 3 · verified against <code id="sha"></code> on <span id="date"></span></span>
+    </div>
+    <div class="theme" role="group" aria-label="Colour theme">
+      <button type="button" data-mode="auto" aria-pressed="true">Auto</button>
+      <button type="button" data-mode="light" aria-pressed="false">Light</button>
+      <button type="button" data-mode="dark" aria-pressed="false">Dark</button>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="shell">
+    <nav class="rail" id="rail" aria-label="Documents"></nav>
+    <main id="content"></main>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.1/mermaid.min.js"></script>
+<script>
+  const DATA = __DATA__;
+  const root = document.documentElement;
+  const GITHUB = 'https://github.com/Sanad-Manga/Travel-Planning-and-Booking-Platform/blob/develop/docs/';
+  const sources = [];            // mermaid source per diagram index
+  window.__diagramErrors = [];
+
+  document.getElementById('sha').textContent = DATA.meta.sha;
+  document.getElementById('date').textContent = DATA.meta.date;
+
+  /* ---------- Markdown to HTML ---------- */
+  const slug = (text) => text.toLowerCase().trim().replace(/[^\w\- ]+/g, '').replace(/ /g, '-');
+  const escapeHtml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const names = DATA.docs.map((d) => d.name);
+  let currentDoc = '';
+
+  function mapHref(href) {
+    if (!href) return href;
+    if (/^https?:/.test(href)) return href;
+    if (href.startsWith('#')) return '#' + currentDoc + '--' + href.slice(1);
+    const m = /^([^#]+)\.md(?:#(.*))?$/.exec(href);
+    if (m && names.includes(m[1])) return m[2] ? '#' + m[1] + '--' + m[2] : '#doc-' + m[1];
+    if (href.startsWith('../')) return GITHUB + href.slice(3);
+    return href;
+  }
+
+  const renderer = new marked.Renderer();
+  renderer.heading = (text, level, raw) => `<h${level} id="${currentDoc}--${slug(raw)}">${text}</h${level}>`;
+  renderer.link = (href, title, text) => {
+    const target = mapHref(href);
+    const external = /^https?:/.test(target);
+    return `<a href="${target}"${external ? ' target="_blank" rel="noopener"' : ''}>${text}</a>`;
+  };
+  renderer.table = (header, body) => `<div class="tablewrap"><table><thead>${header}</thead><tbody>${body}</tbody></table></div>`;
+  renderer.code = (code, info) => {
+    if ((info || '').trim() === 'mermaid') {
+      const i = sources.push(code) - 1;
+      return `<figure class="diagram"><div class="bar"><button type="button" data-expand>Expand</button></div><div class="diagram-body" data-i="${i}"><div class="pending">Drawing diagram...</div></div></figure>`;
+    }
+    return `<pre><code>${escapeHtml(code)}</code></pre>`;
+  };
+  marked.setOptions({ renderer, gfm: true, mangle: false, headerIds: false });
+
+  const rail = document.getElementById('rail');
+  const content = document.getElementById('content');
+  for (const doc of DATA.docs) {
+    currentDoc = doc.name;
+    const md = doc.markdown.replace(/<a id="([^"]+)"><\/a>/g, `<a id="${doc.name}--$1"></a>`);
+    const section = document.createElement('section');
+    section.className = 'doc';
+    section.id = 'doc-' + doc.name;
+    section.innerHTML = marked.parse(md);
+    content.appendChild(section);
+    const link = document.createElement('a');
+    link.href = '#doc-' + doc.name;
+    link.textContent = doc.label;
+    link.dataset.doc = doc.name;
+    rail.appendChild(link);
+  }
+
+  /* Severity badges in the findings tables and headings */
+  document.querySelectorAll('td').forEach((td) => {
+    const t = td.textContent.trim();
+    if (/^(High|Medium|Low|Info)$/.test(t)) td.innerHTML = `<span class="sev sev-${t.toLowerCase()}">${t}</span>`;
+  });
+  document.querySelectorAll('#doc-FINDINGS h2').forEach((h) => {
+    h.innerHTML = h.innerHTML.replace(/\((High|Medium|Low|Info)\)/, (m, s) => `<span class="sev sev-${s.toLowerCase()}">${s}</span>`);
+  });
+
+  /* ---------- Theme ---------- */
+  const THEMES = {
+    light: {
+      background: '#fcfbf8', primaryColor: '#f1efe8', primaryTextColor: '#22232a', primaryBorderColor: '#85807a',
+      lineColor: '#85807a', textColor: '#22232a', edgeLabelBackground: '#fcfbf8',
+      clusterBkg: '#f5f3ee', clusterBorder: '#dfdbd0', secondaryColor: '#ece9e1', tertiaryColor: '#f5f3ee',
+      actorBkg: '#dde8e8', actorBorder: '#2d6370', actorTextColor: '#22232a', actorLineColor: '#85807a',
+      signalColor: '#5a5b63', signalTextColor: '#22232a', labelBoxBkgColor: '#ece9e1', labelBoxBorderColor: '#85807a',
+      labelTextColor: '#22232a', loopTextColor: '#22232a', noteBkgColor: '#f5ebd6', noteTextColor: '#22232a',
+      noteBorderColor: '#8a5a12', activationBkgColor: '#dde8e8', activationBorderColor: '#2d6370',
+      sequenceNumberColor: '#ffffff', fontFamily: 'Inter, system-ui, sans-serif',
+    },
+    dark: {
+      background: '#1f1e1b', primaryColor: '#26241f', primaryTextColor: '#ece8e0', primaryBorderColor: '#7d766a',
+      lineColor: '#a8a196', textColor: '#ece8e0', edgeLabelBackground: '#1f1e1b',
+      clusterBkg: '#171614', clusterBorder: '#36332e', secondaryColor: '#282622', tertiaryColor: '#171614',
+      actorBkg: '#1d2e31', actorBorder: '#88b9c3', actorTextColor: '#ece8e0', actorLineColor: '#7d766a',
+      signalColor: '#a8a196', signalTextColor: '#ece8e0', labelBoxBkgColor: '#282622', labelBoxBorderColor: '#7d766a',
+      labelTextColor: '#ece8e0', loopTextColor: '#ece8e0', noteBkgColor: '#33291a', noteTextColor: '#ece8e0',
+      noteBorderColor: '#c9a15a', activationBkgColor: '#1d2e31', activationBorderColor: '#88b9c3',
+      sequenceNumberColor: '#0f2024', fontFamily: 'Inter, system-ui, sans-serif',
+    },
+  };
+  /* The class colours inside each diagram are written for the light theme; this maps them for dark. */
+  const DARK_MAP = [
+    ['color:#ffffff', 'color:#0f2024'], ['fill:#ffffff', 'fill:#1f1e1b'], ['fill:#2d6370', 'fill:#88b9c3'],
+    ['stroke:#2d6370', 'stroke:#88b9c3'], ['stroke:#224f5a', 'stroke:#a2cad2'], ['fill:#e7e3d9', 'fill:#2b2822'],
+    ['fill:#f1efe8', 'fill:#26241f'], ['fill:#dde8e8', 'fill:#1d2e31'], ['fill:#f5ebd6', 'fill:#33291a'],
+    ['fill:#ece9e1', 'fill:#232220'], ['stroke:#85807a', 'stroke:#7d766a'], ['stroke:#8a5a12', 'stroke:#c9a15a'],
+    ['color:#22232a', 'color:#ece8e0'], ['color:#5a5b63', 'color:#a8a196'],
+  ];
+  const forDark = (src) => DARK_MAP.reduce((s, [a, b]) => s.split(a).join(b), src);
+
+  function effective() {
+    const set = root.getAttribute('data-theme');
+    if (set === 'dark' || set === 'light') return set;
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+
+  let drawing = 0;
+  // Mermaid sizes every box from the text width at draw time, so the web font must be loaded first,
+  // otherwise labels are measured in a narrower fallback font and the real text is cut off.
+  const fontsReady = Promise.all([
+    document.fonts.load('400 16px Inter'), document.fonts.load('500 16px Inter'), document.fonts.load('600 16px Inter'),
+  ]).then(() => document.fonts.ready).catch(() => undefined);
+
+  async function drawAll() {
+    await fontsReady;
+    const token = ++drawing;
+    const theme = effective();
+    mermaid.initialize({
+      startOnLoad: false, securityLevel: 'strict', theme: 'base', themeVariables: THEMES[theme],
+      flowchart: { htmlLabels: true, curve: 'basis', useMaxWidth: true },
+      sequence: { useMaxWidth: true, mirrorActors: false },
+    });
+    const bodies = document.querySelectorAll('.diagram-body');
+    window.__diagramErrors = [];
+    for (const body of bodies) {
+      if (token !== drawing) return;
+      const i = Number(body.dataset.i);
+      const src = theme === 'dark' ? forDark(sources[i]) : sources[i];
+      try {
+        const { svg } = await mermaid.render('diagram-' + token + '-' + i, src);
+        body.innerHTML = svg;
+        const el = body.querySelector('svg');
+        const natural = parseInt(el.style.maxWidth, 10);
+        // Wide diagrams keep a readable size and scroll sideways instead of shrinking to fit.
+        if (natural > 0) { el.dataset.mw = natural; el.style.maxWidth = 'none'; el.style.width = Math.min(natural, 1180) + 'px'; }
+      } catch (e) {
+        window.__diagramErrors.push({ index: i, message: String(e && e.message || e) });
+        body.innerHTML = '<div class="err"><strong>This diagram could not be drawn.</strong><pre>' + escapeHtml(String(e && e.message || e)) + '</pre></div>';
+      }
+    }
+    window.__diagramsDone = true;
+  }
+
+  const buttons = document.querySelectorAll('.theme button');
+  function setMode(mode, persist) {
+    if (mode === 'auto') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', mode);
+    buttons.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
+    if (persist) { try { localStorage.setItem('arch-theme', mode); } catch (e) { /* storage may be blocked */ } }
+    drawAll();
+  }
+  buttons.forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode, true)));
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (!root.getAttribute('data-theme')) drawAll(); });
+
+  /* ---------- Expand and rail highlight ---------- */
+  content.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-expand]');
+    if (!btn) return;
+    const fig = btn.closest('figure');
+    const on = fig.classList.toggle('expanded');
+    btn.textContent = on ? 'Close' : 'Expand';
+    const svg = fig.querySelector('svg');
+    if (svg) svg.style.width = on ? svg.dataset.mw + 'px' : Math.min(Number(svg.dataset.mw), 1180) + 'px';
+    document.body.style.overflow = on ? 'hidden' : '';
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const open = document.querySelector('figure.expanded');
+    if (open) { open.querySelector('[data-expand]').click(); }
+  });
+
+  const links = [...rail.querySelectorAll('a')];
+  const spy = new IntersectionObserver((entries) => {
+    entries.forEach((en) => {
+      if (en.isIntersecting) links.forEach((l) => l.setAttribute('aria-current', String(l.dataset.doc === en.target.id.slice(4))));
+    });
+  }, { rootMargin: '-20% 0px -70% 0px' });
+  document.querySelectorAll('section.doc').forEach((s) => spy.observe(s));
+  links[0].setAttribute('aria-current', 'true');
+
+  let saved = 'auto';
+  try { saved = localStorage.getItem('arch-theme') || 'auto'; } catch (e) { /* ignore */ }
+  setMode(['auto', 'light', 'dark'].includes(saved) ? saved : 'auto', false);
+  if (location.hash.length > 1) setTimeout(() => { const t = document.getElementById(location.hash.slice(1)); if (t) t.scrollIntoView(); }, 50);
+</script>

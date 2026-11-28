@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 import { api } from '@/lib/api';
 import { toFriendlyError, type FriendlyError } from '@/lib/apiError';
+import { homePathFor } from '@/lib/roles';
 import { Alert } from './Alert';
 import { useAuth } from './AuthProvider';
 import { Breadcrumbs } from './Breadcrumbs';
@@ -26,10 +27,10 @@ function checkNewPassword(value: string): string | undefined {
  * ACC-11 / ACC-08: change the password. For a user with a temporary password this is the only usable
  * page; the server then ends the session, so after success the person logs in again with the new one.
  */
-export function ChangePasswordForm() {
+export function ChangePasswordForm({ embedded = false }: { embedded?: boolean } = {}) {
   const router = useRouter();
   const toast = useToast();
-  const { logout, resetSession } = useAuth();
+  const { user, login, logout, resetSession } = useAuth();
 
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -62,8 +63,24 @@ export function ChangePasswordForm() {
       return;
     }
 
-    // Changed. A forced change has already cleared the cookies; an ordinary one is ended here so
-    // the person signs in with the new password. If that call fails the screen still must not keep the old session.
+    // ACC-13 / ACC-07a: a forced change has already ended the session on the server. Sign straight back in
+    // with the new password and go to the role's home; if that fails, fall through to "please log in again".
+    if (user?.mustChangePassword) {
+      try {
+        const me = await login(user.email, newPassword);
+        toast.success('Password changed.');
+        router.replace(homePathFor(me.role));
+        return;
+      } catch {
+        resetSession();
+        toast.success('Password changed, please log in again.');
+        router.replace('/login');
+        return;
+      }
+    }
+
+    // An ordinary change is ended here so the person signs in with the new password.
+    // If that call fails the screen still must not keep the old session.
     try {
       await logout();
     } catch {
@@ -80,8 +97,15 @@ export function ChangePasswordForm() {
 
   return (
     <>
-      <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Change password' }]} />
-      <PageHeader title="Change password" description="Choose a new password. You will then log in again." />
+      {embedded ? (
+        // ACC-08: inside a section of /account, which has its own heading.
+        <p className="field-hint">Enter your current password and a new one. You will then log in again.</p>
+      ) : (
+        <>
+          <Breadcrumbs items={[{ label: 'Home', href: '/' }, { label: 'Change password' }]} />
+          <PageHeader title="Change password" description="Choose a new password. You will then log in again." />
+        </>
+      )}
       <form className="auth-form" onSubmit={onSubmit} noValidate>
         {formError ? (
           <Alert variant="error" hint={formError.hint} onRetry={formError.retryable ? () => void submit() : undefined}>
@@ -119,7 +143,7 @@ export function ChangePasswordForm() {
           onChange={(event) => setConfirm(event.target.value)}
           error={fieldErrors.confirm}
         />
-        <FormActions primaryLabel="Change password" submitting={submitting} submittingLabel="Changing password…" cancelHref="/" />
+        <FormActions primaryLabel="Change password" submitting={submitting} submittingLabel="Changing password…" cancelHref={embedded ? undefined : '/'} />
       </form>
     </>
   );

@@ -31,6 +31,8 @@ interface Auth {
   logout: () => Promise<void>;
   /** Forget the user locally, without calling the API: for when the server has already ended the session. */
   resetSession: () => void;
+  /** Reload the user from GET /api/auth/me (for example after the email was verified). Never rejects. */
+  refresh: () => Promise<void>;
 }
 
 const AuthContext = createContext<Auth | null>(null);
@@ -76,14 +78,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearPendingAction();
   }, []);
 
+  const refresh = useCallback(async () => {
+    try {
+      setUser(await api<AuthUser>('/auth/me', { redirectOn401: false }));
+    } catch {
+      // Keep what we have: the next page load asks again.
+    }
+  }, []);
+
   const resetSession = useCallback(() => {
     setUser(null);
     clearPendingAction();
   }, []);
 
   const value = useMemo<Auth>(
-    () => ({ user, loading, login, logout, resetSession }),
-    [user, loading, login, logout, resetSession],
+    () => ({ user, loading, login, logout, resetSession, refresh }),
+    [user, loading, login, logout, resetSession, refresh],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

@@ -26,10 +26,13 @@ function describeLoginError(error: unknown): FriendlyError {
     return { ...friendly, message: 'This account is suspended.', hint: 'Contact support if you think this is a mistake.' };
   }
   if (error.statusCode === 423) {
+    // ACC-05: the server says how long is left ("... Try again in 12 minutes."); show that, not a fixed 15.
+    const left = /Try again in (\d+ minutes?)/.exec(error.message)?.[1];
     return {
       ...friendly,
-      message: 'This account is locked for 15 minutes after too many failed attempts.',
-      hint: 'Try again later, or reset your password.',
+      retryable: false, // trying again while locked only fails again
+      message: 'This account is locked after too many failed attempts.',
+      hint: left ? `Try again in ${left}, or reset your password.` : 'Try again in up to 15 minutes, or reset your password.',
     };
   }
   return friendly;
