@@ -1,6 +1,6 @@
 import { render } from '@testing-library/react';
 import type { ReactElement } from 'react';
-import { SWRConfig } from 'swr';
+import { SWRConfig, type Cache } from 'swr';
 import { swrDefaults } from '@/api/useApi';
 import { ConfirmProvider } from '@/components/ConfirmProvider';
 
@@ -35,9 +35,10 @@ export const egyptTrip = {
   updatedAt: '2026-11-20T10:00:00.000Z',
 };
 
-export function mountWithProviders(ui: ReactElement) {
+/** Pass the same `cache` twice to model leaving a screen and coming back to it. */
+export function mountWithProviders(ui: ReactElement, cache: Cache = new Map()) {
   return render(
-    <SWRConfig value={{ ...swrDefaults, provider: () => new Map(), dedupingInterval: 0 }}>
+    <SWRConfig value={{ ...swrDefaults, provider: () => cache, dedupingInterval: 0 }}>
       <ConfirmProvider>{ui}</ConfirmProvider>
     </SWRConfig>,
   );

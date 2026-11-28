@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useConfirm } from '@/components/ConfirmProvider';
 import { useToast } from '@/components/ToastProvider';
+import { ApiError } from '@/lib/api';
 import { toFriendlyError } from '@/lib/apiError';
 import { deleteItinerary, updateItinerary, type Visibility } from './api';
 
@@ -10,6 +11,7 @@ interface Target {
   id: string;
   title: string;
   visibility: Visibility;
+  isHidden?: boolean;
 }
 
 /**
@@ -33,7 +35,9 @@ export function useItineraryActions() {
     if (next === 'PUBLIC') {
       const agreed = await confirm({
         title: `Make “${target.title}” public?`,
-        message: 'Anyone, including guests, will be able to find it and read its days, activities and budget. Only you can change it.',
+        message: target.isHidden
+          ? 'An admin hid this itinerary, so others still will not see it.'
+          : 'Anyone, including guests, will be able to find it and read its days, activities and budget. Only you can change it.',
         confirmLabel: 'Make public',
         cancelLabel: 'Keep private',
       });
@@ -67,6 +71,8 @@ export function useItineraryActions() {
       await onDone();
     } catch (error) {
       report(error);
+      // Already gone (deleted in another tab): refresh, or the dead row stays on screen.
+      if (error instanceof ApiError && error.statusCode === 404) await onDone();
     }
   }
 

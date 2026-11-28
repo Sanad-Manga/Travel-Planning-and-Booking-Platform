@@ -52,6 +52,16 @@ describe('EditItinerary (ITN-01, ITN-20)', () => {
     expect(JSON.parse(String(calls('PATCH')[0][1].body))).toEqual({ title: 'Nile trip', countryCodes: ['EG', 'AE'], startDate: '2027-01-05' });
   });
 
+  it('shows the fresh values when the itinerary changed elsewhere, so saving cannot undo that change', async () => {
+    const cache = new Map();
+    const first = mountWithProviders(<EditItinerary id="a1" />, cache);
+    expect(await screen.findByLabelText(/Title/)).toHaveValue('Two weeks in Egypt');
+    first.unmount();
+    stored = { ...stored, title: 'Renamed in another tab' };
+    mountWithProviders(<EditItinerary id="a1" />, cache);
+    await vi.waitFor(() => expect(screen.getByLabelText(/Title/)).toHaveValue('Renamed in another tab'));
+  });
+
   it('says what the visibility is and toggles it', async () => {
     mount();
     expect(await screen.findByText('Only you can see this itinerary.')).toBeInTheDocument();

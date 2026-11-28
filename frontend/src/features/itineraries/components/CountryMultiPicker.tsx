@@ -21,8 +21,8 @@ export function CountryMultiPicker({ value, onChange, error }: CountryMultiPicke
     <div className="country-multi">
       <ReferencePicker
         label="Countries"
-        required
-        hint="Add every country you plan to visit."
+        // Not `required`: that would mark the always-empty search box as missing even after countries are chosen.
+        hint="Required. Add every country you plan to visit."
         options={options}
         value=""
         onChange={(code) => {

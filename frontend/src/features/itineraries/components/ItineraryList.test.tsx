@@ -103,6 +103,27 @@ describe('ItineraryList (ITN-03)', () => {
     expect(JSON.parse(String(calls('PATCH')[1][1].body))).toEqual({ visibility: 'PRIVATE' });
   });
 
+  it('drops a row that was already deleted elsewhere', async () => {
+    mountWithProviders(<ItineraryList />);
+    const button = await screen.findByRole('button', { name: 'Delete: Two weeks in Egypt' });
+    rows = [];
+    fetchMock.mockImplementation((url: string) =>
+      Promise.resolve(url.startsWith('/api/countries') ? json(countries) : url.startsWith('/api/itineraries?') ? json(page(rows)) : apiError(404, 'Itinerary not found')),
+    );
+    await userEvent.click(button);
+    await userEvent.click(within(dialog()).getByRole('button', { name: 'Delete itinerary' }));
+    expect(await screen.findByText('No itineraries yet')).toBeInTheDocument();
+    expect(toast.error).toHaveBeenCalled();
+  });
+
+  it('does not promise readers when an admin has hidden the trip', async () => {
+    rows = [{ ...egyptTrip, isHidden: true }];
+    mountWithProviders(<ItineraryList />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Make public: Two weeks in Egypt' }));
+    expect(dialog()).toHaveTextContent('An admin hid this itinerary, so others still will not see it.');
+    expect(dialog()).not.toHaveTextContent('Anyone, including guests');
+  });
+
   it('keeps the row and says why when a delete fails', async () => {
     failWrites = true;
     mountWithProviders(<ItineraryList />);

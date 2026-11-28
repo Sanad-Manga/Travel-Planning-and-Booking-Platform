@@ -50,6 +50,9 @@ export function EditItinerary({ id }: { id: string }) {
       <div className="itinerary-sections">
         <Card title="Basics">
           <ItineraryForm
+            // A form reads its values once. Remounting when the SAVED basics change stops it from sending stale
+            // cached values back; sharing changes do not remount it, so typed edits survive them.
+            key={JSON.stringify([data.title, data.countryCodes, data.startDate])}
             defaultValues={{ title: data.title, countryCodes: data.countryCodes, startDate: data.startDate }}
             submitLabel="Save changes"
             submittingLabel="Saving…"
