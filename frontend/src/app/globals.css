@@ -1668,6 +1668,10 @@ a.btn {
     justify-self: start;
     text-align: left;
   }
+   CHECKOUT (PAY-01 / PAY-02): the cards above the payment form keep the standard gap between them.
+   ============================================================================================= */
+.checkout > .card {
+  margin-bottom: var(--space-4);
 }
 
 /* =============================================================================================
