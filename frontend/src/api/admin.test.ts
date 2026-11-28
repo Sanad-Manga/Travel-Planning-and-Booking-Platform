@@ -1,7 +1,9 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { setUnauthorizedHandler } from '@/lib/api';
-import { adminAccountsPath, reactivateAccount, resetAccountPassword, suspendAccount } from './admin';
-import { adminProvidersPath, createModerator, type CreateModeratorBody } from './admin';
+import {
+  adminAccountsPath, adminProvidersPath, createModerator, reactivateAccount,
+  resetAccountPassword, suspendAccount, type CreateModeratorBody,
+} from './admin';
 
 afterEach(() => {
   setUnauthorizedHandler(null);
@@ -29,6 +31,8 @@ it('propagates a reset failure and redirects a lost session without refreshing o
   await expect(resetAccountPassword('target')).rejects.toMatchObject({ status: 401 });
   expect(redirect).toHaveBeenCalledOnce();
   expect(http).toHaveBeenCalledTimes(1);
+});
+
 const base = { name: 'Synthetic Moderator', email: 'moderator@example.test', temporaryPassword: 'Synthetic9Pass' };
 const id = '6730a1f2c3d4e5f607182931';
 
