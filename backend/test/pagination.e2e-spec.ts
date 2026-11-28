@@ -248,6 +248,12 @@ describe('pagination on every list endpoint (GEN-05, whole app)', () => {
       auth: 'airlineModerator',
     },
     {
+      // FLT-04: the cabins of the moderator's own flight; envelope and limits here, the rows in flight-cabins-list.spec.ts
+      swagger: '/api/flights/{id}/cabins',
+      url: `/api/flights/${pagingFlightId.toHexString()}/cabins`,
+      auth: 'airlineModerator',
+    },
+    {
       swagger: '/api/hotels/search',
       url: '/api/hotels/search',
       auth: 'none',
