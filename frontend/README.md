@@ -36,7 +36,7 @@ npm run gen:api        # backend running on :3001: reads http://localhost:3001/a
 npm run gen:api:file   # no backend: regenerates from the committed openapi/openapi.json
 ```
 
-- `openapi/openapi.json` is the snapshot of the Swagger document the types were generated from. When the backend changes, run `gen:api` against it, then commit `openapi/openapi.json` and `src/api/schema.d.ts` together (save the document with `curl http://localhost:3001/api/docs-json -o openapi/openapi.json` first). Never edit `schema.d.ts` by hand.
+- Before shipping a backend contract change, save the current Swagger document (for example, `curl http://localhost:3001/api/docs-json -o openapi/openapi.json`) and run `npm run gen:api:file`. Include both `openapi/openapi.json` and `src/api/schema.d.ts` together. Never edit `schema.d.ts` by hand.
 - **Types:** import from `@/api/types`: `Schema<'CountryResponseDto'>`, `ResponseOf<'/api/auth/me'>`, `BodyOf<'/api/auth/login', 'post'>`, `QueryOf<'/api/airports'>`, `Page<T>`.
 - **One file per backend module** in `src/api/` (see `referenceData.ts`), one function per endpoint, named like the action (`listAirports`, `getMe`, `createBooking`). Functions call `api()` from `@/lib/api` (cookies, one refresh on 401, `ApiError`), never `fetch`.
 - **Reading data:** `useApi<T>(key)` from `@/api/useApi`. The key is the API path with its query (`airportsKey({ limit: 10 })`). Pass `null` to wait. Show `isLoading` with `Skeleton`, `error` with `toFriendlyError`, an empty list with `EmptyState`. 4xx answers are not retried.
@@ -67,54 +67,43 @@ files again to retry. A failed deletion retains the preview, and its delete butt
 Previews use the server's `/uploads/…` URL directly, so cookie-protected images go through the
 same-origin rewrite. The server still validates the image content and enforces ownership and capacity.
 
+Use the shared API helpers for the callbacks. The helpers send the file as multipart field
+`image` and preserve the shared client's cookie authentication and one refresh on an explicit 401.
+Network and server failures are passed back to the caller.
+
 ```tsx
-'use client';
-
-import { useState } from 'react';
-import type { ResponseOf } from '@/api/types';
+import { removeImage, uploadImage } from '@/api/uploads';
 import { ImageUploader, type ImageReference } from '@/components/ImageUploader';
-import { api } from '@/lib/api';
 
-function imageBody(file: File) {
-  const body = new FormData();
-  body.append('image', file);
-  return body;
-}
+const postImages = (id: string) => ({
+  upload: (file: File) => uploadImage({ kind: 'post', id }, file),
+  remove: (image: ImageReference) => removeImage({ kind: 'post', id, imageId: image.id }),
+});
 
-export function PostImages({ id, initialImages }: { id: string; initialImages: ImageReference[] }) {
-  const [images, setImages] = useState(initialImages);
-  const path = `/api/posts/${encodeURIComponent(id)}/images`;
-  return (
-    <ImageUploader label="Post images" images={images} onChange={setImages}
-      upload={(file) => api<ResponseOf<'/api/posts/{id}/images', 'post'>>(path, {
-        method: 'POST', body: imageBody(file),
-      })}
-      remove={(image) => api<void>(`${path}/${encodeURIComponent(image.id)}`, { method: 'DELETE' })}
-    />
-  );
-}
+const hotelPhotos = (id: string) => ({
+  upload: (file: File) => uploadImage({ kind: 'hotel', id }, file),
+  remove: (image: ImageReference) => removeImage({ kind: 'hotel', id, imageId: image.id }),
+});
 
-export function AirlineLogo({ id, logoUrl }: { id: string; logoUrl?: string | null }) {
-  const [images, setImages] = useState<ImageReference[]>(logoUrl ? [{ id, url: logoUrl }] : []);
-  const path = `/api/airlines/${encodeURIComponent(id)}/logo`;
-  return (
-    <ImageUploader label="Airline logo" maxImages={1} images={images} onChange={setImages}
-      upload={(file) => api<ResponseOf<'/api/airlines/{id}/logo', 'post'>>(path, {
-        method: 'POST', body: imageBody(file),
-      })}
-      remove={() => api<void>(path, { method: 'DELETE' })}
-    />
-  );
-}
+const airlineLogo = (id: string) => ({
+  maxImages: 1,
+  upload: (file: File) => uploadImage({ kind: 'airline', id }, file),
+  remove: () => removeImage({ kind: 'airline', id }),
+});
+
+const activityImages = (id: string) => ({
+  upload: (file: File) => uploadImage({ kind: 'activity', id }, file),
+  remove: (image: ImageReference) => removeImage({ kind: 'activity', id, imageId: image.id }),
+});
+
+// In a client component with images and setImages state:
+<ImageUploader label="Post images" images={images} onChange={setImages} {...postImages(postId)} />
 ```
 
-All four POST routes take one file in the multipart field `image`. Pass `FormData` as the body
-so the browser adds its boundary. Hotel photos use `/api/hotels/:id/photos` and return `{ id, url }`
-like posts and logos. Activity uploads use `/api/activities/:id/images` and return the updated
-`ActivityDto`. The activity service appends the new reference to its `images` array, so the upload
-adapter can return the last entry. Post, hotel and activity deletes append the image ID to the
-collection path. Airline logo deletion uses the same path as upload, so an existing `logoUrl` can
-use the airline ID as its local preview key. Every successful deletion returns 204.
+Airline logo deletion takes only the airline ID. An existing `logoUrl` can use that ID as its
+local preview key. Activity uploads return the updated activity. The helper picks the newly
+appended image from the end of its `images` array. If the response cannot identify the image,
+reload the activity before retrying because the file may already have been attached.
 
 ## Server-paginated lists (GEN-05)
 
