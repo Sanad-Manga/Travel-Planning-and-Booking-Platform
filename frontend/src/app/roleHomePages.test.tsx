@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Role } from '@/lib/roles';
-import AdminPage from './admin/page';
+import AdminLayout from './admin/layout';
 import AirlinePage from './airline/page';
 import BookingsPage from './bookings/page';
 import HotelPage from './hotel/page';
@@ -15,13 +15,24 @@ beforeEach(() => {
 });
 
 const pages = [
-  ['Admin', AdminPage, 'ADMIN'],
   ['Airline', AirlinePage, 'AIRLINE_MODERATOR'],
   ['Hotel', HotelPage, 'HOTEL_MODERATOR'],
   ['My bookings', BookingsPage, 'USER'],
 ] as const;
 
 describe('role home pages (ACC-04)', () => {
+  it.each(['ADMIN', 'USER', null] as const)('enforces the admin home guard for %s', (role) => {
+    auth = { user: role ? { id: 'u', role } : null, loading: false };
+    render(<AdminLayout><h1>Admin dashboard</h1></AdminLayout>);
+    if (role === 'ADMIN') {
+      expect(screen.getByRole('heading', { level: 1, name: 'Admin dashboard' })).toBeInTheDocument();
+      expect(screen.getByRole('navigation', { name: 'Admin navigation' })).toBeInTheDocument();
+    } else {
+      expect(screen.queryByRole('heading', { level: 1, name: 'Admin dashboard' })).toBeNull();
+      if (role === 'USER') expect(screen.getByRole('alert')).toHaveTextContent('You do not have access to this page');
+    }
+  });
+
   it.each(pages)('%s shows its heading to the right role', (name, Page, role) => {
     auth = { user: { id: 'u', role }, loading: false };
     render(<Page />);
@@ -34,9 +45,8 @@ describe('role home pages (ACC-04)', () => {
     expect(screen.queryByRole('heading', { level: 1, name })).toBeNull();
   });
 
-  it.each(pages)('%s tells another role they have no access', (name, Page, role) => {
-    const other: Role = role === 'ADMIN' ? 'USER' : 'ADMIN';
-    auth = { user: { id: 'u', role: other }, loading: false };
+  it.each(pages)('%s tells another role they have no access', (name, Page) => {
+    auth = { user: { id: 'u', role: 'ADMIN' }, loading: false };
     render(<Page />);
     expect(screen.queryByRole('heading', { level: 1, name })).toBeNull();
     expect(screen.getByRole('alert')).toHaveTextContent('You do not have access to this page');
