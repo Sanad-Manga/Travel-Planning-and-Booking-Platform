@@ -92,6 +92,7 @@ describe('FlightSearchPanel (FLT-11, FLT-12, FLT-15)', () => {
     mount(toFlightSearchQuery(form));
 
     expect(await screen.findByText('EgyptAir')).toBeInTheDocument();
+    expect(screen.getByText('1 flight')).toBeInTheDocument();
     expect(screen.getByText(/14:30/)).toBeInTheDocument();
     expect(screen.getByText(/19:45/)).toBeInTheDocument();
     expect(screen.getByText(/\$450\.00/)).toBeInTheDocument();

@@ -112,7 +112,9 @@ function FlightResults({
           </p>
         </div>
         <p className="flight-results-count" aria-live="polite">
-          {roundTrip ? `${outbound.total} outbound · ${data.return.total} return` : `${outbound.total} flights`}
+          {roundTrip
+            ? `${outbound.total} outbound · ${data.return.total} return`
+            : `${outbound.total} ${outbound.total === 1 ? 'flight' : 'flights'}`}
         </p>
       </div>
 
