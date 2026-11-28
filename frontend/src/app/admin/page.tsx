@@ -10,6 +10,7 @@ export default function AdminPage() {
     <RequireRole roles={['ADMIN']}>
       <ComingSoon title="Admin" description="Manage users, providers and reports." />
       <Link className="btn btn-primary" href="/admin/moderators/new">Create moderator</Link>
+      <Link className="btn" href="/admin/providers">Manage providers</Link>
     </RequireRole>
   );
 }

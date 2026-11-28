@@ -1,0 +1,54 @@
+.page {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.page > :global(.card),
+.fieldset {
+  min-width: 0;
+}
+
+.fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.fields,
+.reference {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.fields :global(.field),
+.reference :global(.field) {
+  min-width: 0;
+}
+
+.selector {
+  max-width: 18rem;
+  margin-block-end: var(--space-4);
+}
+
+.fields textarea {
+  resize: vertical;
+}
+
+.reference :global(.list-pagination) {
+  margin-block: 0;
+}
+
+.page :global(.alert-action) {
+  min-block-size: var(--touch-target);
+}
+
+@media (min-width: 40rem) {
+  .fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .wide {
+    grid-column: 1 / -1;
+  }
+}

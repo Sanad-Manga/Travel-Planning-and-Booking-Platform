@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { setUnauthorizedHandler } from '@/lib/api';
-import { adminProvidersPath, createModerator, type CreateModeratorBody } from './admin';
+import { adminProvidersPath, createModerator, deactivateProvider, reactivateProvider, type CreateModeratorBody } from './admin';
 
 afterEach(() => {
   setUnauthorizedHandler(null);
@@ -32,4 +32,26 @@ it('propagates a 401 and uses the unauthorized handler without a refresh or repl
   await expect(createModerator({ ...base, role: 'AIRLINE_MODERATOR', airlineId: id })).rejects.toMatchObject({ status: 401 });
   expect(redirect).toHaveBeenCalledOnce();
   expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  [deactivateProvider, 'airline', 'deactivate', false],
+  [reactivateProvider, 'hotel', 'reactivate', true],
+] as const)('patches provider status without a body', async (change, type, action, isActive) => {
+  const response = { type, id: 'a/b?', isActive };
+  const http = vi.fn().mockResolvedValue(Response.json(response));
+  vi.stubGlobal('fetch', http);
+  await expect(change(type, response.id)).resolves.toEqual(response);
+  const url = '/api/admin/providers/' + type + '/a%2Fb%3F/' + action;
+  expect(http).toHaveBeenCalledExactlyOnceWith(url, expect.objectContaining({ method: 'PATCH', body: undefined, credentials: 'include' }));
+});
+
+it('redirects a provider status 401 without replaying the mutation', async () => {
+  const redirect = vi.fn();
+  setUnauthorizedHandler(redirect);
+  const http = vi.fn().mockResolvedValue(Response.json({}, { status: 401 }));
+  vi.stubGlobal('fetch', http);
+  await expect(deactivateProvider('hotel', id)).rejects.toMatchObject({ status: 401 });
+  expect(redirect).toHaveBeenCalledOnce();
+  expect(http).toHaveBeenCalledTimes(1);
 });
