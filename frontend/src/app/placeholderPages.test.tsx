@@ -3,14 +3,12 @@ import { describe, expect, it } from 'vitest';
 import BlogPage from './blog/page';
 import FlightsPage from './flights/page';
 import HotelsPage from './hotels/page';
-import ItinerariesPage from './itineraries/page';
 import ForgotPasswordPage from './forgot-password/page';
 import HomePage from './page';
 
 const pages = [
   ['Flights', FlightsPage],
   ['Hotels', HotelsPage],
-  ['Itineraries', ItinerariesPage],
   ['Blog', BlogPage],
   ['Forgot password', ForgotPasswordPage],
 ] as const;
