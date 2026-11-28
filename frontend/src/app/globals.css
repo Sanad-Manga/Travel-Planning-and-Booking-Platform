@@ -1456,6 +1456,221 @@ a.btn {
 }
 
 /* =============================================================================================
+   FLIGHT SEARCH (FLT-11 / FLT-12 / FLT-15): form, filters, and one card per flight with airport-local
+   times and cabin fares. Works at phone width: every grid falls back to one column.
+   ============================================================================================= */
+.flight-search {
+  display: grid;
+  gap: var(--space-6);
+}
+.flight-search-card {
+  display: grid;
+  gap: var(--space-4);
+}
+.flight-search-grid {
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+}
+.flight-intro p {
+  margin: 0 0 var(--space-2);
+}
+.flight-intro > :last-child {
+  margin-bottom: 0;
+}
+
+.flight-results {
+  display: grid;
+  gap: var(--space-5);
+}
+.flight-results-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.flight-results-title {
+  margin: 0;
+  font-size: var(--font-size-xl);
+}
+.flight-results-summary,
+.flight-results-count {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+}
+.flight-results-count {
+  font-weight: var(--font-weight-bold);
+}
+
+.flight-filters {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
+  align-items: start;
+  padding: var(--space-4);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.flight-filters-action {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-self: end;
+}
+
+.flight-section {
+  display: grid;
+  gap: var(--space-3);
+}
+.flight-section-header {
+  display: grid;
+  gap: var(--space-1);
+}
+.flight-section-title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+}
+.flight-section-description {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+}
+.flight-list {
+  display: grid;
+  gap: var(--space-4);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.flight-card {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.flight-card-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.flight-airline {
+  margin: 0;
+  font-weight: var(--font-weight-bold);
+}
+.flight-number {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+}
+.flight-route {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-weight: var(--font-weight-bold);
+}
+.flight-times {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
+  margin: 0;
+}
+.flight-times dt {
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.flight-times dd {
+  display: grid;
+  gap: 0.125rem;
+  margin: var(--space-1) 0 0;
+  font-variant-numeric: tabular-nums;
+}
+.flight-airport {
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+}
+.flight-cabins {
+  padding-top: var(--space-3);
+  border-top: var(--border-width) solid var(--border);
+}
+.flight-cabins-legend {
+  margin: 0 0 var(--space-2);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+}
+.flight-cabin-list {
+  display: grid;
+  gap: var(--space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.flight-cabin {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.flight-cabin-name {
+  font-weight: var(--font-weight-bold);
+}
+.flight-cabin-price {
+  justify-self: end;
+  font-weight: var(--font-weight-bold);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.flight-cabin-seats {
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+}
+.flight-cabin-total {
+  justify-self: end;
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.flight-loading {
+  display: grid;
+  gap: var(--space-3);
+}
+
+@media (min-width: 40rem) {
+  .flight-card-header {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+  }
+  .flight-results-header {
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: space-between;
+  }
+}
+@media (max-width: 40rem) {
+  .flight-cabin {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .flight-cabin-price,
+  .flight-cabin-total {
+    justify-self: start;
+    text-align: left;
+  }
+}
+
+/* =============================================================================================
    MOTION: users who ask for less motion get none
    ============================================================================================= */
 @media (prefers-reduced-motion: reduce) {

@@ -47,6 +47,29 @@ export interface SearchFormValues {
 
 export type SearchFormErrors = Partial<Record<keyof SearchFormValues, string>>;
 
+/** The form before anything is typed: the passenger count starts at one, which is the usual case. */
+export const EMPTY_SEARCH_FORM: SearchFormValues = {
+  departureAirport: '',
+  arrivalAirport: '',
+  departureDate: '',
+  returnDate: '',
+  passengers: '1',
+  cabinClass: '',
+};
+
+/** Shows an applied search back in the form, for a reload, a shared link or the Back button. */
+export function formFromQuery(query: FlightSearchQuery | null): SearchFormValues {
+  if (!query) return EMPTY_SEARCH_FORM;
+  return {
+    departureAirport: query.departureAirport,
+    arrivalAirport: query.arrivalAirport,
+    departureDate: query.departureDate,
+    returnDate: query.returnDate ?? '',
+    passengers: String(query.passengers),
+    cabinClass: query.cabinClass ?? '',
+  };
+}
+
 /** The filters that refine an existing result set, separate from the form that starts a new search. */
 export interface SearchFilters {
   minPrice?: number;
@@ -184,6 +207,11 @@ export function toFlightSearchQuery(values: SearchFormValues, filters: Partial<S
 /** The /flights address that describes this search. */
 export function buildSearchHref(query: FlightSearchQuery): string {
   return withQuery('/flights', query);
+}
+
+/** FLT-15: a fresh search starts again at the first page and the default sort. */
+export function searchValuesToQuery(values: SearchFormValues) {
+  return toFlightSearchQuery(values, { sort: DEFAULT_SORT, order: DEFAULT_ORDER, page: 1 });
 }
 
 export function sortChoiceOf(sort: FlightSortBy, order: FlightSortOrder): string {
