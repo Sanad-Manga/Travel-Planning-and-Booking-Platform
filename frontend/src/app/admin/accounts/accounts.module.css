@@ -1,0 +1,134 @@
+.page {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.page > :global(.card) {
+  min-width: 0;
+}
+
+.filters {
+  display: grid;
+  align-items: end;
+  gap: var(--space-3);
+}
+
+.filters > * {
+  min-width: 0;
+}
+
+.results :global(.alert-action) {
+  min-height: var(--touch-target);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.actions > button {
+  padding-inline: var(--space-2);
+}
+
+.results :global(.data-table) :is(th, td):nth-child(3) {
+  overflow-wrap: normal;
+}
+
+.results :global(.data-table) time {
+  white-space: nowrap;
+}
+
+@media (min-width: 40rem) {
+  .results :global(.data-table) {
+    /* The 17% Role column stays about 150px at the minimum table width. */
+    min-width: 55rem;
+    table-layout: fixed;
+  }
+
+  .results :global(.data-table) :is(th, td) {
+    padding-inline: var(--space-2);
+    vertical-align: middle;
+  }
+
+  .results :global(.data-table) th:nth-child(1) { width: 13%; }
+  .results :global(.data-table) th:nth-child(2) { width: 22%; }
+  .results :global(.data-table) th:nth-child(3) { width: 17%; }
+  .results :global(.data-table) th:nth-child(4) { width: 10%; }
+  .results :global(.data-table) th:nth-child(5) { width: 15%; }
+  .results :global(.data-table) th:nth-child(6) { width: 23%; }
+}
+
+.dialog {
+  width: min(28rem, calc(100% - var(--space-8)));
+  max-height: calc(100dvh - var(--space-8));
+  overflow: auto;
+  overscroll-behavior: contain;
+  margin: auto;
+  padding: var(--space-4);
+  color: var(--foreground);
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow-wrap: anywhere;
+}
+
+.dialog[open] {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.dialog::backdrop {
+  background: var(--scrim);
+}
+
+.dialog h2, .dialog p, .identity, .identity dd {
+  margin: 0;
+}
+
+.dialog h2 {
+  font-size: var(--font-size-lg);
+}
+
+.dialog button {
+  justify-self: start;
+}
+
+.identity {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+}
+
+.identity dt {
+  color: var(--muted);
+}
+
+.password {
+  font-family: ui-monospace, monospace;
+  min-width: 0;
+}
+
+@media (min-width: 40rem) {
+  .filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .filters > :first-child {
+    grid-column: 1 / -1;
+  }
+
+  .filters > button {
+    justify-self: start;
+  }
+}
+
+@media (min-width: 64rem) {
+  .filters {
+    grid-template-columns: minmax(0, 2fr) repeat(2, minmax(0, 1fr)) auto;
+  }
+
+  .filters > :first-child {
+    grid-column: auto;
+  }
+}
